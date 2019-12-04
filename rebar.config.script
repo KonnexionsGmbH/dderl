@@ -4,7 +4,8 @@ OCIConfig = case os:getenv("NO_OCI") of
         ConfigMap = maps:from_list(CONFIG),
         #{deps := Deps} = ConfigMap,
         DepsWithoutOci = lists:keydelete(erloci, 1, Deps),
-        maps:to_list(ConfigMap#{deps => DepsWithoutOci});
+        DepsWithoutOdpi = lists:keydelete(oranif, 1, DepsWithoutOci),
+        maps:to_list(ConfigMap#{deps => DepsWithoutOdpi});
     _ -> CONFIG
 end,
 
