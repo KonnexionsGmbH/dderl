@@ -124,6 +124,7 @@ handle_call(Unknown, _From, #state{user=_User}=State) ->
     {reply, {not_supported, Unknown} , State}.
 
 handle_cast({process, Adapter, Typ, WReq, From, RemoteEp}, #state{session_idle_tref=TRef, inactive_tref = ITref, user_id = UserId} = State) ->
+    %io:format("handle cast (session)~n", []),
     cancel_timer(TRef),
     ScreenSaverTimeout = ?SCREEN_SAVER_TIMEOUT,
     NewITref =
@@ -170,6 +171,9 @@ handle_info(invalid_credentials, #state{sess = OldSess} = State) ->
     {noreply, State#state{sess = Sess}};
 handle_info({'EXIT', _Pid, normal}, #state{user = _User} = State) ->
     %?Debug("Received normal exit from ~p for ~p", [Pid, User]),
+    {noreply, State};
+handle_info({'EXIT', Pid, _}, #state{user = User} = State) ->
+    ?Debug("Received ABnormal exit from ~p for ~p", [Pid, User]),
     {noreply, State};
 handle_info({set_id, SessionToken}, State) ->
     {noreply, State#state{id = SessionToken}};
@@ -423,6 +427,14 @@ process_call({[<<"connect_info">>], _ReqData}, _Adapter, From, {SrcIp,_},
                                         owner => User,
                                         method => <<"tcp">>}];
                                 _ -> []
+                            end ++
+                            case [A || #{adapter := A} <- Connections, A == <<"odpi">>] of
+                                   [] -> [#{adapter => <<"odpi">>,
+                                            id => null,
+                                            name => <<"template oracle dpi">>,
+                                            owner => User,
+                                            method => <<"tns">>}];
+                                   _ -> []
                             end
                         }
                     }

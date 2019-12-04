@@ -3,6 +3,7 @@ case os:getenv("NO_OCI") of
         %% removing erloci from list of dependent applications
         [{application, dderl, Conf}] = CONFIG,
         #{applications := Apps} = ConfMap = maps:from_list(Conf),
-        [{application, dderl, maps:to_list(ConfMap#{applications => lists:delete(erloci, Apps)})}];
+        NewApps = Apps -- [erloci, oranif],
+        [{application, dderl, maps:to_list(ConfMap#{applications => NewApps})}];
     _ -> CONFIG
 end.

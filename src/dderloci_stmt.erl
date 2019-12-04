@@ -73,6 +73,7 @@ handle_call(execute, _From, #stmt{columns = Columns, connection = Connection} = 
     end.
 
 handle_cast(_Ignored, State) ->
+    io:format("handle cast (stmt)~n", []),
     {noreply, State}.
 
 handle_info(_Info, State) ->
@@ -240,7 +241,7 @@ process_one_update(PrepStmt, FilterRows, FilterColumns, Rows, Columns) ->
             case check_rowid(RowIds, Rows) of
                 true->
                     ChangedKeys = [{Row#row.pos, {{}, list_to_tuple(create_changedkey_vals(Row#row.values ++ [Row#row.id], Columns ++ [#rowCol{type = 'SQLT_STR'}]))}} || Row <- Rows],
-                    {ok, ChangedKeys};
+                {ok, ChangedKeys};
                 false ->
                     {error, <<"Unknown error updating the rows.">>};
                 long_rowid ->

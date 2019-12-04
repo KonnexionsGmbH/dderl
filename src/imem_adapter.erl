@@ -61,15 +61,18 @@ init() ->
     ],
     %% TODO: This should be added on the load of the other adapter but we don't know the id...
     AddViewResult = gen_adapter:add_cmds_views(undefined, system, imem, false, SystemViews),
-    case lists:member(need_replace, AddViewResult) of
+    CmdId = case lists:member(need_replace, AddViewResult) of
         true ->
             View = dderl_dal:get_view(undefined, <<"All ddViews">>, imem, system),
-            dderl_dal:add_adapter_to_cmd(undefined, View#ddView.cmd, oci);
+            View#ddView.cmd;
         _ ->
             [_, ViewId] = AddViewResult,
             View = dderl_dal:get_view(undefined, ViewId),
-            dderl_dal:add_adapter_to_cmd(undefined, View#ddView.cmd, oci)
-    end.
+            View#ddView.cmd
+    end,
+    dderl_dal:add_adapter_to_cmd(undefined, CmdId, oci),
+    dderl_dal:add_adapter_to_cmd(undefined, CmdId, odpi).
+
 
 -spec add_conn_info(undefined | #priv{}, map()) -> #priv{}.
 add_conn_info(undefined, ConnInfo) ->
@@ -695,6 +698,7 @@ produce_csv_rows(UserId, Connection, From, StmtRef, RowFun)
   when is_function(RowFun), is_pid(From) ->
     receive
         Data ->
+        io:format("Received in imem_adapter!~n", []),
             case erlang:process_info(From) of
                 undefined -> ?Error("Request aborted (response pid ~p invalid)", [From]);
                 _ ->
