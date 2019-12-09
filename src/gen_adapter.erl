@@ -771,7 +771,7 @@ build_column_json([C|Cols], JCols, Counter) ->
         'DPI_ORACLE_TYPE_NATIVE_DOUBLE' -> Type = <<"numeric">>;
         'DPI_ORACLE_TYPE_NATIVE_INT' -> Type = <<"numeric">>;
         'DPI_ORACLE_TYPE_NATIVE_UINT' -> Type = <<"numeric">>;
-        'DPI_ORACLE_TYPE_NUMBER' -> Type = <<"numeric">>;
+        'DPI_ORACLE_TYPE_NUMBER' -> Type = <<"text">>;
         'DPI_ORACLE_TYPE_DATE' -> Type = <<"text">>;
         'DPI_ORACLE_TYPE_TIMESTAMP' -> Type = <<"text">>;
         'DPI_ORACLE_TYPE_TIMESTAMP_TZ' -> Type = <<"text">>;

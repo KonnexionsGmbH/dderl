@@ -393,7 +393,7 @@ get_modified_cols([OrigVal | RestOrig], [Value | RestValues], [#rowCol{type = 'D
             [Pos | get_modified_cols(RestOrig, RestValues, Columns, Pos + 1)]
     end;
 get_modified_cols([Number | RestOrig], [Value | RestValues], [#rowCol{type = Type} | Columns], Pos) when
-        Type =:= 'DPI_ORACLE_TYPE_NUMBER';
+        %Type =:= 'DPI_ORACLE_TYPE_NUMBER';
         Type =:= 'DPI_ORACLE_TYPE_NATIVE_DOUBLE';
         Type =:= 'DPI_ORACLE_TYPE_NATIVE_FLOAT' ->
     Result = dderloci_utils:clean_dynamic_prec(dderlodpi:number_to_binary(Number)),

@@ -848,7 +848,7 @@ translate_datatype(Stmt, [R | RestRow], [#rowCol{type = 'DPI_ORACLE_TYPE_DATE'} 
     ?TR(e),
     [dpi_to_dderltime(R) | translate_datatype(Stmt, RestRow, RestCols)];
 translate_datatype(Stmt, [Number | RestRow], [#rowCol{type = Type} | RestCols]) when
-        Type =:= 'DPI_ORACLE_TYPE_NUMBER';
+        %Type =:= 'DPI_ORACLE_TYPE_NUMBER';
         Type =:= 'DPI_ORACLE_TYPE_NATIVE_DOUBLE';
         Type =:= 'DPI_ORACLE_TYPE_NATIVE_FLOAT' ->
             ?TR(f),
@@ -1141,7 +1141,10 @@ dpi_stmt_getInfo(#odpi_conn{node = Node}, Stmt) ->
 
 dpi_stmt_close(#odpi_conn{node = Node}, Stmt) ->
     ?TR,
-    dpi:safe(Node, fun() -> dpi:stmt_close(Stmt) end).
+    io:format("stmt close. Conn node: ~p Stmt ~p~n",[Node, Stmt]),
+    R = dpi:safe(Node, fun() -> dpi:stmt_close(Stmt) end),
+    io:format("close result ~p~n",[R]),
+    R.
 
 dpi_var_getReturnedData(#odpi_conn{node = Node}, Var, Index) ->
     ?TR,
@@ -1167,22 +1170,62 @@ get_column_info(_Stmt, ColIdx, Limit) when ColIdx > Limit -> ?TR, [];
 get_column_info(Stmt, ColIdx, Limit) ->
     ?TR,
     QueryInfo = dpi:stmt_getQueryInfo(Stmt, ColIdx),
-    [QueryInfo | get_column_info(Stmt, ColIdx + 1, Limit)].
+    InnerMap = maps:get(typeInfo, QueryInfo),
+    Type = case maps:get(defaultNativeTypeNum, InnerMap) of 'DPI_NATIVE_TYPE_DOUBLE' -> 'DPI_NATIVE_TYPE_BYTES'; A -> A end,
+    io:format("FIXED TYPE ~p~n", [Type]),
+    InnerMap2 = InnerMap#{defaultNativeTypeNum := Type},
+    QueryInfo2 = QueryInfo#{typeInfo := InnerMap2},
+    io:format("QueryInfo Fixed: ~p~n", [QueryInfo2]),
+    R = [QueryInfo2 | get_column_info(Stmt, ColIdx + 1, Limit)],
+    io:format("QueryInfo final: ~p~n", [R]),
+    R.
 
-dpi_fetch_rows(#odpi_conn{node = Node}, Statement, BlockSize) ->
+dpi_fetch_rows( #odpi_conn{node = Node, connection = Conn}, Statement, BlockSize) ->
     ?TR,
-    dpi:safe(Node, fun() -> get_rows(Statement, BlockSize, []) end).
+    dpi:safe(Node, fun() -> get_rows_prepare(Conn, Statement, BlockSize, []) end).
 
-get_rows(_, 0, Acc) -> ?TR, {lists:reverse(Acc), false};
-get_rows(Stmt, NRows, Acc) ->
+%% initalizes things that need to be doen before getting the rows
+%% it finds out how many columns they are and what types all those columns are
+%% then it makes dpiVars for every column and calls get_rows to fetch all the data
+get_rows_prepare(Conn, Stmt, NRows, Acc)->
+    NumCols = dpi:stmt_getNumQueryColumns(Stmt),    % get number of cols returned by the Stmt
+    io:format("Col count ~p~n", [NumCols]),
+    Types = [
+        begin
+            Qinfo = maps:get(typeInfo, dpi:stmt_getQueryInfo(Stmt, Col)),
+            io:format("Qinfo ~p~n", [Qinfo]),
+            #{defaultNativeTypeNum := DefaultNativeTypeNum,
+            oracleTypeNum := OracleTypeNum} = Qinfo,
+            {OracleTypeNum, DefaultNativeTypeNum, Col}
+        end
+        || Col <- lists:seq(1, NumCols)], %make a list of types that each row has. Each entry is a tuple of Oratype and nativetype
+
+    VarsDatas = [
+            begin
+        NewNativeType = case NativeType of 'DPI_NATIVE_TYPE_DOUBLE' -> 'DPI_NATIVE_TYPE_BYTES'; A -> A end,
+                #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, NewNativeType, 100, 4000, false, false, null),
+                ok = dpi:stmt_define(Stmt, Col, Var),    %% results will be fetched to the vars
+                {Var, Datas}
+            end
+            || {OraType, NativeType, Col} <- Types], % make a list of {Var, Datas} tuples. Var is the dpiVar handle, Datas is the list of Data handles in that respective Var
+    R = get_rows(Conn, Stmt, NRows, Acc, VarsDatas),
+    [begin
+        [dpi:data_release(Data)|| Data <- Datas],
+        io:format("pass double ~p~n", [5]),
+        dpi:var_release(Var)
+    end || {Var, Datas} <- VarsDatas],
+        io:format("pass double ~p~n", [6]),
+        io:format("final result ~p~n", [R]),
+R.
+
+get_rows(_Conn, _, 0, Acc, _VarsDatas) -> ?TR, {lists:reverse(Acc), false};
+get_rows(Conn, Stmt, NRows, Acc, VarsDatas) ->
     ?TR,
     io:format("GET ROWS Stmt ~p NRows ~p Acc ~p~n", [Stmt, NRows, Acc]),
     case dpi:stmt_fetch(Stmt) of
         #{found := true} ->
             io:format("get rows found true~n", []),
-            NumCols = dpi:stmt_getNumQueryColumns(Stmt),
-            io:format("NumCols ~p~n", [NumCols]),
-            G = get_rows(Stmt, NRows -1, [get_column_values(Stmt, 1, NumCols) | Acc]),
+            G =  get_rows(Conn, Stmt, NRows -1, [get_column_values(Conn, Stmt, 1, VarsDatas, length(VarsDatas), length(Acc)+1) | Acc], VarsDatas),
             io:format("G ~p~n", [G]),
             G;
         #{found := false} ->
@@ -1193,13 +1236,18 @@ get_rows(Stmt, NRows, Acc) ->
             
     end.
 
-get_column_values(_Stmt, ColIdx, Limit) when ColIdx > Limit -> ?TR, [];
-get_column_values(Stmt, ColIdx, Limit) ->
-    ?TR,
-    #{data := Data} = dpi:stmt_getQueryValue(Stmt, ColIdx),
-    Value = dpi:data_get(Data),
-    dpi:data_release(Data),
-    [Value | get_column_values(Stmt, ColIdx + 1, Limit)].
+get_column_values(_Conn, _Stmt, ColIdx, _VarsDatas, Limit, _RowIndex) when ColIdx > Limit -> ?TR(1), [];
+get_column_values(Conn, Stmt, ColIdx, VarsDatas, Limit, RowIndex) ->
+    ?TR(2),
+    {_Var, Datas} = lists:nth(ColIdx, VarsDatas),
+
+            io:format("pass double ~p ColIdx ~p~n", [0, ColIdx]),
+        io:format("pass double ~pRowIndex ~p~n", [3, RowIndex]),
+        Value = (catch dpi:data_get(lists:nth(RowIndex, Datas))),
+        io:format("Value (1)~p~n", [Value]),
+            
+
+    [Value | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas,Limit, RowIndex)].
 
 % Helper function to avoid many rpc calls when binding a list of variables.
 dpi_var_set_many(#odpi_conn{node = Node}, Vars, Rows) ->
