@@ -124,7 +124,6 @@ handle_call(Unknown, _From, #state{user=_User}=State) ->
     {reply, {not_supported, Unknown} , State}.
 
 handle_cast({process, Adapter, Typ, WReq, From, RemoteEp}, #state{session_idle_tref=TRef, inactive_tref = ITref, user_id = UserId} = State) ->
-    %io:format("handle cast (session)~n", []),
     cancel_timer(TRef),
     ScreenSaverTimeout = ?SCREEN_SAVER_TIMEOUT,
     NewITref =

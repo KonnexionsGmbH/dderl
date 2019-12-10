@@ -57,9 +57,7 @@ get_fsmctx(Result) ->
                     Rows = [{{}, {RowId, Left, Cmp, Right}} || {ddTermDiff, RowId, Left, Cmp, Right} <- Result],
                     % This seems hackish but we don't want to keep a process here.
                     % TODO: Revisit after tuple calls have been removed.
-                    R = dderl_fsm:rows({self(), Rows, true}, {dderl_fsm, self()}),
-                io:format("fetch_recs_async_funs done~n", []),
-                R
+                    dderl_fsm:rows({self(), Rows, true}, {dderl_fsm, self()})
                 end]
             ,fetch_close_funs = [fun() -> ok end]
             ,stmt_close_funs  = [fun() -> ok end]

@@ -591,7 +591,6 @@ rows_limit(_NRows, Rows, {?MODULE, Pid}) -> Pid ! {Rows, true}. %% Fake a comple
 produce_csv_rows(UserId, From, StmtRef, RowFun) when is_function(RowFun) andalso is_pid(From) ->
     receive
         Data ->
-            io:format("Received in oci_adapter!!!!!!!!!~n", []),
             case erlang:process_info(From) of
                 undefined ->
                     ?Error("Request aborted (response pid ~p invalid)", [From]),

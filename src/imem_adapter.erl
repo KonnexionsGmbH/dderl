@@ -698,7 +698,6 @@ produce_csv_rows(UserId, Connection, From, StmtRef, RowFun)
   when is_function(RowFun), is_pid(From) ->
     receive
         Data ->
-        io:format("Received in imem_adapter!~n", []),
             case erlang:process_info(From) of
                 undefined -> ?Error("Request aborted (response pid ~p invalid)", [From]);
                 _ ->

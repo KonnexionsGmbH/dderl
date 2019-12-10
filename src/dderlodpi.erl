@@ -209,7 +209,6 @@ handle_cast({fetch_recs_async, false, _}, #qry{fsm_ref = FsmRef, stmt_result = S
         {error, Error} -> FsmRef:rows({error, Error});
         {error, _DpiNifFile, _Line, #{message := Msg}} -> FsmRef:rows({error, Msg});
         {Rows, Completed} when is_list(Rows), is_boolean(Completed) ->
-            RowsF = fix_row_format(Statement, Rows, Clms, ContainRowId),
             Rowargs = {fix_row_format(Statement, Rows, Clms, ContainRowId), Completed},
             try FsmRef:rows(Rowargs) of
                 ok -> ok
@@ -370,28 +369,14 @@ bind_vars(Conn, Stmt, BindsMeta)->
         Var = (catch dpi:safe(Conn#odpi_conn.node, fun() ->
         #{var := VarReturned, data := [FirstData | _Rest]} =
             dpi:conn_newVar(Conn#odpi_conn.connection, OraNative, DpiNative, 100, 4000, false, false, null),
-            R = (catch dpi:stmt_bindByName(Stmt, BindName, VarReturned)),
+            dpi:stmt_bindByName(Stmt, BindName, VarReturned),
         {VarReturned, FirstData}
         end)),
 
         {Var, DpiNative}
     end || {BindName, _Direction, BindType} <- BindsMeta].
     % BindsMeta is a list like:
-    %[
-    %    {<<":pkey">>, 'SQLT_INT'}
-    %    , {<<":publisher">>, 'SQLT_CHR'}
-    %    , {<<":rank">>, 'SQLT_FLT'}
-    %    , {<<":hero">>, 'SQLT_CHR'}
-    %    , {<<":reality">>, 'SQLT_CHR'}
-    %    , {<<":votes">>, 'SQLT_INT'}
-    %    , {<<":createdate">>, 'SQLT_DAT'}
-    %    , {<<":votes_first_rank">>, 'SQLT_INT'}
-    %]
-
-    % For each of those:
-    %   - Create the dpiData/Var
-    %   - do the bind
-
+ 
 
 execute_with_binds(#odpi_conn{context = _Ctx, connection = _Conn, node = Node}, Stmt, BindVars, Binds) ->
     ?TR,
@@ -405,7 +390,7 @@ execute_with_binds(#odpi_conn{context = _Ctx, connection = _Conn, node = Node}, 
         end,
         [   begin
             dpi:safe(Node, fun() ->
-                R = (catch case VarType of 
+                case VarType of 
                     'DPI_NATIVE_TYPE_INT64' ->
                          dpi:data_setInt64(Data, Bind);
                     'DPI_NATIVE_TYPE_DOUBLE' ->
@@ -416,7 +401,7 @@ execute_with_binds(#odpi_conn{context = _Ctx, connection = _Conn, node = Node}, 
                         %% TODO: timestamp, etc
 
                     Else -> {error, {"invalide gobshite", Else}}
-                end)
+                end
              end)
 end
         || {Bind, {{Var, Data}, VarType}} <- lists:zip(BindList, BindVars)

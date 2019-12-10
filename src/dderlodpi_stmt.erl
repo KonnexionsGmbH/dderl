@@ -75,7 +75,6 @@ handle_call(execute, _From, #stmt{columns = Columns, connection = Connection} = 
     end.
 
 handle_cast(_Ignored, State) ->
-    io:format("dderlodpi_stmt handle_cast State ~p~n", [State]),
     {noreply, State}.
 
 handle_info(_Info, State) ->

@@ -253,9 +253,8 @@ process_cmd({[<<"query">>], ReqBody}, Sess, _UserId, From, #priv{connections = C
             case lists:member(Connection, Connections) of
                 true ->
                     R = case dderl_dal:is_local_query(Query) of
-                            true -> io:format("process_query ~p~n", [a]), gen_adapter:process_query(Query, Sess, {ConnId, odpi}, SessPid);
-                            _ -> io:format("process_query ~p Query ~p BindVals ~p Connection ~p SessPid ~p ~n", [b, Query, BindVals, Connection, SessPid]),
-                                 process_query({Query, BindVals}, Connection, SessPid)
+                            true -> gen_adapter:process_query(Query, Sess, {ConnId, odpi}, SessPid);
+                            _ -> process_query({Query, BindVals}, Connection, SessPid)
                         end,
                     From ! {reply, jsx:encode([{<<"query">>,[{<<"qstr">>, Query} | R]}])};
                 false ->
@@ -306,7 +305,6 @@ process_cmd({[<<"browse_data">>], ReqBody}, Sess, _UserId, From, #priv{connectio
                             ClientBinds = make_binds(proplists:get_value(<<"binds">>, BodyJson, null), CmdBinds),
                             case {CmdBinds, ClientBinds} of
                                 {[], _} ->
-                                    io:format("process_query ~p~n", [c]),
                                     Resp = process_query(C#ddCmd.command, Connection, SessPid),
                                     RespJson = jsx:encode(
                                                  [{<<"browse_data">>,[{<<"content">>, C#ddCmd.command},
@@ -325,7 +323,6 @@ process_cmd({[<<"browse_data">>], ReqBody}, Sess, _UserId, From, #priv{connectio
                                                                        {<<"view_id">>, V#ddView.id} | JsonBindInfo]}]
                                                 );
                                 {_, Binds} ->
-                                    io:format("process_query ~p~n", [d]),
                                     Resp = process_query({C#ddCmd.command, Binds}, Connection, SessPid),
                                     RespJson = jsx:encode(
                                                  [{<<"browse_data">>,[{<<"content">>, C#ddCmd.command},
@@ -346,7 +343,6 @@ process_cmd({[<<"browse_data">>], ReqBody}, Sess, _UserId, From, #priv{connectio
                 true ->
                     Name = element(3 + Col, R),
                     Query = <<"select * from ", Name/binary>>,
-                    io:format("process_query ~p~n", [e]),
                     Resp = process_query(Query, Connection, SessPid),
                     RespJson = jsx:encode([{<<"browse_data">>,
                         [{<<"content">>, Query}
@@ -380,7 +376,6 @@ process_cmd({[<<"views">>], ReqBody}, Sess, UserId, From, Priv, SessPid) ->
             RespJson = jsx:encode([{<<"error">>, Reason}]);
         _ ->
             C = dderl_dal:get_command(Sess, F#ddView.cmd),
-            io:format("process_query ~p~n", [f]),
             Resp = gen_adapter:process_query(C#ddCmd.command, Sess, {ConnId, odpi}, SessPid),
             ?Debug("ddViews ~p~n~p", [C#ddCmd.command, Resp]),
             RespJson = jsx:encode([{<<"views">>,
@@ -405,7 +400,6 @@ process_cmd({[<<"system_views">>], ReqBody}, Sess, _UserId, From, Priv, SessPid)
             RespJson = jsx:encode([{<<"error">>, Reason}]);
         F ->
             C = dderl_dal:get_command(Sess, F#ddView.cmd),
-            io:format("process_query ~p~n", [g]),
             Resp = gen_adapter:process_query(C#ddCmd.command, Sess, {ConnId, odpi}, SessPid),
             ?Debug("ddViews ~p~n~p", [C#ddCmd.command, Resp]),
             RespJson = jsx:encode([{<<"system_views">>,
@@ -483,7 +477,6 @@ process_cmd({[<<"filter">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     Priv;
 process_cmd({[<<"reorder">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     ?TR(n),
-    io:format("ReqBody: ~p From: ~p Priv: ~p", [ReqBody, From, Priv]),
     [{<<"reorder">>,BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     ColumnOrder = proplists:get_value(<<"column_order">>, BodyJson, []),
@@ -536,7 +529,6 @@ process_cmd({[<<"button">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
                                    {error, _Error} -> undefined;
                                    BindVals0 -> BindVals0
                                end,
-                    io:format("calling dderlodpi:exec (c) with params Connection ~p, Query ~p, BindVals ~p, imem_sql_expr:rownum_limit() ~p", [Connection, Query, BindVals, imem_sql_expr:rownum_limit()]),
                     case dderlodpi:exec(Connection, Query, BindVals, imem_sql_expr:rownum_limit()) of
                         {ok, #stmtResults{} = StmtRslt, TableName} ->
                             dderlodpi:add_fsm(StmtRslt#stmtResults.stmtRefs, FsmStmt),
@@ -602,7 +594,6 @@ process_cmd({[<<"download_query">>], ReqBody}, _Sess, UserId, From, Priv, SessPi
                                    BindVals0 -> BindVals0
                                 end,
     Id = proplists:get_value(<<"id">>, BodyJson, <<>>),
-    io:format("calling dderlodpi:exec (d) with params Connection ~p, Query ~p, BindVals ~p, imem_sql_expr:rownum_limit() ~p", [Connection, Query, BindVals, imem_sql_expr:rownum_limit()]),
     case dderlodpi:exec(Connection, Query, BindVals, imem_sql_expr:rownum_limit()) of
         {ok, #stmtResults{rowCols = Clms, stmtRefs = StmtRef, rowFun = RowFun}, _} ->
             Columns = gen_adapter:build_column_csv(UserId, odpi, Clms),
@@ -645,7 +636,6 @@ produce_csv_rows(UserId, From, StmtRef, RowFun) when is_function(RowFun) andalso
     ?TR,
     receive
         Data ->
-            io:format("received in odpi_adapter!~n", []),
             case erlang:process_info(From) of
                 undefined ->
                     ?Error("Request aborted (response pid ~p invalid)", [From]),
@@ -681,9 +671,7 @@ disconnect(#priv{connections = Connections} = Priv) ->
 -spec gui_resp_cb_fun(binary(), {atom(), pid()}, pid()) -> fun().
 gui_resp_cb_fun(Cmd, Statement, From) ->
     ?TR,
-    io:format("gui_resp_cb_fun(~p, ~p, ~p)~n", [Cmd, Statement, From]),
     Clms = Statement:get_columns(),
-    io:format("Clms ~p~n", [Clms]),
     gen_adapter:build_resp_fun(Cmd, Clms, From).
 
 -spec sort_json_to_term(list()) -> [tuple()].
@@ -716,9 +704,9 @@ open_view(Sess, Connection, SessPid, ConnId, Binds, #ddView{id = Id, name = Name
         local -> gen_adapter:process_query(C#ddCmd.command, Sess, {ConnId, odpi}, SessPid);
         _ ->
             case {gen_adapter:opt_bind_json_obj(C#ddCmd.command, odpi), Binds} of
-                {[], _} -> io:format("process_query ~p~n", [h]), process_query(C#ddCmd.command, Connection, SessPid);
+                {[], _} -> process_query(C#ddCmd.command, Connection, SessPid);
                 {JsonBindInfo, B} when B == undefined; element(1, B) == error -> JsonBindInfo;
-                {_, Binds} -> io:format("process_query ~p~n", [i]), process_query({C#ddCmd.command, Binds}, Connection, SessPid)
+                {_, Binds} -> process_query({C#ddCmd.command, Binds}, Connection, SessPid)
             end
     end,
     [{<<"content">>, C#ddCmd.command}
@@ -731,23 +719,17 @@ open_view(Sess, Connection, SessPid, ConnId, Binds, #ddView{id = Id, name = Name
 -spec process_query(tuple()|binary(), tuple(), pid()) -> list().
 process_query({Query, BindVals}, Connection, SessPid) ->
     ?TR,
-    io:format("process_query A ~n", []),
-    io:format("calling dderlodpi:exec (a) with params Connection ~p, Query ~p, BindVals ~p, imem_sql_expr:rownum_limit()~p~n", [Connection, Query, BindVals, imem_sql_expr:rownum_limit()]),
     Result = dderlodpi:exec(Connection, Query, BindVals, imem_sql_expr:rownum_limit()),
     CheckFuns = check_funs(Result),
-    io:format("CheckFuns ~p~n", [CheckFuns]),
     process_query(CheckFuns, Query, BindVals, Connection, SessPid);
 process_query(Query, Connection, SessPid) ->
     ?TR,
-     io:format("process_query B ~n", []),
-    io:format("calling dderlodpi:exec (b) with params Connection ~p, Query ~p, imem_sql_expr:rownum_limit() ~p~n", [Connection, Query, imem_sql_expr:rownum_limit()]),
     process_query(check_funs(dderlodpi:exec(Connection, Query, imem_sql_expr:rownum_limit())),
                   Query, [], Connection, SessPid).
 
 -spec process_query(term(), binary(), list(), tuple(), pid()) -> list().
 process_query(ok, Query, BindVals, Connection, SessPid) ->
     ?TR,
-     io:format("process_query C ~n", []),
     ?Debug([{session, Connection}], "query ~p -> ok", [Query]),
     SessPid ! {log_query, Query, process_log_binds(BindVals)},
     [{<<"result">>, <<"ok">>}];
@@ -756,41 +738,30 @@ process_query(ok, Query, BindVals, Connection, SessPid) ->
 process_query({ok, #stmtResults{sortSpec = SortSpec, rowCols = Clms} = StmtRslt, TableName},
               Query, BindVals, #odpi_conn{} = Connection, SessPid) ->
                   ?TR,
-    io:format("process_query D ~n", []),
     SessPid ! {log_query, Query, process_log_binds(BindVals)},
     FsmCtx = generate_fsmctx(StmtRslt, Query, BindVals, Connection, TableName),
     StmtFsm = dderl_fsm:start(FsmCtx, SessPid),
     dderlodpi:add_fsm(StmtRslt#stmtResults.stmtRefs, StmtFsm),
-    io:format("add FSM StmtFsm ~p StmtRefs ~p~n", [StmtFsm, StmtRslt#stmtResults.stmtRefs]),
     ?Debug("StmtRslt ~p ~p", [Clms, SortSpec]),
-    io:format("StmtRslt ~p ~p~n", [Clms, SortSpec]),
     Columns = gen_adapter:build_column_json(lists:reverse(Clms)),
     JSortSpec = build_srtspec_json(SortSpec),
     ?Debug("JColumns~n ~s~n JSortSpec~n~s", [jsx:prettify(jsx:encode(Columns)), jsx:prettify(jsx:encode(JSortSpec))]),
     ?Debug("process_query created statement ~p for ~p", [StmtFsm, Query]),
-    io:format("JColumns~n ~s~n JSortSpec~n~s~n", [jsx:prettify(jsx:encode(Columns)), jsx:prettify(jsx:encode(JSortSpec))]),
-    io:format("process_query created statement ~p for ~p~n", [StmtFsm, Query]),
-    PQR =
     [{<<"columns">>, Columns},
      {<<"sort_spec">>, JSortSpec},
      {<<"statement">>, base64:encode(term_to_binary(StmtFsm))},
-     {<<"connection">>, ?E2B(Connection)}],
-     io:format("Process Query Result: ~p~n", [PQR]),
-     PQR;
+     {<<"connection">>, ?E2B(Connection)}];
 process_query({ok, Values}, Query, BindVals, #odpi_conn{} = Connection, SessPid) ->
     ?TR,
-    io:format("process_query E ~n", []),
     SessPid ! {log_query, Query, process_log_binds(BindVals)},
     [{<<"data">>, Values},
      {<<"connection">>, ?E2B(Connection)}];
 process_query({error, Msg}, Query, BindVals, _Connection, _SessPid) when is_binary(Msg) ->
     ?TR,
-    io:format("process_query F ~n", []),
     ?Error("query error ~p for ~p whith bind values ~p", [Msg, Query, BindVals]),
     [{<<"error">>, Msg}];
 process_query(Error, Query, BindVals, _Connection, _SessPid) ->
     ?TR,
-    io:format("process_query G ~n", []),
     ?Error("query error ~p for ~p whith bind values ~p", [Error, Query, BindVals]),
     if
         is_binary(Error) ->
@@ -915,7 +886,6 @@ generate_fsmctx(#stmtResults{
                 , sortFun  = SortFun
                 , sortSpec = SortSpec} = Rec, Query, BindVals, #odpi_conn{} = Connection, TableName) ->
                     ?TR,
-                    io:format("generate_fsmctx Query ~p BindVals ~p Conn ~p TableName ~p Rec ~p~n", [Query, BindVals, Connection, TableName, Rec]),
     #fsmctxs{rowCols      = Clms
            ,stmtRefs      = [StmtRef]
            ,rowFun        = RowFun
@@ -934,17 +904,11 @@ generate_fsmctx(#stmtResults{
                 end]
            ,update_cursor_prepare_funs =
                 [fun(ChangeList) ->
-                        ?Debug("The stmtref ~p, the table name: ~p and the change list: ~n~p", [StmtRef, TableName, ChangeList]),
-                        io:format("The stmtref ~p, the table name: ~p and the change list: ~n~p~n", [StmtRef, TableName, ChangeList]),
                         dderlodpi_stmt:prepare(TableName, ChangeList, Connection, Clms)
                 end]
            ,update_cursor_execute_funs =
                 [fun(_Lock, PrepStmt) ->
-                        Result = dderlodpi_stmt:execute(PrepStmt),
-                        ?Debug("The result from the exec ~p", [Result]),
-                        io:format("The result from the exec ~p~n", [Result]),
-
-                        Result
+                        dderlodpi_stmt:execute(PrepStmt)
                 end]
            }.
 
@@ -981,7 +945,6 @@ make_binds(null, [{<<"binds">>, ParamsProp}]) ->
 make_binds(null, _CmdBinds) -> ?TR, undefined;
 make_binds(Binds, _CmdBinds) ->
     ?TR,
-    io:format("make_binds! Binds ~p~n", [Binds]),
     try
         {Vars, Values} = lists:foldr(
             fun({B, TV}, {NewBinds, NewVals}) ->
@@ -1006,7 +969,6 @@ make_binds(Binds, _CmdBinds) ->
                               end;
                           V -> V
                       end,
-                    io:format("make_binds Val ~p~n", [Val]),
                 {[{B, Dir, Typ} | NewBinds],
                  [if Dir == in ->
                          dderloci_utils:to_ora(Typ, Val);

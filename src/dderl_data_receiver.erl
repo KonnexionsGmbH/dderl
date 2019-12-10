@@ -83,18 +83,15 @@ handle_call(Req, _From, State) ->
     {reply, {not_supported, Req}, State}.
 
 handle_cast({status, ReplyToPid}, #state{is_complete = true, received_rows = RowCount} = State) ->
-    io:format("data receiver handle cast (1)~n"),
     Response = [{<<"received_rows">>, RowCount}, {<<"is_complete">>, true}, {<<"continue">>, false}],
     ReplyToPid ! {reply, jsx:encode([{<<"receiver_status">>, Response}])},
     ?Info("Terminating in state completed"),
     {stop, normal, State};
 handle_cast({status, ReplyToPid}, #state{received_rows = RowCount, errors = Errors} = State) ->
-    io:format("data receiver handle cast (2)~n"),
     Response = [{<<"received_rows">>, RowCount}, {<<"errors">>, Errors}, {<<"continue">>, true}],
     ReplyToPid ! {reply, jsx:encode([{<<"receiver_status">>, Response}])},
     {noreply, State#state{errors = []}, ?RESPONSE_TIMEOUT};
 handle_cast({data_info, {stats, SndColsCount, AvailableRows}}, #state{sender_pid = SenderPid, browser_pid = BrowserPid, statement = Statement, column_pos = ColumnPos} = State) ->
-    io:format("data receiver handle cast (3)~n"),
     {Ucpf, Ucef, Columns, Node} = Statement:get_receiver_params(),
     if
         length(ColumnPos) =:= SndColsCount ->
@@ -107,7 +104,6 @@ handle_cast({data_info, {stats, SndColsCount, AvailableRows}}, #state{sender_pid
             {stop, {shutdown, <<"Columns mismatch">>}, State}
     end;
 handle_cast({data_info, {SenderColumns, AvailableRows}}, #state{sender_pid = SenderPid, browser_pid = BrowserPid, statement = Statement, column_pos = ColumnPos} = State) ->
-    io:format("data receiver handle cast (4)~n"),
     ?Debug("data information from sender, columns ~n~p~n, Available rows: ~p", [SenderColumns, AvailableRows]),
     {Ucpfs, Ucefs, Columns, Node} = Statement:get_receiver_params(),
     %% TODO: Check for column names and types instead of only count.
@@ -124,11 +120,9 @@ handle_cast({data_info, {SenderColumns, AvailableRows}}, #state{sender_pid = Sen
             {stop, {shutdown, <<"Columns mismatch">>}, State}
     end;
 handle_cast({data, '$end_of_table'}, State) ->
-    io:format("data receiver handle cast (5)~n"),
     ?Info("End of table reached in sender"),
     {noreply, State#state{is_complete = true}, ?RESPONSE_TIMEOUT};
 handle_cast({data, Rows}, #state{sender_pid=SenderPid, received_rows=ReceivedRows, errors=Errors} = State) ->
-    io:format("data receiver handle cast (6)~n"),
     ?Debug("got ~p rows from the data sender, adding it to fsm and asking for more", [length(Rows)]),
     case add_rows_to_statement(Rows, State) of
         ok -> 
@@ -139,7 +133,6 @@ handle_cast({data, Rows}, #state{sender_pid=SenderPid, received_rows=ReceivedRow
             {noreply, State#state{errors = [imem_datatype:term_to_io(Error) | Errors]}, ?RESPONSE_TIMEOUT}
     end;
 handle_cast(Req, State) ->
-    io:format("data receiver handle cast (7)~n"),
     ?Info("~p received unknown cast ~p", [self(), Req]),
     {noreply, State}.
 

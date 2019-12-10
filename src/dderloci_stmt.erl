@@ -73,7 +73,6 @@ handle_call(execute, _From, #stmt{columns = Columns, connection = Connection} = 
     end.
 
 handle_cast(_Ignored, State) ->
-    io:format("handle cast (stmt)~n", []),
     {noreply, State}.
 
 handle_info(_Info, State) ->

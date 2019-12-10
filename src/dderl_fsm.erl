@@ -280,7 +280,6 @@ get_count({?MODULE, Pid}) ->
 %% the return tuple type #stmtcol{}. but is not imported
 -spec get_columns({atom(), pid()}) -> [tuple()].
 get_columns({?MODULE, Pid}) ->
-    io:format("get_columns module ~p Pid ~p~n", [?MODULE, Pid]),
     gen_statem:call(Pid, {"get_columns"}).
 
 -spec get_query({atom(), pid()}) -> binary().
@@ -321,25 +320,19 @@ cache_data({?MODULE, Pid}) ->
 
 -spec rows({pid(), {_, _}} | {_, _}, {atom(), pid()}) -> ok.
 rows({StmtRef,{error, _} = Error}, {?MODULE, Pid}) ->   % from erlimem/imem_server
-    io:format("Rows (1)~n", []),
     %?Info("dderl_fsm:rows from ~p ~p", [StmtRef, Error]),
     gen_statem:cast(Pid, {StmtRef,Error});
 rows({StmtRef,{Rows,Completed}},{?MODULE,Pid}) when is_list(Rows) ->  % from erlimem/imem_server
-    io:format("Rows (2)~n", []),
     %?Info("dderl_fsm:rows from ~p ~p ~p", [StmtRef, length(Rows), Completed]),
     %?Info("dderl_fsm:rows from ~p ~p~n~p", [StmtRef, length(Rows), Rows]),
     gen_statem:cast(Pid,{rows, {StmtRef,Rows,Completed}});
 rows({Rows,Completed},{?MODULE,Pid}) when is_list(Rows) ->  % from dderloci (single source)
-    io:format("Rows (3) pid ~p Module ~p Rows ~p Completed ~p~n", [Pid, ?MODULE, Rows, Completed]),
-    io:format("Now executing gen_statem:cast with Pid ~p and self ~p~n", [Pid, self()]),
     %?Info("dderl_fsm:rows ~p ~p", [length(Rows), Completed]),
     gen_statem:cast(Pid,{rows, {self(),Rows,Completed}});
 rows({StmtRef, Error}, {?MODULE, Pid}) ->   % from erlimem/imem_server
-    io:format("Rows (4)~n", []),
     %?Info("dderl_fsm:rows from ~p ~p", [StmtRef, Error]),
     gen_statem:cast(Pid, {StmtRef,{error,Error}});
 rows(Error, {?MODULE, Pid}) ->             % from dderloci (single source)
-    io:format("Rows (5)~n", []),
     %?Info("dderl_fsm:rows ~p", [Error]),
     gen_statem:cast(Pid, {self(),Error}).
 
