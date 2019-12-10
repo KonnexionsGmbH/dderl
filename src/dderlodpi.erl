@@ -1166,18 +1166,18 @@ get_rows(Conn, Stmt, NRows, Acc, VarsDatas) ->
     ?TR,
     case dpi:stmt_fetch(Stmt) of % try to fetch a row
         #{found := true} -> % got a row
-            get_rows(Conn, Stmt, NRows -1, [get_column_values(Conn, Stmt, 1, VarsDatas, length(VarsDatas), length(Acc)+1) | Acc], VarsDatas); % recursive call
+            get_rows(Conn, Stmt, NRows -1, [get_column_values(Conn, Stmt, 1, VarsDatas, length(Acc)+1) | Acc], VarsDatas); % recursive call
         #{found := false} -> % no more rows, that was all of them
-            {lists:reverse(Acc), true} % reverse the list so it's in the right order again after ti was pieced together the other way around
+            {lists:reverse(Acc), true} % reverse the list so it's in the right order again after it was pieced together the other way around
     end.
 
 %% get all the fields in a row
-get_column_values(_Conn, _Stmt, ColIdx, _VarsDatas, Limit, _RowIndex) when ColIdx > Limit -> ?TR(1), [];
-get_column_values(Conn, Stmt, ColIdx, VarsDatas, Limit, RowIndex) ->
+get_column_values(_Conn, _Stmt, ColIdx, VarsDatas, _RowIndex) when ColIdx > length(VarsDatas) -> ?TR(1), [];
+get_column_values(Conn, Stmt, ColIdx, VarsDatas, RowIndex) ->
     ?TR(2),
     {_Var, Datas} = lists:nth(ColIdx, VarsDatas), % finds out which field to get in this recursive call, gets the respective data variable
     Value = dpi:data_get(lists:nth(RowIndex, Datas)), % get the value out of that data variable
-    [Value | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas,Limit, RowIndex)]. % recursive call
+    [Value | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas, RowIndex)]. % recursive call
 
 % Helper function to avoid many rpc calls when binding a list of variables.
 dpi_var_set_many(#odpi_conn{node = Node}, Vars, Rows) ->
