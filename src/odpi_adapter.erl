@@ -23,8 +23,15 @@
 
 bind_arg_types() -> erloci:bind_arg_types().
 
--define (TR, io:format("adapter call ~p/~p~n", [?FUNCTION_NAME, ?FUNCTION_ARITY])).
--define (TR(__V), io:format("adapter call ~p/~p (~p)~n", [?FUNCTION_NAME, ?FUNCTION_ARITY, __V])).
+%-define(TRACE_FUNCTION_CALLS, '_').
+-ifdef(TRACE_FUNCTION_CALLS).
+    -define (TR, io:format("adapter call ~p/~p~n", [?FUNCTION_NAME, ?FUNCTION_ARITY])).
+    -define (TR(__V), io:format("adapter call ~p/~p (~p)~n", [?FUNCTION_NAME, ?FUNCTION_ARITY, __V])).
+-else.
+    -define (TR, nop).
+    -define (TR(__V), nop).
+-endif.
+
 -spec init() -> ok.
 init() ->
     ?Info("Init called"),

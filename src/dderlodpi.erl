@@ -3,8 +3,14 @@
 
 -include("dderlodpi.hrl").
 
--define (TR, io:format("dderlodpi call ~p/~p~n", [?FUNCTION_NAME, ?FUNCTION_ARITY])).
--define (TR(__V), io:format("dderlodpi call ~p/~p (~p)~n", [?FUNCTION_NAME, ?FUNCTION_ARITY, __V])).
+%-define(TRACE_FUNCTION_CALLS, '_').
+-ifdef(TRACE_FUNCTION_CALLS).
+    -define (TR, io:format("dderlodpi call ~p/~p~n", [?FUNCTION_NAME, ?FUNCTION_ARITY])).
+    -define (TR(__V), io:format("dderlodpi call ~p/~p (~p)~n", [?FUNCTION_NAME, ?FUNCTION_ARITY, __V])).
+-else.
+    -define (TR, nop).
+    -define (TR(__V), nop).
+-endif.
 
 %% API
 -export([
@@ -73,12 +79,12 @@
 %% ===================================================================
 -spec exec(map(), binary(), integer()) -> ok | {ok, pid()} | {error, term()}.
 exec(Connection, Sql, MaxRowCount) ->
-    io:format("exec (1) Connection ~p Sql ~p MaxRowCount ~p~n", [Connection, Sql, MaxRowCount]),
+    ?TR,
     exec(Connection, Sql, undefined, MaxRowCount).
 
 -spec exec(map(), binary(), tuple(), integer()) -> ok | {ok, pid()} | {error, term()}.
 exec(Connection, OrigSql, Binds, MaxRowCount) ->
-    io:format("exec (2) Connection ~p OrigSql ~p Binds ~p MaxRowCount ~p~n", [Connection, OrigSql, Binds, MaxRowCount]),
+    ?TR,
     {Sql, NewSql, TableName, RowIdAdded, SelectSections} =
         parse_sql(sqlparse:parsetree(OrigSql), OrigSql),
     case catch run_query(Connection, Sql, Binds, NewSql, RowIdAdded, SelectSections) of
@@ -89,7 +95,6 @@ exec(Connection, OrigSql, Binds, MaxRowCount) ->
             ?Error("run_query( SQL: ~s, Binds: ~p, NewSQL: ~s)~n{Error: ~p, ST: ~p}", [Sql, Binds, NewSql, Error, ST]),
             {error, Error};
         {ok, #stmtResults{} = StmtResult, ContainRowId} ->
-            io:format("run_query result StmtResult ~p ContainRowId ~p~n",[StmtResult, ContainRowId]),
             LowerSql = string:to_lower(binary_to_list(Sql)),
             case string:str(LowerSql, "rownum") of
                 0 -> ContainRowNum = false;
@@ -156,9 +161,6 @@ init([SelectSections, StmtResult, ContainRowId, MaxRowCount, ContainRowNum, Conn
 handle_call({filter_and_sort, Connection, FilterSpec, SortSpec, Cols, Query}, _From, #qry{stmt_result = StmtResult} = State) ->
     ?TR(a),
     #stmtResults{rowCols = StmtCols} = StmtResult,
-    io:format("StmtResult ~p~n", [StmtResult]),
-    io:format("Connection ~p, FilterSpec ~p, SortSpec ~p, Cols ~p, Query ~p~n", [Connection, FilterSpec, SortSpec, Cols, Query]),
-    io:format("State ~p~n", [State]),
     %% TODO: improve this to use/update parse tree from the state.
     Res = filter_and_sort_internal(Connection, FilterSpec, SortSpec, Cols, Query, StmtCols),
     {reply, Res, State};
@@ -182,16 +184,16 @@ handle_call(_Ignored, _From, State) ->
     ?TR(f),
     {noreply, State}.
 
-handle_cast({add_fsm, FsmRef}, #qry{} = State) -> io:format("handle cast (a)~n", []), {noreply, State#qry{fsm_ref = FsmRef}};
+handle_cast({add_fsm, FsmRef}, #qry{} = State) -> ?TR, {noreply, State#qry{fsm_ref = FsmRef}};
 
 handle_cast({fetch_recs_async, _, _}, #qry{pushlock = true} = State) ->
-    io:format("handle cast (b)~n", []),
+    ?TR,
     {noreply, State};
 handle_cast({fetch_push, _, _}, #qry{pushlock = true} = State) ->
-    io:format("handle cast (c)~n", []),
+    ?TR,
     {noreply, State};
 handle_cast({fetch_recs_async, true, FsmNRows}, #qry{max_rowcount = MaxRowCount} = State) ->
-    io:format("handle cast (d)~n", []),
+    ?TR,
     case FsmNRows rem MaxRowCount of
         0 -> RowsToRequest = MaxRowCount;
         Result -> RowsToRequest = MaxRowCount - Result
@@ -200,7 +202,7 @@ handle_cast({fetch_recs_async, true, FsmNRows}, #qry{max_rowcount = MaxRowCount}
     {noreply, State};
 handle_cast({fetch_recs_async, false, _}, #qry{fsm_ref = FsmRef, stmt_result = StmtResult,
         contain_rowid = ContainRowId, connection = Connection} = State) ->
-    io:format("handle cast (1)~n", []),
+    ?TR,
     #stmtResults{stmtRefs = Statement, rowCols = Clms} = StmtResult,
     Res = dpi_fetch_rows(Connection, Statement, ?DEFAULT_ROW_SIZE),
     case Res of
@@ -208,11 +210,9 @@ handle_cast({fetch_recs_async, false, _}, #qry{fsm_ref = FsmRef, stmt_result = S
         {error, _DpiNifFile, _Line, #{message := Msg}} -> FsmRef:rows({error, Msg});
         {Rows, Completed} when is_list(Rows), is_boolean(Completed) ->
             RowsF = fix_row_format(Statement, Rows, Clms, ContainRowId),
-            io:format("fixed row format ~p FSMref ~p~n", [RowsF, FsmRef]),
             Rowargs = {fix_row_format(Statement, Rows, Clms, ContainRowId), Completed},
-            io:format("rowargs ~p~n", [Rowargs]),
             try FsmRef:rows(Rowargs) of
-                ok -> io:format("done with ~p:format (123)~n", [FsmRef]), ok
+                ok -> ok
             catch
                 _Class:Result ->
                     FsmRef:rows({error, Result})
@@ -220,7 +220,7 @@ handle_cast({fetch_recs_async, false, _}, #qry{fsm_ref = FsmRef, stmt_result = S
     end,
     {noreply, State};
 handle_cast({fetch_push, NRows, Target}, #qry{fsm_ref = FsmRef, stmt_result = StmtResult} = State) ->
-    io:format("handle cast (2)~n", []),
+    ?TR,
     #qry{contain_rowid = ContainRowId, contain_rownum = ContainRowNum} = State,
     #stmtResults{stmtRefs = StmtRef, rowCols = Clms} = StmtResult,
     MissingRows = Target - NRows,
@@ -246,7 +246,7 @@ handle_cast({fetch_push, NRows, Target}, #qry{fsm_ref = FsmRef, stmt_result = St
     end,
     {noreply, State};
 handle_cast(_Ignored, State) ->
-    io:format("handle cast (3)~n", []),
+    ?TR,
     {noreply, State}.
 
 handle_info(_Info, State) ->
@@ -354,7 +354,6 @@ bind_exec_stmt(Conn, Stmt, {BindsMeta, BindVal}) ->
 
 oraTypeToInternal(OraType)->
     ?TR,
-    io:format("oraTypeToInternal ~p~n", [OraType]),
     case OraType of
         'SQLT_INT' -> { 'DPI_ORACLE_TYPE_NATIVE_INT', 'DPI_NATIVE_TYPE_INT64' };
         'SQLT_CHR' -> { 'DPI_ORACLE_TYPE_CHAR', 'DPI_NATIVE_TYPE_BYTES' };
@@ -368,16 +367,12 @@ bind_vars(Conn, Stmt, BindsMeta)->
     ?TR,
     [begin
         {OraNative, DpiNative} = oraTypeToInternal(BindType),
-        io:format("bind_vars pass ~p ~p~n", [OraNative, DpiNative]),
         Var = (catch dpi:safe(Conn#odpi_conn.node, fun() ->
         #{var := VarReturned, data := [FirstData | _Rest]} =
             dpi:conn_newVar(Conn#odpi_conn.connection, OraNative, DpiNative, 100, 4000, false, false, null),
-            io:format("pre bind Stmt ~p BindName ~p VarReturned ~p OraNative ~p DpiNative ~p~n", [Stmt, BindName, VarReturned, OraNative, DpiNative]),
             R = (catch dpi:stmt_bindByName(Stmt, BindName, VarReturned)),
-            io:format("past bind ~p ~n", [R]),
         {VarReturned, FirstData}
         end)),
-        io:format("bind_vars internal result Var ~p", [Var]),
 
         {Var, DpiNative}
     end || {BindName, _Direction, BindType} <- BindsMeta].
@@ -409,7 +404,6 @@ execute_with_binds(#odpi_conn{context = _Ctx, connection = _Conn, node = Node}, 
             true -> [BindTuple] % something else: wrap it into a list
         end,
         [   begin
-            io:format("Internal. VarType ~p Data ~p Bind ~p ~n", [VarType, Data, Bind]),
             dpi:safe(Node, fun() ->
                 R = (catch case VarType of 
                     'DPI_NATIVE_TYPE_INT64' ->
@@ -422,8 +416,7 @@ execute_with_binds(#odpi_conn{context = _Ctx, connection = _Conn, node = Node}, 
                         %% TODO: timestamp, etc
 
                     Else -> {error, {"invalide gobshite", Else}}
-                end),
-            io:format("Result: ~p~n", [R])
+                end)
              end)
 end
         || {Bind, {{Var, Data}, VarType}} <- lists:zip(BindList, BindVars)
@@ -448,7 +441,6 @@ end
 run_query(Connection, Sql, Binds, NewSql, RowIdAdded, SelectSections) ->
     ?TR,
     %% For now only the first table is counted.
-    io:format("RUN QUERY~n", []),
     case dpi_conn_prepareStmt(Connection, NewSql) of
         Statement when is_reference(Statement) ->
             StmtExecResult = bind_exec_stmt(Connection, Statement, Binds),
@@ -476,9 +468,7 @@ run_query(Connection, Sql, Binds, NewSql, RowIdAdded, SelectSections) ->
 result_exec_query(NColumns, Statement, _Sql, _Binds, NewSql, RowIdAdded, Connection,
                     SelectSections) when is_integer(NColumns), NColumns > 0 ->
                         ?TR,
-    io:format("result exec query (~p)~n", [1]),
     Clms = dpi_query_columns(Connection, Statement, NColumns),
-    io:format("Clms: ~p~n", [Clms]),
     if
         RowIdAdded -> % ROWID is hidden from columns
             [_|ColumnsR] = lists:reverse(Clms),
@@ -487,11 +477,7 @@ result_exec_query(NColumns, Statement, _Sql, _Binds, NewSql, RowIdAdded, Connect
             Columns = Clms
     end,
     Fields = proplists:get_value(fields, SelectSections, []),
-    io:format("Fields: ~p~n", [Fields]),
     NewClms = cols_to_rec(Columns, Fields),
-    %NewClms = [{rowCol,<<"A">>,<<"A">>,'DPI_ORACLE_TYPE_BYTES',38,dynamic,false}],
-
-    io:format("newClms: ~p~n", [NewClms]),
     SortFun = build_sort_fun(NewSql, NewClms),
     R= {ok
      , #stmtResults{ rowCols = NewClms
@@ -509,12 +495,10 @@ result_exec_query(NColumns, Statement, _Sql, _Binds, NewSql, RowIdAdded, Connect
                     , sortFun  = SortFun
                     , sortSpec = []}
      , RowIdAdded},
-    io:format("result_exec_query Result: ~p~n", [Fields]),
     R;
 result_exec_query(RowIdError, OldStmt, Sql, Binds, NewSql, _RowIdAdded, Connection,
         SelectSections) when Sql =/= NewSql ->
             ?TR,
-    io:format("result exec query (~p)~n", [2]),
     ?Debug("RowIdError ~p", [RowIdError]),
     dpi_stmt_close(Connection, OldStmt),
     case dpi_conn_prepareStmt(Connection, Sql) of
@@ -526,7 +510,6 @@ result_exec_query(RowIdError, OldStmt, Sql, Binds, NewSql, _RowIdAdded, Connecti
     end;
 result_exec_query(Error, Stmt, _Sql, _Binds, _NewSql, _RowIdAdded, Connection, _SelectSections) ->
     ?TR,
-    io:format("result exec query (~p)~n", [3]),
     result_exec_error(Error, Stmt, Connection).
 
 result_exec_stmt({rowids, _}, Statement, _Sql, _Binds, _NewSql, _RowIdAdded, Connection, _SelectSections) ->
@@ -683,7 +666,6 @@ process_sort_order({Fun, Dir}, Map) ->
 
 filter_and_sort_internal(_Connection, FilterSpec, SortSpec, Cols, Query, StmtCols) ->
     ?TR,
-    io:format("FilterSpec ~p, SortSpec ~p, Cols ~p, Query ~p, StmtCols ~p~n",[FilterSpec, SortSpec, Cols, Query, StmtCols]),
     FullMap = build_full_map(StmtCols),
     case Cols of
         [] ->   Cols1 = lists:seq(1,length(FullMap));
@@ -1091,7 +1073,6 @@ dpi_conn_newVar(#odpi_conn{node = Node, connection = Conn} = Connection, Count, 
     % encapsulates the dpi:safe call call that creates the variable and returns the variable/data
     % because the call is the same for most variable types except the ora/dpi types
     MakeVar = fun(NativeType, DpiType)->
-        io:format("MakeVar with NativeType ~p DpiType ~p", [NativeType, DpiType]),
     dpi:safe(Node, fun() ->
         #{var := Var, data := DataList} =
             dpi:conn_newVar(Conn, NativeType, DpiType, Count, 1, false, false, null),
@@ -1112,7 +1093,6 @@ dpi_conn_newVar(Connection, Count) ->
 dpi_conn_newVar(#odpi_conn{node = Node, connection = Conn}, Count, OracleType, NativeType, Size) ->
     ?TR,
     dpi:safe(Node, fun() ->
-        io:format("dpi_conn_newVar with NativeType ~p DpiType ~p", [NativeType, OracleType]),
         #{var := Var, data := DataList} =
             dpi:conn_newVar(Conn, OracleType, NativeType, Count, Size, false, false, null),
         {Var, DataList}
@@ -1141,10 +1121,7 @@ dpi_stmt_getInfo(#odpi_conn{node = Node}, Stmt) ->
 
 dpi_stmt_close(#odpi_conn{node = Node}, Stmt) ->
     ?TR,
-    io:format("stmt close. Conn node: ~p Stmt ~p~n",[Node, Stmt]),
-    R = dpi:safe(Node, fun() -> dpi:stmt_close(Stmt) end),
-    io:format("close result ~p~n",[R]),
-    R.
+    dpi:safe(Node, fun() -> dpi:stmt_close(Stmt) end).
 
 dpi_var_getReturnedData(#odpi_conn{node = Node}, Var, Index) ->
     ?TR,
@@ -1172,13 +1149,9 @@ get_column_info(Stmt, ColIdx, Limit) ->
     QueryInfo = dpi:stmt_getQueryInfo(Stmt, ColIdx),
     InnerMap = maps:get(typeInfo, QueryInfo),
     Type = case maps:get(defaultNativeTypeNum, InnerMap) of 'DPI_NATIVE_TYPE_DOUBLE' -> 'DPI_NATIVE_TYPE_BYTES'; A -> A end,
-    io:format("FIXED TYPE ~p~n", [Type]),
     InnerMap2 = InnerMap#{defaultNativeTypeNum := Type},
     QueryInfo2 = QueryInfo#{typeInfo := InnerMap2},
-    io:format("QueryInfo Fixed: ~p~n", [QueryInfo2]),
-    R = [QueryInfo2 | get_column_info(Stmt, ColIdx + 1, Limit)],
-    io:format("QueryInfo final: ~p~n", [R]),
-    R.
+    [QueryInfo2 | get_column_info(Stmt, ColIdx + 1, Limit)].
 
 dpi_fetch_rows( #odpi_conn{node = Node, connection = Conn}, Statement, BlockSize) ->
     ?TR,
@@ -1189,11 +1162,9 @@ dpi_fetch_rows( #odpi_conn{node = Node, connection = Conn}, Statement, BlockSize
 %% then it makes dpiVars for every column and calls get_rows to fetch all the data
 get_rows_prepare(Conn, Stmt, NRows, Acc)->
     NumCols = dpi:stmt_getNumQueryColumns(Stmt),    % get number of cols returned by the Stmt
-    io:format("Col count ~p~n", [NumCols]),
     Types = [
         begin
             Qinfo = maps:get(typeInfo, dpi:stmt_getQueryInfo(Stmt, Col)),
-            io:format("Qinfo ~p~n", [Qinfo]),
             #{defaultNativeTypeNum := DefaultNativeTypeNum,
             oracleTypeNum := OracleTypeNum} = Qinfo,
             {OracleTypeNum, DefaultNativeTypeNum, Col}
@@ -1211,29 +1182,18 @@ get_rows_prepare(Conn, Stmt, NRows, Acc)->
     R = get_rows(Conn, Stmt, NRows, Acc, VarsDatas),
     [begin
         [dpi:data_release(Data)|| Data <- Datas],
-        io:format("pass double ~p~n", [5]),
         dpi:var_release(Var)
     end || {Var, Datas} <- VarsDatas],
-        io:format("pass double ~p~n", [6]),
-        io:format("final result ~p~n", [R]),
 R.
 
 get_rows(_Conn, _, 0, Acc, _VarsDatas) -> ?TR, {lists:reverse(Acc), false};
 get_rows(Conn, Stmt, NRows, Acc, VarsDatas) ->
     ?TR,
-    io:format("GET ROWS Stmt ~p NRows ~p Acc ~p~n", [Stmt, NRows, Acc]),
     case dpi:stmt_fetch(Stmt) of
         #{found := true} ->
-            io:format("get rows found true~n", []),
-            G =  get_rows(Conn, Stmt, NRows -1, [get_column_values(Conn, Stmt, 1, VarsDatas, length(VarsDatas), length(Acc)+1) | Acc], VarsDatas),
-            io:format("G ~p~n", [G]),
-            G;
+            get_rows(Conn, Stmt, NRows -1, [get_column_values(Conn, Stmt, 1, VarsDatas, length(VarsDatas), length(Acc)+1) | Acc], VarsDatas);
         #{found := false} ->
-            io:format("get rows found false~n", []),
-            R = {lists:reverse(Acc), true},
-            io:format("R: ~p~n", [R]),
-            R
-            
+            {lists:reverse(Acc), true}
     end.
 
 get_column_values(_Conn, _Stmt, ColIdx, _VarsDatas, Limit, _RowIndex) when ColIdx > Limit -> ?TR(1), [];
@@ -1241,10 +1201,7 @@ get_column_values(Conn, Stmt, ColIdx, VarsDatas, Limit, RowIndex) ->
     ?TR(2),
     {_Var, Datas} = lists:nth(ColIdx, VarsDatas),
 
-            io:format("pass double ~p ColIdx ~p~n", [0, ColIdx]),
-        io:format("pass double ~pRowIndex ~p~n", [3, RowIndex]),
-        Value = (catch dpi:data_get(lists:nth(RowIndex, Datas))),
-        io:format("Value (1)~p~n", [Value]),
+        Value = dpi:data_get(lists:nth(RowIndex, Datas)),
             
 
     [Value | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas,Limit, RowIndex)].
