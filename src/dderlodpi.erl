@@ -411,18 +411,7 @@ end
         dpi:stmt_execute(Stmt, [])
     end),
     {cols,Cols}.
-    % Binds is a list like 
-
-    %[
-    %   {1,<<"_publisher_1_">>,1.5,<<"_hero_1_">>,<<"_reality_1_">>, 1, <<120,119,4,10,14,31,48>>, 1},
-    %   {2,<<"_publisher_2_">>,3.0,<<"_hero_2_">>,<<"_reality_2_">>, 2, <<120,119,4,10,14,31,48>>, 2},
-    %   {3,<<"_publisher_3_">>,4.5,<<"_hero_3_">>,<<"_reality_3_">>, 3, <<120,119,4,10,14,31,48>>, 3}
-    %]
-
-    % For each of those:
-    %   - Assign all these values to the data/char
-    %   - execute the statement
-
+   
 run_query(Connection, Sql, Binds, NewSql, RowIdAdded, SelectSections) ->
     ?TR,
     %% For now only the first table is counted.
@@ -1142,7 +1131,7 @@ dpi_fetch_rows( #odpi_conn{node = Node, connection = Conn}, Statement, BlockSize
     ?TR,
     dpi:safe(Node, fun() -> get_rows_prepare(Conn, Statement, BlockSize, []) end).
 
-%% initalizes things that need to be doen before getting the rows
+%% initalizes things that need to be done before getting the rows
 %% it finds out how many columns they are and what types all those columns are
 %% then it makes dpiVars for every column and calls get_rows to fetch all the data
 get_rows_prepare(Conn, Stmt, NRows, Acc)->
@@ -1154,11 +1143,11 @@ get_rows_prepare(Conn, Stmt, NRows, Acc)->
             oracleTypeNum := OracleTypeNum} = Qinfo,
             {OracleTypeNum, DefaultNativeTypeNum, Col}
         end
-        || Col <- lists:seq(1, NumCols)], %make a list of types that each row has. Each entry is a tuple of Oratype and nativetype
+        || Col <- lists:seq(1, NumCols)], %make a list of types that each row has. Each entry is a tuple of Oratype and nativetype. Also includes the col count
 
     VarsDatas = [
             begin
-        NewNativeType = case NativeType of 'DPI_NATIVE_TYPE_DOUBLE' -> 'DPI_NATIVE_TYPE_BYTES'; A -> A end,
+        NewNativeType = case NativeType of 'DPI_NATIVE_TYPE_DOUBLE' -> 'DPI_NATIVE_TYPE_BYTES'; A -> A end, % doubles are read as binary instead
                 #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, NewNativeType, 100, 4000, false, false, null),
                 ok = dpi:stmt_define(Stmt, Col, Var),    %% results will be fetched to the vars
                 {Var, Datas}
@@ -1171,25 +1160,24 @@ get_rows_prepare(Conn, Stmt, NRows, Acc)->
     end || {Var, Datas} <- VarsDatas],
 R.
 
+%% this recursive function fetches all the rows. It does so by calling yet another recursive function that fetches all the fields in a row.
 get_rows(_Conn, _, 0, Acc, _VarsDatas) -> ?TR, {lists:reverse(Acc), false};
 get_rows(Conn, Stmt, NRows, Acc, VarsDatas) ->
     ?TR,
-    case dpi:stmt_fetch(Stmt) of
-        #{found := true} ->
-            get_rows(Conn, Stmt, NRows -1, [get_column_values(Conn, Stmt, 1, VarsDatas, length(VarsDatas), length(Acc)+1) | Acc], VarsDatas);
-        #{found := false} ->
-            {lists:reverse(Acc), true}
+    case dpi:stmt_fetch(Stmt) of % try to fetch a row
+        #{found := true} -> % got a row
+            get_rows(Conn, Stmt, NRows -1, [get_column_values(Conn, Stmt, 1, VarsDatas, length(VarsDatas), length(Acc)+1) | Acc], VarsDatas); % recursive call
+        #{found := false} -> % no more rows, that was all of them
+            {lists:reverse(Acc), true} % reverse the list so it's in the right order again after ti was pieced together the other way around
     end.
 
+%% get all the fields in a row
 get_column_values(_Conn, _Stmt, ColIdx, _VarsDatas, Limit, _RowIndex) when ColIdx > Limit -> ?TR(1), [];
 get_column_values(Conn, Stmt, ColIdx, VarsDatas, Limit, RowIndex) ->
     ?TR(2),
-    {_Var, Datas} = lists:nth(ColIdx, VarsDatas),
-
-        Value = dpi:data_get(lists:nth(RowIndex, Datas)),
-            
-
-    [Value | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas,Limit, RowIndex)].
+    {_Var, Datas} = lists:nth(ColIdx, VarsDatas), % finds out which field to get in this recursive call, gets the respective data variable
+    Value = dpi:data_get(lists:nth(RowIndex, Datas)), % get the value out of that data variable
+    [Value | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas,Limit, RowIndex)]. % recursive call
 
 % Helper function to avoid many rpc calls when binding a list of variables.
 dpi_var_set_many(#odpi_conn{node = Node}, Vars, Rows) ->
