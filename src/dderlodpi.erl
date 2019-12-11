@@ -1153,7 +1153,7 @@ get_rows_prepare(Conn, Stmt, NRows, Acc)->
                         % fetched as a binary in order to avoid a rounding error that would occur if they were transformed from their internal decimal
                         % representation to double. Therefore, stmt_getQueryValue() can't be used for this, so a variable needs to be made because
                         % the data has to be fetched using define so the value goes into the data and then retrieving the values from the data
-                        #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_BYTES', 100, 4000, false, false, null),
+                        #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_BYTES', 100, 0, false, false, null),
                         ok = dpi:stmt_define(Stmt, Col, Var),    %% results will be fetched to the vars and go into the data
                         {Var, Datas}; % put the variable and its data list into a tuple
                     _else -> noVariable % when no variable needs to be made for the type, just put an atom signlizing that no variable was made and stmt_getQueryValue() can be used to get the values
@@ -1175,7 +1175,7 @@ get_rows(_Conn, _, 0, Acc, _VarsDatas) -> ?TR, {lists:reverse(Acc), false};
 get_rows(Conn, Stmt, NRows, Acc, VarsDatas) ->
     ?TR,
     case dpi:stmt_fetch(Stmt) of % try to fetch a row
-        #{found := true} -> % got a row: do the recursive call to try to get another row
+        #{found := true} -> % got a row: get the values in that row and then do the recursive call to try to get another row
             get_rows(Conn, Stmt, NRows -1, [get_column_values(Conn, Stmt, 1, VarsDatas, length(Acc)+1) | Acc], VarsDatas); % recursive call
         #{found := false} -> % no more rows: that was all of them
             {lists:reverse(Acc), true} % reverse the list so it's in the right order again after it was pieced together the other way around
