@@ -1133,51 +1133,70 @@ dpi_fetch_rows( #odpi_conn{node = Node, connection = Conn}, Statement, BlockSize
 
 %% initalizes things that need to be done before getting the rows
 %% it finds out how many columns they are and what types all those columns are
-%% then it makes dpiVars for every column and calls get_rows to fetch all the data
+%% then it makes and defines dpiVars for every column where it's necessary because stmt_getQueryValue() can't be used for those cols
+%% and calls get_rows to fetch all the results of the query
 get_rows_prepare(Conn, Stmt, NRows, Acc)->
     NumCols = dpi:stmt_getNumQueryColumns(Stmt),    % get number of cols returned by the Stmt
     Types = [
         begin
-            Qinfo = maps:get(typeInfo, dpi:stmt_getQueryInfo(Stmt, Col)),
+            Qinfo = maps:get(typeInfo, dpi:stmt_getQueryInfo(Stmt, Col)), % get the info and extract the map within the map
             #{defaultNativeTypeNum := DefaultNativeTypeNum,
-            oracleTypeNum := OracleTypeNum} = Qinfo,
-            {OracleTypeNum, DefaultNativeTypeNum, Col}
+            oracleTypeNum := OracleTypeNum} = Qinfo,    % match the map to get the wanted native/ora data type atoms
+            {OracleTypeNum, DefaultNativeTypeNum, Col} % put those types into a tuple and add the column number
         end
-        || Col <- lists:seq(1, NumCols)], %make a list of types that each row has. Each entry is a tuple of Oratype and nativetype. Also includes the col count
+        || Col <- lists:seq(1, NumCols)], % make a list of types that each row has. Each entry is a tuple of Oratype and nativetype. Also includes the col count
 
     VarsDatas = [
             begin
-        NewNativeType = case NativeType of 'DPI_NATIVE_TYPE_DOUBLE' -> 'DPI_NATIVE_TYPE_BYTES'; A -> A end, % doubles are read as binary instead
-                #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, NewNativeType, 100, 4000, false, false, null),
-                ok = dpi:stmt_define(Stmt, Col, Var),    %% results will be fetched to the vars
-                {Var, Datas}
+                case NativeType of 'DPI_NATIVE_TYPE_DOUBLE' ->  % if the type is a double, make a variable for it, but say that the native type is bytes
+                        % if stmt_getQueryValue() is used to get the values, then they will have their "correct" type. But doubles need to be
+                        % fetched as a binary in order to avoid a rounding error that would occur if they were transformed from their internal decimal
+                        % representation to double. Therefore, stmt_getQueryValue() can't be used for this, so a variable needs to be made because
+                        % the data has to be fetched using define so the value goes into the data and then retrieving the values from the data
+                        #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_BYTES', 100, 4000, false, false, null),
+                        ok = dpi:stmt_define(Stmt, Col, Var),    %% results will be fetched to the vars and go into the data
+                        {Var, Datas}; % put the variable and its data list into a tuple
+                    _else -> noVariable % when no variable needs to be made for the type, just put an atom signlizing that no variable was made and stmt_getQueryValue() can be used to get the values
+                end
             end
-            || {OraType, NativeType, Col} <- Types], % make a list of {Var, Datas} tuples. Var is the dpiVar handle, Datas is the list of Data handles in that respective Var
-    R = get_rows(Conn, Stmt, NRows, Acc, VarsDatas),
+            || {OraType, NativeType, Col} <- Types], % make a list of {Var, Datas} tuples. Var is the dpiVar handle, Datas is the list of Data handles in that respective Var  
+R = get_rows(Conn, Stmt, NRows, Acc, VarsDatas), % gets all the results from the query
     [begin
-        [dpi:data_release(Data)|| Data <- Datas],
-        dpi:var_release(Var)
-    end || {Var, Datas} <- VarsDatas],
-R.
+        case VarDatas of {Var, Datas} -> % if there is a variable (which was made to fetch a double as a binary)
+                [dpi:data_release(Data)|| Data <- Datas], % loop through the list of datas and release them all
+                dpi:var_release(Var); % now release the variable
+            _else -> nop % if no variable was made, then nothing needs to be done here
+        end
+    end || VarDatas <- VarsDatas], % clean up eventual variables that may have been made
+R. % return query results
 
 %% this recursive function fetches all the rows. It does so by calling yet another recursive function that fetches all the fields in a row.
 get_rows(_Conn, _, 0, Acc, _VarsDatas) -> ?TR, {lists:reverse(Acc), false};
 get_rows(Conn, Stmt, NRows, Acc, VarsDatas) ->
     ?TR,
     case dpi:stmt_fetch(Stmt) of % try to fetch a row
-        #{found := true} -> % got a row
+        #{found := true} -> % got a row: do the recursive call to try to get another row
             get_rows(Conn, Stmt, NRows -1, [get_column_values(Conn, Stmt, 1, VarsDatas, length(Acc)+1) | Acc], VarsDatas); % recursive call
-        #{found := false} -> % no more rows, that was all of them
+        #{found := false} -> % no more rows: that was all of them
             {lists:reverse(Acc), true} % reverse the list so it's in the right order again after it was pieced together the other way around
     end.
 
-%% get all the fields in a row
+%% get all the fields in one row
 get_column_values(_Conn, _Stmt, ColIdx, VarsDatas, _RowIndex) when ColIdx > length(VarsDatas) -> ?TR(1), [];
 get_column_values(Conn, Stmt, ColIdx, VarsDatas, RowIndex) ->
     ?TR(2),
-    {_Var, Datas} = lists:nth(ColIdx, VarsDatas), % finds out which field to get in this recursive call, gets the respective data variable
-    Value = dpi:data_get(lists:nth(RowIndex, Datas)), % get the value out of that data variable
-    [Value | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas, RowIndex)]. % recursive call
+    case lists:nth(ColIdx, VarsDatas) of % get the entry that is either a {Var, Datas} tuple or noVariable if no variable was made for this column
+        {_Var, Datas} -> % if a variable was made for this column: the value was fetched into the variable's data object, so get it from there
+            Value = dpi:data_get(lists:nth(RowIndex, Datas)), % get the value out of that data variable
+            [Value | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas, RowIndex)]; % recursive call
+        noVariable -> % if no variable has been made then that means that the value can be fetched with stmt_getQueryValue()
+            #{data := Data} = dpi:stmt_getQueryValue(Stmt, ColIdx), % get the value 
+            Value = dpi:data_get(Data), % take the value from this freshly made data
+            dpi:data_release(Data), % release this new data object
+            [Value | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas, RowIndex)]; % recursive call
+        Else ->
+            io:format("ERROR! Invalid variable term of ~p~n!", [Else])
+    end.
 
 % Helper function to avoid many rpc calls when binding a list of variables.
 dpi_var_set_many(#odpi_conn{node = Node}, Vars, Rows) ->
