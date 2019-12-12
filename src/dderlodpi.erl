@@ -356,7 +356,7 @@ oraTypeToInternal(OraType)->
     case OraType of
         'SQLT_INT' -> { 'DPI_ORACLE_TYPE_NATIVE_INT', 'DPI_NATIVE_TYPE_INT64' };
         'SQLT_CHR' -> { 'DPI_ORACLE_TYPE_CHAR', 'DPI_NATIVE_TYPE_BYTES' };
-        'SQLT_FLT' -> { 'DPI_ORACLE_TYPE_NATIVE_NUMBER', 'DPI_NATIVE_TYPE_BYTES' };
+        'SQLT_FLT' -> { 'DPI_ORACLE_TYPE_NUMBER', 'DPI_NATIVE_TYPE_DOUBLE' };
         'SQLT_DAT' -> { 'DPI_ORACLE_TYPE_DATE', 'DPI_NATIVE_TYPE_TIMESTAMP' };
         Else ->       { error, {"Unknown Type", Else}}
     end.
@@ -370,12 +370,11 @@ bind_vars(Conn, Stmt, BindsMeta)->
         #{var := VarReturned, data := [FirstData | _Rest]} =
             dpi:conn_newVar(Conn#odpi_conn.connection, OraNative, DpiNative, 100, 4000, false, false, null),
             dpi:stmt_bindByName(Stmt, BindName, VarReturned),
+        
         {VarReturned, FirstData}
         end)),
-
         {Var, DpiNative}
     end || {BindName, _Direction, BindType} <- BindsMeta].
-    % BindsMeta is a list like:
  
 
 execute_with_binds(#odpi_conn{context = _Ctx, connection = _Conn, node = Node}, Stmt, BindVars, Binds) ->
@@ -392,12 +391,12 @@ execute_with_binds(#odpi_conn{context = _Ctx, connection = _Conn, node = Node}, 
             dpi:safe(Node, fun() ->
                 case VarType of 
                     'DPI_NATIVE_TYPE_INT64' ->
-                         dpi:data_setInt64(Data, Bind);
+                        ok = dpi:data_setInt64(Data, Bind);
                     'DPI_NATIVE_TYPE_DOUBLE' ->
-                         %dpi:data_setDouble(Data, Bind);
-                        dpi:var_setFromBytes(Var, 0, Bind);
+                        % doubles are handled as binaris now to avoid precision loss, so the double that is to be inserted has to be turned back from binary to double here
+                        ok = dpi:data_setDouble(Data, list_to_float(binary_to_list(Bind)));
                     'DPI_NATIVE_TYPE_BYTES' ->
-                         dpi:var_setFromBytes(Var, 0, Bind);
+                        ok = dpi:var_setFromBytes(Var, 0, Bind);
                         %% TODO: timestamp, etc
 
                     Else -> {error, {"invalide gobshite", Else}}
