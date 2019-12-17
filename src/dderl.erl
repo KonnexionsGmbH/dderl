@@ -222,9 +222,9 @@ exec_coldstart_cb(App, Fun) when is_binary(Fun); is_function(Fun, 0) ->
                 true -> (imem_compiler:compile(Fun))()
             end,
         ?Info("'~p' cold start : cold_start_fun hook : ~p", [App, Ret])
-    catch Class:Exception ->
+    catch Class:Exception:Stacktrace ->
         ?Error("'~p' cold start : ~p:~p~nHook cold_start_fun : ~p~nStack ~p",
-               [App, Class, Exception, Fun, erlang:get_stacktrace()])
+               [App, Class, Exception, Fun, Stacktrace])
     end;
 exec_coldstart_cb(App, FunStr) ->
     ?Error("'~p' cold start : bad cold_start_fun hook '~p'", [App, FunStr]).

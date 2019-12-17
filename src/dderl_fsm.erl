@@ -1626,8 +1626,8 @@ handle_call({statistics, ColumnIds, RowIds}, From, SN, #state{nav = Nav, tableId
         StatColumns = [<<"column">>, <<"count">>, <<"min">>, <<"max">>, <<"sum">>, <<"avg">>, <<"median">>, <<"std_dev">>, <<"variance">>,<<"hash">>],
         {next_state, SN, State, [{reply, From, {lists:max(Counts), StatColumns, StatsRows, atom_to_binary(SN, utf8)}}]}
     catch
-        _:Error ->
-            {next_state, SN, State, [{reply, From, {error, iolist_to_binary(io_lib:format("~p", [Error])), erlang:get_stacktrace()}}]}
+        _:Error:Stacktrace ->
+            {next_state, SN, State, [{reply, From, {error, iolist_to_binary(io_lib:format("~p", [Error])), Stacktrace}}]}
     end;
 handle_call({distinct_count, ColumnId}, From, SN, #state{nav=Nav, tableId=TableId, indexId=IndexId, rowFun=RowFun, ctx=#ctx{rowCols=RowCols}} = State) ->
     case Nav of
@@ -1712,8 +1712,8 @@ handle_call({distinct_statistics, ColumnId}, From, SN, #state{nav=Nav, tableId=T
     try
         {next_state, SN, State, [{reply, From, {Total, ResultColumns, ResultRowsWithId, atom_to_binary(SN, utf8)}}]}
     catch
-        _:Error ->
-            {next_state, SN, State, [{reply, From, {error, iolist_to_binary(io_lib:format("~p", [Error])), erlang:get_stacktrace()}}]}
+        _:Error:Stacktrace ->
+            {next_state, SN, State, [{reply, From, {error, iolist_to_binary(io_lib:format("~p", [Error])), Stacktrace}}]}
     end;
 handle_call(cache_data, From, SN, #state{tableId = TableId, ctx=#ctx{rowCols=RowCols, orig_qry=Qry, bind_vals=BindVals}} = State) ->
     FoldFun =
