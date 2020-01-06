@@ -319,7 +319,6 @@ process_cmd({[<<"query">>], ReqBody}, Sess, _UserId, From, #priv{connections = C
     case lists:member(Connection, Connections) of
         true ->
             Params = make_binds(proplists:get_value(<<"binds">>, BodyJson, null)),
-            io:format("params: ~p~n",[Params]),
             R = case dderl_dal:is_local_query(Query) of
                     true -> process_query(Query, Sess, {ConnId, imem}, Params, SessPid);
                     _ -> process_query(Query, Connection, {ConnId, imem}, Params, SessPid)
@@ -364,7 +363,6 @@ process_cmd({[<<"browse_data">>], ReqBody}, Sess, _UserId, From, #priv{connectio
                 _ ->
                     case lists:member(Connection, Connections) of
                         true ->
-                            io:format("pass make binds (1)", []),
                             case {gen_adapter:opt_bind_json_obj(C#ddCmd.command, imem),
                                   make_binds(proplists:get_value(<<"binds">>, BodyJson, null))} of
                                 {[], _} ->
@@ -472,7 +470,6 @@ process_cmd({[<<"open_view">>], ReqBody}, Sess, _UserId, From, #priv{connections
     Connection = ?D2T(proplists:get_value(<<"connection">>, BodyJson, <<>>)),
     case lists:member(Connection, Connections) of
         true ->
-            io:format("pass make binds (2)", []),
             Binds = make_binds(proplists:get_value(<<"binds">>, BodyJson, null)),
             View = dderl_dal:get_view(Sess, ViewId),
             Res = open_view(Sess, Connection, SessPid, ConnId, Binds, View),
@@ -495,7 +492,6 @@ process_cmd({[<<"open_graph_view">>], ReqBody}, Sess, UserId, From,
                     dderl_dal:get_view(Sess, ViewName, imem, '_');
                 VRes -> VRes
             end,
-            io:format("pass make binds (3)", []),
             Binds = make_binds(proplists:get_value(<<"binds">>, BodyJson, null)),
             Res = open_view(Sess, Connection, SessPid, ConnId, Binds, View),
             %% We have to add the supported types so edit sql can be prefilled with the parameters.
@@ -522,7 +518,6 @@ process_cmd({[<<"update_focus_stmt">>], BodyJson}, Sess, UserId, From, Priv, Ses
         undefined ->
             From ! {reply, jsx:encode([{<<"update_focus_stmt">>,[{<<"error">>, <<"unable to find the view">>}]}])};
         _ ->
-            io:format("pass make binds (4)", []),
             Binds = make_binds(proplists:get_value(<<"binds">>, BodyJson, null)),
             Connection = ?D2T(proplists:get_value(<<"connection">>, BodyJson, <<>>)),
             ConnId = proplists:get_value(<<"conn_id">>, BodyJson, <<>>),
@@ -762,9 +757,8 @@ filter_json_to_term([[{C,Vs}]|Filters]) ->
     [{binary_to_integer(C), Vs} | filter_json_to_term(Filters)].
 
 -spec make_binds(null | [{binary(), [{binary(), binary()}]}]) -> [tuple()].
-make_binds(null) -> io:format("make_binds internal ~p~n", [a]), [];
+make_binds(null) -> [];
 make_binds(Binds) ->
-    io:format("make_binds internal ~p~n", [a]),
     [{B, binary_to_existing_atom(proplists:get_value(<<"typ">>, TV, <<>>), utf8), 0, [proplists:get_value(<<"val">>, TV, <<>>)]} || {B, TV} <- Binds].
 
 -spec add_param(boolean(), [tuple()], tuple()) -> [tuple()].

@@ -402,8 +402,10 @@ execute_with_binds(#odpi_conn{context = _Ctx, connection = _Conn, node = Node}, 
                         ok = dpi:data_setDouble(Data, list_to_float(binary_to_list(Bind)));
                     'DPI_NATIVE_TYPE_BYTES' ->
                         ok = dpi:var_setFromBytes(Var, 0, Bind);
-                        %% TODO: timestamp, etc
-
+                        %% TODO: timestamp, etc;
+                    'DPI_NATIVE_TYPE_TIMESTAMP' ->
+                        {{Y,M,D},{Hh,Mm,Ss}} = imem_datatype:io_to_datetime(Bind),
+                        ok = dpi:data_setTimestamp(Data, Y, M, D, Hh, Mm, Ss, 0, 0, 0);
                     Else -> {error, {"invalide gobshite", Else}}
                 end
              end),
