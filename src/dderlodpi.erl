@@ -3,7 +3,7 @@
 
 -include("dderlodpi.hrl").
 
-%-define(TRACE_FUNCTION_CALLS, '_').
+-define(TRACE_FUNCTION_CALLS, '_').
 -ifdef(TRACE_FUNCTION_CALLS).
     -define (TR, io:format("dderlodpi call ~p/~p~n", [?FUNCTION_NAME, ?FUNCTION_ARITY])).
     -define (TR(__V), io:format("dderlodpi call ~p/~p (~p)~n", [?FUNCTION_NAME, ?FUNCTION_ARITY, __V])).
@@ -354,10 +354,10 @@ bind_exec_stmt(Conn, Stmt, {BindsMeta, BindVal}) ->
 oraTypeToInternal(OraType)->
     ?TR,
     case OraType of
-        'SQLT_INT' -> { 'DPI_ORACLE_TYPE_NATIVE_INT', 'DPI_NATIVE_TYPE_INT64' };
-        'SQLT_CHR' -> { 'DPI_ORACLE_TYPE_CHAR', 'DPI_NATIVE_TYPE_BYTES' };
-        'SQLT_FLT' -> { 'DPI_ORACLE_TYPE_NUMBER', 'DPI_NATIVE_TYPE_DOUBLE' };
-        'SQLT_DAT' -> { 'DPI_ORACLE_TYPE_DATE', 'DPI_NATIVE_TYPE_TIMESTAMP' };
+        'INTEGER' -> { 'DPI_ORACLE_TYPE_NATIVE_INT', 'DPI_NATIVE_TYPE_INT64' };
+        'STRING' -> { 'DPI_ORACLE_TYPE_CHAR', 'DPI_NATIVE_TYPE_BYTES' };
+        'FLOAT' -> { 'DPI_ORACLE_TYPE_NUMBER', 'DPI_NATIVE_TYPE_DOUBLE' };
+        'TIMESTAMP' -> { 'DPI_ORACLE_TYPE_DATE', 'DPI_NATIVE_TYPE_TIMESTAMP' };
         Else ->       { error, {"Unknown Type", Else}}
     end.
 
@@ -379,6 +379,7 @@ bind_vars(Conn, Stmt, BindsMeta)->
 
 execute_with_binds(#odpi_conn{context = _Ctx, connection = _Conn, node = Node}, Stmt, BindVars, Binds) ->
     ?TR,
+    io:format("Binding the binds ~p~n", Binds),
     [   
         begin
         % turn BindTuple into a list for the next list comprehension to work
@@ -387,11 +388,15 @@ execute_with_binds(#odpi_conn{context = _Ctx, connection = _Conn, node = Node}, 
             is_tuple(BindTuple) -> tuple_to_list(BindTuple); % a tuple: turn it into a list
             true -> [BindTuple] % something else: wrap it into a list
         end,
+        io:format("Bindlist ~p~n", BindList ),
+        io:format("Bindvars ~p~n", BindVars ),
         [   begin
-            dpi:safe(Node, fun() ->
+            io:format("Vartype ~p Bind ~p~n", [VarType, Bind]),
+            R = dpi:safe(Node, fun() ->
                 case VarType of 
                     'DPI_NATIVE_TYPE_INT64' ->
-                        ok = dpi:data_setInt64(Data, Bind);
+                        io:format("Doing the INTelligent thing ~p~n", [Bind]),
+                        ok = dpi:data_setInt64(Data, list_to_integer(binary_to_list(Bind)));
                     'DPI_NATIVE_TYPE_DOUBLE' ->
                         % doubles are handled as binaris now to avoid precision loss, so the double that is to be inserted has to be turned back from binary to double here
                         ok = dpi:data_setDouble(Data, list_to_float(binary_to_list(Bind)));
@@ -401,7 +406,8 @@ execute_with_binds(#odpi_conn{context = _Ctx, connection = _Conn, node = Node}, 
 
                     Else -> {error, {"invalide gobshite", Else}}
                 end
-             end)
+             end),
+            io:format("Arr ~p~n", [R])
 end
         || {Bind, {{Var, Data}, VarType}} <- lists:zip(BindList, BindVars)
         ] end

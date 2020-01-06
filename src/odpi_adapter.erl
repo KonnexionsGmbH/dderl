@@ -1,5 +1,13 @@
 -module(odpi_adapter).
 
+-define(CLM_TYPES, [
+{'INTEGER',       undefined},
+{'STRING',        undefined},
+{'FLOAT',         undefined},
+{'TIMESTAMP',     undefined}
+]).
+
+
 -include("dderlodpi.hrl").
 -include("gres.hrl").
 
@@ -21,9 +29,10 @@
 -define(E2B(__T), gen_adapter:encrypt_to_binary(__T)).
 -define(D2T(__B), gen_adapter:decrypt_to_term(__B)).
 
-bind_arg_types() -> erloci:bind_arg_types().
+bind_arg_types() ->
+    [atom_to_binary(T,utf8) || {T,_} <- ?CLM_TYPES].
 
-%-define(TRACE_FUNCTION_CALLS, '_').
+-define(TRACE_FUNCTION_CALLS, '_').
 -ifdef(TRACE_FUNCTION_CALLS).
     -define (TR, io:format("adapter call ~p/~p~n", [?FUNCTION_NAME, ?FUNCTION_ARITY])).
     -define (TR(__V), io:format("adapter call ~p/~p (~p)~n", [?FUNCTION_NAME, ?FUNCTION_ARITY, __V])).
@@ -514,7 +523,9 @@ process_cmd({[<<"restore_table">>], ReqBody}, _Sess, _UserId, From, #priv{connec
 % gui button events
 process_cmd({[<<"button">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     ?TR(s),
+    io:format("From: ~p Priv: ~p~n", [From, Priv]),
     [{<<"button">>,BodyJson}] = ReqBody,
+    io:format("BodyJson: ~p~n", [BodyJson]),
     FsmStmt = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     case proplists:get_value(<<"btn">>, BodyJson, <<">">>) of
         <<"restart">> ->
@@ -733,8 +744,6 @@ process_query(ok, Query, BindVals, Connection, SessPid) ->
     ?Debug([{session, Connection}], "query ~p -> ok", [Query]),
     SessPid ! {log_query, Query, process_log_binds(BindVals)},
     [{<<"result">>, <<"ok">>}];
-    %{cols,[{<<"123">>,'SQLT_NUM',22,0,-127},
-    %           {<<"ROWID">>,'SQLT_RDD',8,0,0}]};    %% hardcoded
 process_query({ok, #stmtResults{sortSpec = SortSpec, rowCols = Clms} = StmtRslt, TableName},
               Query, BindVals, #odpi_conn{} = Connection, SessPid) ->
                   ?TR,
@@ -884,7 +893,7 @@ generate_fsmctx(#stmtResults{
                 , rowFun   = RowFun
                 , stmtRefs = StmtRef
                 , sortFun  = SortFun
-                , sortSpec = SortSpec} = Rec, Query, BindVals, #odpi_conn{} = Connection, TableName) ->
+                , sortSpec = SortSpec}, Query, BindVals, #odpi_conn{} = Connection, TableName) ->
                     ?TR,
     #fsmctxs{rowCols      = Clms
            ,stmtRefs      = [StmtRef]
