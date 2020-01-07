@@ -351,7 +351,8 @@ bind_exec_stmt(Conn, Stmt, {BindsMeta, BindVal}) ->
     end),
     Cols.
 
-oraTypeToInternal(OraType)->
+% given the atom that specifies the type of the bind, finds the respective ora/dpi types and returns them as a tuple
+bindTypeMapping(OraType)->
     ?TR,
     case OraType of
         'INTEGER' -> { 'DPI_ORACLE_TYPE_NATIVE_INT', 'DPI_NATIVE_TYPE_INT64' };
@@ -365,7 +366,7 @@ oraTypeToInternal(OraType)->
 bind_vars(Conn, Stmt, BindsMeta)->
     ?TR,
     [begin
-        {OraNative, DpiNative} = oraTypeToInternal(BindType),
+        {OraNative, DpiNative} = bindTypeMapping(BindType),
         Var = (catch dpi:safe(Conn#odpi_conn.node, fun() ->
         #{var := VarReturned, data := [FirstData | _Rest]} =
             dpi:conn_newVar(Conn#odpi_conn.connection, OraNative, DpiNative, 100, 4000, false, false, null),
@@ -392,25 +393,25 @@ execute_with_binds(#odpi_conn{context = _Ctx, connection = _Conn, node = Node}, 
         io:format("Bindvars ~p~n", BindVars ),
         [   begin
             io:format("Vartype ~p Bind ~p~n", [VarType, Bind]),
-            R = dpi:safe(Node, fun() ->
+            dpi:safe(Node, fun() ->
                 case VarType of 
                     'DPI_NATIVE_TYPE_INT64' ->
                         io:format("Doing the INTelligent thing ~p~n", [Bind]),
+                        % since everything is a binary now, even the ints need to be converted first
                         ok = dpi:data_setInt64(Data, list_to_integer(binary_to_list(Bind)));
                     'DPI_NATIVE_TYPE_DOUBLE' ->
-                        % doubles are handled as binaris now to avoid precision loss, so the double that is to be inserted has to be turned back from binary to double here
+                        % doubles are handled as binaries now to avoid precision loss, so the double that is to be inserted has to be turned back from binary to double here
                         ok = dpi:data_setDouble(Data, list_to_float(binary_to_list(Bind)));
                     'DPI_NATIVE_TYPE_BYTES' ->
                         ok = dpi:var_setFromBytes(Var, 0, Bind);
                         %% TODO: timestamp, etc;
                     'DPI_NATIVE_TYPE_TIMESTAMP' ->
-                        {{Y,M,D},{Hh,Mm,Ss}} = imem_datatype:io_to_datetime(Bind),
-                        ok = dpi:data_setTimestamp(Data, Y, M, D, Hh, Mm, Ss, 0, 0, 0);
-                    Else -> {error, {"invalide gobshite", Else}}
+                        {{Y,M,D},{Hh,Mm,Ss}} = imem_datatype:io_to_datetime(Bind), % extract values out of timestamp binary
+                        ok = dpi:data_setTimestamp(Data, Y, M, D, Hh, Mm, Ss, 0, 0, 0); % fsecond and timezone hour/minute offset not supported, so they are set to 0
+                    Else -> io:format("Error! Unsupported bind type ~p~n", [Else])
                 end
-             end),
-            io:format("Arr ~p~n", [R])
-end
+             end)
+        end
         || {Bind, {{Var, Data}, VarType}} <- lists:zip(BindList, BindVars)
         ] end
     || BindTuple <- Binds],

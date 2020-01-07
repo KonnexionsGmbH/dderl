@@ -1,10 +1,11 @@
 -module(odpi_adapter).
 
+% all the valid type specifiers for parameterized binds
 -define(CLM_TYPES, [
-{'INTEGER',       undefined},
-{'STRING',        undefined},
-{'FLOAT',         undefined},
-{'TIMESTAMP',     undefined}
+'INTEGER',
+'STRING',
+'FLOAT',
+'TIMESTAMP'
 ]).
 
 
@@ -30,7 +31,7 @@
 -define(D2T(__B), gen_adapter:decrypt_to_term(__B)).
 
 bind_arg_types() ->
-    [atom_to_binary(T,utf8) || {T,_} <- ?CLM_TYPES].
+    [atom_to_binary(T,utf8) || T <- ?CLM_TYPES].
 
 -define(TRACE_FUNCTION_CALLS, '_').
 -ifdef(TRACE_FUNCTION_CALLS).
