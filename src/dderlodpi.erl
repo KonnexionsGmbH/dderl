@@ -380,7 +380,6 @@ bind_vars(Conn, Stmt, BindsMeta)->
 
 execute_with_binds(#odpi_conn{context = _Ctx, connection = _Conn, node = Node}, Stmt, BindVars, Binds) ->
     ?TR,
-    io:format("Binding the binds ~p~n", Binds),
     [   
         begin
         % turn BindTuple into a list for the next list comprehension to work
@@ -389,14 +388,10 @@ execute_with_binds(#odpi_conn{context = _Ctx, connection = _Conn, node = Node}, 
             is_tuple(BindTuple) -> tuple_to_list(BindTuple); % a tuple: turn it into a list
             true -> [BindTuple] % something else: wrap it into a list
         end,
-        io:format("Bindlist ~p~n", BindList ),
-        io:format("Bindvars ~p~n", BindVars ),
         [   begin
-            io:format("Vartype ~p Bind ~p~n", [VarType, Bind]),
             dpi:safe(Node, fun() ->
                 case VarType of 
                     'DPI_NATIVE_TYPE_INT64' ->
-                        io:format("Doing the INTelligent thing ~p~n", [Bind]),
                         % since everything is a binary now, even the ints need to be converted first
                         ok = dpi:data_setInt64(Data, list_to_integer(binary_to_list(Bind)));
                     'DPI_NATIVE_TYPE_DOUBLE' ->
