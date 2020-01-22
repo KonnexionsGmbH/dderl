@@ -5,7 +5,8 @@
 'INTEGER',
 'STRING',
 'FLOAT',
-'TIMESTAMP'
+'TIMESTAMP',
+'BLOB'
 ]).
 
 

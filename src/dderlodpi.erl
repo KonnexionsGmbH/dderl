@@ -359,6 +359,7 @@ bindTypeMapping(OraType)->
         'STRING' -> { 'DPI_ORACLE_TYPE_CHAR', 'DPI_NATIVE_TYPE_BYTES' };
         'FLOAT' -> { 'DPI_ORACLE_TYPE_NUMBER', 'DPI_NATIVE_TYPE_DOUBLE' };
         'TIMESTAMP' -> { 'DPI_ORACLE_TYPE_DATE', 'DPI_NATIVE_TYPE_TIMESTAMP' };
+        'BLOB' -> { 'DPI_ORACLE_TYPE_BLOB', 'DPI_NATIVE_TYPE_LOB' };
         Else ->       { error, {"Unknown Type", Else}}
     end.
 
@@ -378,7 +379,7 @@ bind_vars(Conn, Stmt, BindsMeta)->
     end || {BindName, _Direction, BindType} <- BindsMeta].
  
 
-execute_with_binds(#odpi_conn{context = _Ctx, connection = _Conn, node = Node}, Stmt, BindVars, Binds) ->
+execute_with_binds(#odpi_conn{context = _Ctx, connection = Conn, node = Node}, Stmt, BindVars, Binds) ->
     ?TR,
     [   
         begin
@@ -399,11 +400,17 @@ execute_with_binds(#odpi_conn{context = _Ctx, connection = _Conn, node = Node}, 
                         ok = dpi:data_setDouble(Data, list_to_float(binary_to_list(Bind)));
                     'DPI_NATIVE_TYPE_BYTES' ->
                         ok = dpi:var_setFromBytes(Var, 0, Bind);
-                        %% TODO: timestamp, etc;
                     'DPI_NATIVE_TYPE_TIMESTAMP' ->
                         {{Y,M,D},{Hh,Mm,Ss}} = imem_datatype:io_to_datetime(Bind), % extract values out of timestamp binary
                         ok = dpi:data_setTimestamp(Data, Y, M, D, Hh, Mm, Ss, 0, 0, 0); % fsecond and timezone hour/minute offset not supported, so they are set to 0
+                    'DPI_NATIVE_TYPE_LOB' ->
+                        io:format("LOBotomy ~p~n", [Bind]),
+                        LOB = dpi:conn_newTempLob(Conn, 'DPI_ORACLE_TYPE_BLOB'),
+                        dpi:lob_setFromBytes(LOB, Bind),
+                        ok = dpi:var_setFromLob(Var, 0, LOB),
+                        ok = dpi:lob_release(LOB);
                     Else -> io:format("Error! Unsupported bind type ~p~n", [Else])
+                %% TODO: find out what other types are needed and implement those
                 end
              end)
         end
@@ -1151,12 +1158,17 @@ get_rows_prepare(Conn, Stmt, NRows, Acc)->
 
     VarsDatas = [
             begin
+                io:format("taipuuuu ~p~n", [NativeType]),
                 case NativeType of 'DPI_NATIVE_TYPE_DOUBLE' ->  % if the type is a double, make a variable for it, but say that the native type is bytes
                         % if stmt_getQueryValue() is used to get the values, then they will have their "correct" type. But doubles need to be
                         % fetched as a binary in order to avoid a rounding error that would occur if they were transformed from their internal decimal
                         % representation to double. Therefore, stmt_getQueryValue() can't be used for this, so a variable needs to be made because
                         % the data has to be fetched using define so the value goes into the data and then retrieving the values from the data
                         #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_BYTES', 100, 0, false, false, null),
+                        ok = dpi:stmt_define(Stmt, Col, Var),    %% results will be fetched to the vars and go into the data
+                        {Var, Datas}; % put the variable and its data list into a tuple
+                    'DPI_NATIVE_TYPE_LOB' ->
+                        #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_LOB', 100, 0, false, false, null),
                         ok = dpi:stmt_define(Stmt, Col, Var),    %% results will be fetched to the vars and go into the data
                         {Var, Datas}; % put the variable and its data list into a tuple
                     _else -> noVariable % when no variable needs to be made for the type, just put an atom signlizing that no variable was made and stmt_getQueryValue() can be used to get the values
@@ -1179,8 +1191,10 @@ get_rows(Conn, Stmt, NRows, Acc, VarsDatas) ->
     ?TR,
     case dpi:stmt_fetch(Stmt) of % try to fetch a row
         #{found := true} -> % got a row: get the values in that row and then do the recursive call to try to get another row
+    io:format("found: YES~n"),
             get_rows(Conn, Stmt, NRows -1, [get_column_values(Conn, Stmt, 1, VarsDatas, length(Acc)+1) | Acc], VarsDatas); % recursive call
         #{found := false} -> % no more rows: that was all of them
+    io:format("found: NOPE~n"),
             {lists:reverse(Acc), true} % reverse the list so it's in the right order again after it was pieced together the other way around
     end.
 
