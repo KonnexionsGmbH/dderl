@@ -6,7 +6,8 @@
 'STRING',
 'FLOAT',
 'TIMESTAMP',
-'BLOB'
+'BLOB',
+'CLOB'
 ]).
 
 

@@ -360,6 +360,7 @@ bindTypeMapping(OraType)->
         'FLOAT' -> { 'DPI_ORACLE_TYPE_NUMBER', 'DPI_NATIVE_TYPE_DOUBLE' };
         'TIMESTAMP' -> { 'DPI_ORACLE_TYPE_DATE', 'DPI_NATIVE_TYPE_TIMESTAMP' };
         'BLOB' -> { 'DPI_ORACLE_TYPE_BLOB', 'DPI_NATIVE_TYPE_LOB' };
+        'CLOB' -> { 'DPI_ORACLE_TYPE_CLOB', 'DPI_NATIVE_TYPE_LOB' };
         Else ->       { error, {"Unknown Type", Else}}
     end.
 
@@ -375,7 +376,7 @@ bind_vars(Conn, Stmt, BindsMeta)->
         
         {VarReturned, FirstData}
         end)),
-        {Var, DpiNative}
+        {Var, DpiNative, BindType}
     end || {BindName, _Direction, BindType} <- BindsMeta].
  
 
@@ -391,22 +392,31 @@ execute_with_binds(#odpi_conn{context = _Ctx, connection = Conn, node = Node}, S
         end,
         [   begin
             dpi:safe(Node, fun() ->
-                case VarType of 
-                    'DPI_NATIVE_TYPE_INT64' ->
+                case BindType of 
+                    'INTEGER' ->
                         % since everything is a binary now, even the ints need to be converted first
                         ok = dpi:data_setInt64(Data, list_to_integer(binary_to_list(Bind)));
-                    'DPI_NATIVE_TYPE_DOUBLE' ->
+                    'FLOAT' ->
                         % doubles are handled as binaries now to avoid precision loss, so the double that is to be inserted has to be turned back from binary to double here
                         ok = dpi:data_setDouble(Data, list_to_float(binary_to_list(Bind)));
-                    'DPI_NATIVE_TYPE_BYTES' ->
+                    'STRING' ->
                         ok = dpi:var_setFromBytes(Var, 0, Bind);
-                    'DPI_NATIVE_TYPE_TIMESTAMP' ->
+                    'TIMESTAMP' ->
                         {{Y,M,D},{Hh,Mm,Ss}} = imem_datatype:io_to_datetime(Bind), % extract values out of timestamp binary
                         ok = dpi:data_setTimestamp(Data, Y, M, D, Hh, Mm, Ss, 0, 0, 0); % fsecond and timezone hour/minute offset not supported, so they are set to 0
-                    'DPI_NATIVE_TYPE_LOB' ->
-                        io:format("LOBotomy ~p~n", [Bind]),
+                    'CLOB' ->
+                        io:format("CLOBotomy CLOB ~p~n", [Bind]),
+                        LOB = dpi:conn_newTempLob(Conn, 'DPI_ORACLE_TYPE_CLOB'),
+                        ok = dpi:lob_setFromBytes(LOB, Bind),
+                        ok = dpi:var_setFromLob(Var, 0, LOB),
+                        ok = dpi:lob_release(LOB);
+                    'BLOB' ->
+                        io:format("BLOBotomy BLOB ~p~n", [Bind]),
                         LOB = dpi:conn_newTempLob(Conn, 'DPI_ORACLE_TYPE_BLOB'),
-                        dpi:lob_setFromBytes(LOB, Bind),
+                        io:format("LOBotomy pass ~p~n", [LOB]),
+                        Bind2 = (catch imem_datatype:io_to_binary(Bind, byte_size(Bind)/2)),
+                        io:format("gear 2nd ~p~n", [Bind2]),
+                        ok = dpi:lob_setFromBytes(LOB, Bind2),
                         ok = dpi:var_setFromLob(Var, 0, LOB),
                         ok = dpi:lob_release(LOB);
                     Else -> io:format("Error! Unsupported bind type ~p~n", [Else])
@@ -414,7 +424,7 @@ execute_with_binds(#odpi_conn{context = _Ctx, connection = Conn, node = Node}, S
                 end
              end)
         end
-        || {Bind, {{Var, Data}, VarType}} <- lists:zip(BindList, BindVars)
+        || {Bind, {{Var, Data}, _VarType, BindType}} <- lists:zip(BindList, BindVars)
         ] end
     || BindTuple <- Binds],
     Cols = dpi:safe(Node, fun() ->
@@ -1170,7 +1180,7 @@ get_rows_prepare(Conn, Stmt, NRows, Acc)->
                     'DPI_NATIVE_TYPE_LOB' ->
                         #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_LOB', 100, 0, false, false, null),
                         ok = dpi:stmt_define(Stmt, Col, Var),    %% results will be fetched to the vars and go into the data
-                        {Var, Datas}; % put the variable and its data list into a tuple
+                        {Var, Datas, OraType}; % put the variable and its data list into a tuple
                     _else -> noVariable % when no variable needs to be made for the type, just put an atom signlizing that no variable was made and stmt_getQueryValue() can be used to get the values
                 end
             end
@@ -1203,9 +1213,14 @@ get_column_values(_Conn, _Stmt, ColIdx, VarsDatas, _RowIndex) when ColIdx > leng
 get_column_values(Conn, Stmt, ColIdx, VarsDatas, RowIndex) ->
     ?TR(2),
     case lists:nth(ColIdx, VarsDatas) of % get the entry that is either a {Var, Datas} tuple or noVariable if no variable was made for this column
-        {_Var, Datas} -> % if a variable was made for this column: the value was fetched into the variable's data object, so get it from there
+        {_Var, Datas, OraType} -> % if a variable was made for this column: the value was fetched into the variable's data object, so get it from there
             Value = dpi:data_get(lists:nth(RowIndex, Datas)), % get the value out of that data variable
-            [Value | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas, RowIndex)]; % recursive call
+        io:format("Value ~p Oratype ~p~n", [Value, OraType]),
+            ValueFixed = case OraType of % depending on the ora type, the value might have to be changed into a different format so it displays properly
+                'DPI_ORACLE_TYPE_BLOB' -> list_to_binary(lists:flatten([io_lib:format("~2.16.0B", [X]) || X <- binary_to_list(Value)])); % turn binary to hex string
+                Else -> Else end, % the value is already in the correct format for most types, so do nothing
+
+            [ValueFixed | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas, RowIndex)]; % recursive call
         noVariable -> % if no variable has been made then that means that the value can be fetched with stmt_getQueryValue()
             #{data := Data} = dpi:stmt_getQueryValue(Stmt, ColIdx), % get the value 
             Value = dpi:data_get(Data), % take the value from this freshly made data
