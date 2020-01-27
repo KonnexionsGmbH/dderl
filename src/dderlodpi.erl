@@ -1218,7 +1218,7 @@ get_column_values(Conn, Stmt, ColIdx, VarsDatas, RowIndex) ->
         io:format("Value ~p Oratype ~p~n", [Value, OraType]),
             ValueFixed = case OraType of % depending on the ora type, the value might have to be changed into a different format so it displays properly
                 'DPI_ORACLE_TYPE_BLOB' -> list_to_binary(lists:flatten([io_lib:format("~2.16.0B", [X]) || X <- binary_to_list(Value)])); % turn binary to hex string
-                Else -> Else end, % the value is already in the correct format for most types, so do nothing
+                _Else -> Value end, % the value is already in the correct format for most types, so do nothing
 
             [ValueFixed | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas, RowIndex)]; % recursive call
         noVariable -> % if no variable has been made then that means that the value can be fetched with stmt_getQueryValue()
