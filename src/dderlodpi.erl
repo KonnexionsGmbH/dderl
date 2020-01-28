@@ -1176,7 +1176,7 @@ get_rows_prepare(Conn, Stmt, NRows, Acc)->
                         % the data has to be fetched using define so the value goes into the data and then retrieving the values from the data
                         #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_BYTES', 100, 0, false, false, null),
                         ok = dpi:stmt_define(Stmt, Col, Var),    %% results will be fetched to the vars and go into the data
-                        {Var, Datas}; % put the variable and its data list into a tuple
+                        {Var, Datas, OraType}; % put the variable and its data list into a tuple
                     'DPI_NATIVE_TYPE_LOB' ->
                         #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_LOB', 100, 0, false, false, null),
                         ok = dpi:stmt_define(Stmt, Col, Var),    %% results will be fetched to the vars and go into the data
