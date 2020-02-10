@@ -382,13 +382,12 @@ bind_vars(Conn, Stmt, BindsMeta)->
 
 execute_with_binds(#odpi_conn{context = _Ctx, connection = Conn, node = Node}, Stmt, BindVars, Binds) ->
     ?TR,
-    [   
-        begin
+    
         % turn BindTuple into a list for the next list comprehension to work
         BindList = if
-            is_list(BindTuple) -> BindTuple; % already a list: leave it as it is
-            is_tuple(BindTuple) -> tuple_to_list(BindTuple); % a tuple: turn it into a list
-            true -> [BindTuple] % something else: wrap it into a list
+            is_list(Binds) -> Binds; % already a list: leave it as it is
+            is_tuple(Binds) -> tuple_to_list(Binds); % a tuple: turn it into a list
+            true -> [Binds] % something else: wrap it into a list
         end,
         [   begin
             dpi:safe(Node, fun() ->
@@ -405,17 +404,13 @@ execute_with_binds(#odpi_conn{context = _Ctx, connection = Conn, node = Node}, S
                         {{Y,M,D},{Hh,Mm,Ss}} = imem_datatype:io_to_datetime(Bind), % extract values out of timestamp binary
                         ok = dpi:data_setTimestamp(Data, Y, M, D, Hh, Mm, Ss, 0, 0, 0); % fsecond and timezone hour/minute offset not supported, so they are set to 0
                     'CLOB' ->
-                        io:format("CLOBotomy CLOB ~p~n", [Bind]),
                         LOB = dpi:conn_newTempLob(Conn, 'DPI_ORACLE_TYPE_CLOB'),
                         ok = dpi:lob_setFromBytes(LOB, Bind),
                         ok = dpi:var_setFromLob(Var, 0, LOB),
                         ok = dpi:lob_release(LOB);
                     'BLOB' ->
-                        io:format("BLOBotomy BLOB ~p~n", [Bind]),
                         LOB = dpi:conn_newTempLob(Conn, 'DPI_ORACLE_TYPE_BLOB'),
-                        io:format("LOBotomy pass ~p~n", [LOB]),
                         Bind2 = (catch imem_datatype:io_to_binary(Bind, byte_size(Bind)/2)),
-                        io:format("gear 2nd ~p~n", [Bind2]),
                         ok = dpi:lob_setFromBytes(LOB, Bind2),
                         ok = dpi:var_setFromLob(Var, 0, LOB),
                         ok = dpi:lob_release(LOB);
@@ -425,8 +420,7 @@ execute_with_binds(#odpi_conn{context = _Ctx, connection = Conn, node = Node}, S
              end)
         end
         || {Bind, {{Var, Data}, _VarType, BindType}} <- lists:zip(BindList, BindVars)
-        ] end
-    || BindTuple <- Binds],
+        ],
     Cols = dpi:safe(Node, fun() ->
         dpi:stmt_execute(Stmt, [])
     end),
@@ -1168,7 +1162,6 @@ get_rows_prepare(Conn, Stmt, NRows, Acc)->
 
     VarsDatas = [
             begin
-                io:format("taipuuuu ~p~n", [NativeType]),
                 case NativeType of 'DPI_NATIVE_TYPE_DOUBLE' ->  % if the type is a double, make a variable for it, but say that the native type is bytes
                         % if stmt_getQueryValue() is used to get the values, then they will have their "correct" type. But doubles need to be
                         % fetched as a binary in order to avoid a rounding error that would occur if they were transformed from their internal decimal
@@ -1201,10 +1194,8 @@ get_rows(Conn, Stmt, NRows, Acc, VarsDatas) ->
     ?TR,
     case dpi:stmt_fetch(Stmt) of % try to fetch a row
         #{found := true} -> % got a row: get the values in that row and then do the recursive call to try to get another row
-    io:format("found: YES~n"),
             get_rows(Conn, Stmt, NRows -1, [get_column_values(Conn, Stmt, 1, VarsDatas, length(Acc)+1) | Acc], VarsDatas); % recursive call
         #{found := false} -> % no more rows: that was all of them
-    io:format("found: NOPE~n"),
             {lists:reverse(Acc), true} % reverse the list so it's in the right order again after it was pieced together the other way around
     end.
 
@@ -1215,7 +1206,6 @@ get_column_values(Conn, Stmt, ColIdx, VarsDatas, RowIndex) ->
     case lists:nth(ColIdx, VarsDatas) of % get the entry that is either a {Var, Datas} tuple or noVariable if no variable was made for this column
         {_Var, Datas, OraType} -> % if a variable was made for this column: the value was fetched into the variable's data object, so get it from there
             Value = dpi:data_get(lists:nth(RowIndex, Datas)), % get the value out of that data variable
-        io:format("Value ~p Oratype ~p~n", [Value, OraType]),
             ValueFixed = case OraType of % depending on the ora type, the value might have to be changed into a different format so it displays properly
                 'DPI_ORACLE_TYPE_BLOB' -> list_to_binary(lists:flatten([io_lib:format("~2.16.0B", [X]) || X <- binary_to_list(Value)])); % turn binary to hex string
                 _Else -> Value end, % the value is already in the correct format for most types, so do nothing
