@@ -525,10 +525,8 @@ process_cmd({[<<"restore_table">>], ReqBody}, _Sess, _UserId, From, #priv{connec
 
 % gui button events
 process_cmd({[<<"button">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
-    ?TR(s),
-    io:format("From: ~p Priv: ~p~n", [From, Priv]),
+    ?TR(s)
     [{<<"button">>,BodyJson}] = ReqBody,
-    io:format("BodyJson: ~p~n", [BodyJson]),
     FsmStmt = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     case proplists:get_value(<<"btn">>, BodyJson, <<">">>) of
         <<"restart">> ->
