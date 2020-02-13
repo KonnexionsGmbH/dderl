@@ -35,7 +35,7 @@
 bind_arg_types() ->
     [atom_to_binary(T,utf8) || T <- ?CLM_TYPES].
 
--define(TRACE_FUNCTION_CALLS, '_').
+%-define(TRACE_FUNCTION_CALLS, '_').
 -ifdef(TRACE_FUNCTION_CALLS).
     -define (TR, io:format("adapter call ~p/~p~n", [?FUNCTION_NAME, ?FUNCTION_ARITY])).
     -define (TR(__V), io:format("adapter call ~p/~p (~p)~n", [?FUNCTION_NAME, ?FUNCTION_ARITY, __V])).

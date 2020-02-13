@@ -3,7 +3,7 @@
 
 -include("dderlodpi.hrl").
 
--define(TRACE_FUNCTION_CALLS, '_').
+%-define(TRACE_FUNCTION_CALLS, '_').
 -ifdef(TRACE_FUNCTION_CALLS).
     -define (TR, io:format("dderlodpi call ~p/~p~n", [?FUNCTION_NAME, ?FUNCTION_ARITY])).
     -define (TR(__V), io:format("dderlodpi call ~p/~p (~p)~n", [?FUNCTION_NAME, ?FUNCTION_ARITY, __V])).
