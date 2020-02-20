@@ -26,7 +26,10 @@
 -define(NoKey,{}).      %% placeholder for unavailable key tuple within RowKey tuple
 
 -define(TAIL_TIMEOUT, 10000). %% 10 Seconds.
--define(BUFFER_WAIT_TIMEOUT, 1000). % 1 Second.
+-define(BUFFER_WAIT_TIMEOUT_RAW, 5000). % 5 Seconds query hold back max.
+-define(BUFFER_WAIT_TIMEOUT_IND, 5000). % 5 Seconds query hold back max.
+-define(BUFFERS_TO_STACK_RAW, 10).  % 10 * 300 = 3000 rows
+-define(BUFFERS_TO_STACK_IND, 10).  % 10 * 300 = 3000 rows
 
 %% --------------------------------------------------------------------
 %% erlimem_fsm interface
@@ -319,16 +322,16 @@ cache_data({?MODULE, Pid}) ->
     gen_statem:call(Pid, cache_data).
 
 -spec rows({pid(), {_, _}} | {_, _}, {atom(), pid()}) -> ok.
-rows({StmtRef,{error, _} = Error}, {?MODULE, Pid}) ->   % from erlimem/imem_server
-    %?Info("dderl_fsm:rows from ~p ~p", [StmtRef, Error]),
-    gen_statem:cast(Pid, {StmtRef,Error});
-rows({StmtRef,{Rows,Completed}},{?MODULE,Pid}) when is_list(Rows) ->  % from erlimem/imem_server
+rows({StmtRef, {error, Error}}, {?MODULE, Pid}) ->   % from erlimem/imem_server
+    %?Info("dderl_fsm:rows from ~p ~p", [StmtRef, {error, Error}]),
+    gen_statem:cast(Pid, {StmtRef, {error, Error}});
+rows({StmtRef, {Rows,Completed}}, {?MODULE,Pid}) when is_list(Rows) ->  % from erlimem/imem_server
     %?Info("dderl_fsm:rows from ~p ~p ~p", [StmtRef, length(Rows), Completed]),
     %?Info("dderl_fsm:rows from ~p ~p~n~p", [StmtRef, length(Rows), Rows]),
-    gen_statem:cast(Pid,{rows, {StmtRef,Rows,Completed}});
+    gen_statem:cast(Pid, {rows, {StmtRef,Rows,Completed}});
 rows({Rows,Completed},{?MODULE,Pid}) when is_list(Rows) ->  % from dderloci (single source)
     %?Info("dderl_fsm:rows ~p ~p", [length(Rows), Completed]),
-    gen_statem:cast(Pid,{rows, {self(),Rows,Completed}});
+    gen_statem:cast(Pid, {rows, {self(),Rows,Completed}});
 rows({StmtRef, Error}, {?MODULE, Pid}) ->   % from erlimem/imem_server
     %?Info("dderl_fsm:rows from ~p ~p", [StmtRef, Error]),
     gen_statem:cast(Pid, {StmtRef,{error,Error}});
@@ -1355,9 +1358,11 @@ handle_event({button, <<"rollback">>, ReplyTo}, SN, State0) ->
 handle_event({subscribe, {Topic, Key}, ReplyTo}, SN, State0) ->
     State1 = reply_stack(SN, ReplyTo, State0),
     Result = case write_subscription(Topic, Key, State1) of
-        ok -> <<"ok">>;
+        ok ->
+            ?Info("write_subscription(~p, ~p, ..) succeeded", [Topic, Key]),
+            <<"ok">>;
         {error, Error} ->
-            ?Error("Unable to write subscription row ~p", [Error]),
+            ?Error("write_subscription(~p, ~p, ..) failed with ~p", [Topic, Key, Error]),
             <<"error">>
     end,
     State2 = gui_nop(#gres{state=SN, beep=true, message=Result}, State1),
@@ -1519,8 +1524,8 @@ handle_call(get_query, From, SN, #state{ctx=#ctx{orig_qry=Qry}}=State) ->
 handle_call(get_table_name, From, SN, #state{ctx=#ctx{stmtTables=[TableName|_]}}=State) ->
     ?Debug("get_table_name ~p", [TableName]),
     {next_state, SN, State, [{reply, From, TableName}]};
-handle_call(get_sender_params, From, SN, #state{nav=Nav, tableId=TableId, indexId=IndexId, rowFun=RowFun, ctx=#ctx{rowCols=Columns}} = State) ->
-    SenderParams = {TableId, IndexId, Nav, RowFun, Columns},
+handle_call(get_sender_params, From, SN, #state{nav=Nav, tableId=TableId, indexId=IndexId, rowFun=RowFun, filterSpec=FilterSpec, ctx=#ctx{rowCols=Columns}} = State) ->
+    SenderParams = {TableId, IndexId, Nav, RowFun, Columns, FilterSpec},    
     ?Debug("get_sender_params ~p", [SenderParams]),
     {next_state, SN, State, [{reply, From, SenderParams}]};
 handle_call(get_receiver_params, From, SN, #state{ctx = #ctx{rowCols=Columns, stmtRefs=StmtRefs, update_cursor_prepare_funs=Ucpf, update_cursor_execute_funs=Ucef}} = State) ->
@@ -2386,62 +2391,36 @@ serve_stack(filling, #state{nav=Nav,stack={button,<<">">>,RT},gl=GL,bufBot=BufBo
         undefined -> 0;
         Lft -> erlang:system_time(millisecond) - Lft
     end,
-    case FetchElapsedTime < ?BUFFER_WAIT_TIMEOUT of
-        true ->
-            case Nav of
-                raw when BufBot < GL ->
-                    % delay serving received rows, trying to get a full block for first serve
-                    %?Info("stack serving delayed at ~p elapsed fetch time and ~p rows",[FetchElapsedTime, BufCnt]),
-                    State;
-                ind when IndCnt < GL ->
-                    % delay serving received rows, trying to get a full gui block of sorted data before first serve
-                    %?Info("stack serving delayed at ~p elapsed fetch time and ~p rows",[FetchElapsedTime, BufCnt]),
-                    State;
-                _ ->
-                    %?Info("stack served at ~p elapsed fetch time and ~p rows",[FetchElapsedTime, BufCnt]),
-                    serve_top(filling,State#state{
-                        stack=undefined,replyToFun=RT,lastFetchTime=undefined})
-            end;
-        false ->
-            serve_top(filling,State#state{
-                stack=undefined,replyToFun=RT,lastFetchTime=undefined})
+    case Nav of
+        ind when IndCnt < ?BUFFERS_TO_STACK_IND*GL, FetchElapsedTime < ?BUFFER_WAIT_TIMEOUT_IND ->
+            % delay serving received rows, trying to get a full gui block of sorted data before first serve
+            %?Info("stack serving delayed at ~p elapsed fetch time and ~p rows",[FetchElapsedTime, BufCnt]),
+            State;
+        raw when BufBot < ?BUFFERS_TO_STACK_RAW*GL, FetchElapsedTime < ?BUFFER_WAIT_TIMEOUT_RAW ->
+            % delay serving received rows, trying to get a full block for first serve
+            %?Info("stack serving delayed at ~p elapsed fetch time and ~p rows",[FetchElapsedTime, BufCnt]),
+            State;
+        _ ->
+            serve_top(filling,State#state{stack=undefined,replyToFun=RT,lastFetchTime=undefined})
     end;
 serve_stack(filling, #state{nav=Nav,stack={button,<<">">>,RT},gl=GL,bufBot=BufBot,indCnt=IndCnt,lastFetchTime=Lft}=State) ->
     FetchElapsedTime = case Lft of
         undefined -> 0;
         Lft -> erlang:system_time(millisecond) - Lft
     end,
-    case FetchElapsedTime < ?BUFFER_WAIT_TIMEOUT of
-        true ->
-            case Nav of
-                raw when BufBot < GL ->
-                    % delay serving received rows, trying to get a full block for first serve
-                    %?Info("stack serving delayed at ~p elapsed fetch time and ~p rows",[FetchElapsedTime, BufCnt]),
-                    State;
-                ind when IndCnt < GL ->
-                    % delay serving received rows, trying to get a full gui block of sorted data before first serve
-                    %?Info("stack serving delayed at ~p elapsed fetch time and ~p rows",[FetchElapsedTime, BufCnt]),
-                    State;
-                _ ->
-                    %?Info("stack served at ~p elapsed fetch time and ~p rows",[FetchElapsedTime, BufCnt]),
-                    serve_bot(filling, <<>>, State#state{
-                        stack=undefined,replyToFun=RT,lastFetchTime=undefined})
-            end;
-        false ->
-            serve_bot(filling, <<>>, State#state{
-                        stack=undefined,replyToFun=RT,lastFetchTime=undefined})
+    case Nav of
+        raw when BufBot < GL, FetchElapsedTime < ?BUFFER_WAIT_TIMEOUT_RAW ->
+            % delay serving received rows, trying to get a full block for first serve
+            %?Info("stack serving delayed at ~p elapsed fetch time and ~p rows",[FetchElapsedTime, BufCnt]),
+            State;
+        ind when IndCnt < GL, FetchElapsedTime < ?BUFFER_WAIT_TIMEOUT_IND ->
+            % delay serving received rows, trying to get a full gui block of sorted data before first serve
+            %?Info("stack serving delayed at ~p elapsed fetch time and ~p rows",[FetchElapsedTime, BufCnt]),
+            State;
+        _ ->
+            %?Info("stack served at ~p elapsed fetch time and ~p rows",[FetchElapsedTime, BufCnt]),
+            serve_bot(filling, <<>>, State#state{stack=undefined,replyToFun=RT,lastFetchTime=undefined})
     end;
-% serve_stack(SN, #state{stack={button,<<">">>,RT},bl=BL,bufBot=BufBot,guiBot=GuiBot}=State0) ->
-%     KeysBefore = keys_before(BufBot,BL-1,State0),
-%     IsMember = KeysBefore == [] orelse lists:member(GuiBot, keys_before(BufBot,BL-1,State0)),
-%     case IsMember of
-%         false ->    % deferred forward can be executed now
-%                     ?NoDbLog(debug, [], "~p stack exec ~p", [SN,<<">">>]),
-%                     %?Info("gui_append at ~p",[BufBot]),
-%                     gui_append(#gres{state=SN},State0#state{tailLock=true,stack=undefined,replyToFun=RT});
-%         true ->     %?Info("skip serve at ~p",[BufBot]),
-%                     State0#state{tailLock=true}  % buffer has not grown by 1 full block yet, keep the stack
-%     end;
 serve_stack(SN, #state{stack={button,<<"<">>,RT},bl=BL,bufTop=BufTop,guiTop=GuiTop}=State0) ->
     if
         (BufTop == GuiTop) -> State0#state{tailLock=true}; % No new data, keep the stack
@@ -3073,7 +3052,8 @@ write_subscription(Topic, Key, #state{ctx = #ctx{update_cursor_prepare_funs=Ucpf
     SubsKey = imem_json:encode([<<"register">>, <<"focus">>, [atom_to_binary(node(), utf8), list_to_binary(pid_to_list(self()))]]),
     Value = imem_json:encode([[Topic, Key]]),
     Hash = <<>>,
-    SubscriptionRow = [[undefined, ins, {{},{}}, SubsKey, Value, Hash]],
+    %% TODO: Use an imem function to create default meta tuple instead of {0,node()}
+    SubscriptionRow = [[undefined, ins, {{0,node()},{}}, SubsKey, Value, Hash]],
     Results = [F(SubscriptionRow) || F <- Ucpf],
     case lists:usort(Results) of
         [ok] ->
