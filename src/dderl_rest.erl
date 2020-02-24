@@ -27,17 +27,17 @@
 -ifdef(TESTwwe).
 f().
 {ok, S} = erlimem:open(local_sec, imem_meta:schema()).
-S:auth(dderl_rest, undefined, {pwdmd5, {<<"system">>, erlang:md5("change_on_install")}}).
-S:run_cmd(login,[]).
-S:run_cmd(admin_exec, [imem_seco, account_id, []]).
+erlimem_session:auth(S, dderl_rest, undefined, {pwdmd5, {<<"system">>, erlang:md5("change_on_install")}}).
+erlimem_session:run_cmd(S, login,[]).
+erlimem_session:run_cmd(S, admin_exec, [imem_seco, account_id, []]).
 
 dderl_dal:get_view(S, "Remote Tables", imem, system).
 
 Sql = "select ddView.id id, ddView.name name, command from ddView, ddCmd where adapters = to_list('[imem]') and ddView.cmd = ddCmd.id".
-S:exec(Sql, 1000, []).
+erlimem_session:exec(S, Sql, 1000, []).
 
-S:run_cmd(logout, []).
-S:close().
+erlimem_session:run_cmd(S, logout, []).
+erlimem_session:close(S).
 
 -endif.
 
@@ -73,16 +73,16 @@ init([]) ->
         init_interface(),
         {ok, #state{}}
     catch
-        _:Error ->
-            {stop, {Error, erlang:get_stacktrace()}}
+        _:Error:Stacktrace ->
+            {stop, {Error, Stacktrace}}
     end.
 
 handle_call({login, User, Password}, _From, State) ->
     {reply,
      try
          {ok, ErlimemSession} = erlimem:open(local_sec, imem_meta:schema()),
-         ErlimemSession:auth(?MODULE, undefined, {pwdmd5, {User, Password}}),
-         ErlimemSession:run_cmd(login,[]),
+         erlimem_session:auth(ErlimemSession, ?MODULE, undefined, {pwdmd5, {User, Password}}),
+         erlimem_session:run_cmd(ErlimemSession, login,[]),
          {ok, ErlimemSession}
      catch
          _:Error -> {error, Error}
@@ -97,7 +97,7 @@ handle_cast(#{reply := RespPid, cmd := views,
     case if is_integer(View) ->
                 dderl_dal:get_view(Connection, View);
             true ->
-                UserId = Connection:run_cmd(
+                UserId = erlimem_session:run_cmd(Connection,
                            admin_exec, [imem_seco, account_id, []]),
                 dderl_dal:get_view(Connection, View, imem, UserId)
          end of
@@ -120,7 +120,7 @@ handle_cast(#{cmd := views, params := #{stmt := _}} = Req, State) ->
 handle_cast(#{reply := RespPid, cmd := sql, params := #{stmt := StmtRef},
               opts := #{session := Connection}},
             #state{stmts = Stmts} = State) ->
-    ok = Connection:run_cmd(fetch_recs_async, [[], StmtRef]),
+    ok = erlimem_session:run_cmd(Connection, fetch_recs_async, [[], StmtRef]),
     #{stmtResult := StmtRslt} = maps:get(StmtRef, Stmts),
     {noreply,
      State#state{
@@ -132,14 +132,14 @@ handle_cast(#{reply := RespPid, cmd := sql, params := #{stmt := StmtRef},
 handle_cast(#{reply := RespPid, cmd := sql,
               params := #{sql := Sql, row_count := RowCount} = Params,
               opts := #{session := Connection}}, State) ->
-    case Connection:exec(Sql, RowCount, maps:get(binds, Params, [])) of
+    case erlimem_session:exec(Connection, Sql, RowCount, maps:get(binds, Params, [])) of
         {error, Exception} ->
             RespPid ! {reply, {400, #{<<"x-irest-conn">> => Connection},
                                list_to_binary(io_lib:format("~p", [Exception]))}},
             {noreply, State};
         {ok, #stmtResults{rowCols=RowCols, stmtRefs=StmtRefs} = StmtRslt} ->
-            Connection:add_stmt_fsm(StmtRefs, {?MODULE, StmtRefs, self()}),
-            [Connection:run_cmd(fetch_recs_async, [[], SR]) || SR <- StmtRefs],
+            erlimem_session:add_stmt_fsm(Connection, StmtRefs, {?MODULE, StmtRefs, self()}),
+            [erlimem_session:run_cmd(Connection, fetch_recs_async, [[], SR]) || SR <- StmtRefs],
             ClmsJson = [maps:from_list(C)
                         || C <- gen_adapter:build_column_json(lists:reverse(RowCols))],
             {noreply,

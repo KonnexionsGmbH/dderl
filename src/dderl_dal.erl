@@ -72,15 +72,15 @@ add_connect(Sess, #ddConn{} = Conn) -> gen_server:call(?MODULE, {add_connect, Se
 
 -spec del_conn({atom(), pid()}, ddEntityId(), integer()) -> ok | no_permission.
 del_conn(Sess, UserId, ConId) ->
-    HasAll = (Sess:run_cmd(have_permission, [[?MANAGE_CONNS]]) == true),
+    HasAll = (erlimem_session:run_cmd(Sess, have_permission, [[?MANAGE_CONNS]]) == true),
     if HasAll ->
-        ok = Sess:run_cmd(delete, [ddConn, ConId]),
+        ok = erlimem_session:run_cmd(Sess, delete, [ddConn, ConId]),
         ?Info("user ~p deleted connection ~p", [UserId, ConId]),
         ok;
     true ->
-        case Sess:run_cmd(select, [ddConn, [{#ddConn{id=ConId,owner=UserId,_='_'},[],['$_']}]]) of
+        case erlimem_session:run_cmd(Sess, select, [ddConn, [{#ddConn{id=ConId,owner=UserId,_='_'},[],['$_']}]]) of
             {[_|_], true} ->
-                ok = Sess:run_cmd(delete, [ddConn, ConId]),
+                ok = erlimem_session:run_cmd(Sess, delete, [ddConn, ConId]),
                 ?Info("user ~p deleted connection ~p", [UserId, ConId]),
                 ok;
             _ ->
@@ -111,7 +111,7 @@ add_command(Sess, Owner, Adapter, Name, Cmd, Conn, Opts) ->
                  , command   = Cmd
                  , conns     = Conn
                  , opts      = Opts},
-    Sess:run_cmd(insert, [ddCmd, NewCmd]),
+    erlimem_session:run_cmd(Sess, insert, [ddCmd, NewCmd]),
     ?Debug("add_command inserted ~p", [NewCmd]),
     Id.
 
@@ -119,7 +119,7 @@ add_command(Sess, Owner, Adapter, Name, Cmd, Conn, Opts) ->
 update_command(undefined, Id, Owner, Name, Sql, Opts) -> gen_server:call(?MODULE, {update_command, Id, Owner, Name, Sql, Opts});
 update_command(Sess, Id, Owner, Name, Sql, Opts) ->
     ?Debug("update command ~p replacing id ~p", [Name, Id]),
-    {[Cmd], true} = Sess:run_cmd(select, [ddCmd, [{#ddCmd{id = Id, _='_'}, [], ['$_']}]]),
+    {[Cmd], true} = erlimem_session:run_cmd(Sess, select, [ddCmd, [{#ddCmd{id = Id, _='_'}, [], ['$_']}]]),
     NewCmd = #ddCmd { id     = Id
                  , name      = Name
                  , owner     = Owner
@@ -127,14 +127,14 @@ update_command(Sess, Id, Owner, Name, Sql, Opts) ->
                  , command   = Sql
                  , conns     = Cmd#ddCmd.conns
                  , opts      = Opts},
-    Sess:run_cmd(write, [ddCmd, NewCmd]),
+    erlimem_session:run_cmd(Sess, write, [ddCmd, NewCmd]),
     Id.
 
 -spec update_command({atom(), pid()} | undefined, ddEntityId(), ddEntityId(), binary(), binary(), list(), term()) -> ddEntityId().
 update_command(undefined, Id, Owner, Name, Sql, Conns, Opts) -> gen_server:call(?MODULE, {update_command, Id, Owner, Name, Sql, Conns, Opts});
 update_command(Sess, Id, Owner, Name, Sql, Conns, Opts) ->
     ?Debug("update command ~p replacing id ~p", [Name, Id]),
-    {[Cmd], true} = Sess:run_cmd(select, [ddCmd, [{#ddCmd{id = Id, _='_'}, [], ['$_']}]]),
+    {[Cmd], true} = erlimem_session:run_cmd(Sess, select, [ddCmd, [{#ddCmd{id = Id, _='_'}, [], ['$_']}]]),
     NewCmd = #ddCmd { id     = Id
                  , name      = Name
                  , owner     = Owner
@@ -142,7 +142,7 @@ update_command(Sess, Id, Owner, Name, Sql, Conns, Opts) ->
                  , command   = Sql
                  , conns     = Conns
                  , opts      = Opts},
-    Sess:run_cmd(write, [ddCmd, NewCmd]),
+    erlimem_session:run_cmd(Sess, write, [ddCmd, NewCmd]),
     Id.
 
 -spec user_name(atom() | integer() | binary()) -> binary().
@@ -156,7 +156,7 @@ user_name(Id) when is_integer(Id) ->
 add_view(undefined, Owner, Name, CmdId, ViewsState) ->
     gen_server:call(?MODULE, {add_view, Owner, Name, CmdId, ViewsState});
 add_view(Sess, Owner, Name, CmdId, ViewsState) ->
-    Id = case Sess:run_cmd(select, [ddView, [{#ddView{name=Name, cmd = CmdId, id='$1', owner=Owner, _='_'}
+    Id = case erlimem_session:run_cmd(Sess, select, [ddView, [{#ddView{name=Name, cmd = CmdId, id='$1', owner=Owner, _='_'}
                                             , []
                                             , ['$1']}]]) of
         {[Id0|_], true} ->
@@ -172,7 +172,7 @@ add_view(Sess, Owner, Name, CmdId, ViewsState) ->
                      , owner    = Owner
                      , cmd      = CmdId
                      , state    = ViewsState},
-    Sess:run_cmd(write, [ddView, NewView]), %% TODO: Validate result...
+    erlimem_session:run_cmd(Sess, write, [ddView, NewView]), %% TODO: Validate result...
     ?Debug("add_view written ~p", [NewView]),
     Id.
 
@@ -180,7 +180,7 @@ add_view(Sess, Owner, Name, CmdId, ViewsState) ->
 update_view(Sess, ViewId, ViewsState, Qry) when is_integer(ViewId) ->
     %% TODO: At the moment the command and the view always have the same owner.
     %%       Check for authorization.
-    case Sess:run_cmd(select, [ddView, [{#ddView{id=ViewId, _='_'}, [], ['$_']}]]) of
+    case erlimem_session:run_cmd(Sess, select, [ddView, [{#ddView{id=ViewId, _='_'}, [], ['$_']}]]) of
         {[OldView], true} ->
             ?Debug("The oldView ~p and the session ~p", [OldView, Sess]),
             Cmd = get_command(Sess, OldView#ddView.cmd),
@@ -201,7 +201,7 @@ update_view(Sess, ViewId, ViewsState, Qry) when is_integer(ViewId) ->
                 #viewstate{} ->
                     NewView = OldView#ddView{state=ViewsState}
             end,
-            Sess:run_cmd(write, [ddView, NewView]),
+            erlimem_session:run_cmd(Sess, write, [ddView, NewView]),
             ?Debug("update_view written ~p", [NewView]),
             ViewId;
         _ ->
@@ -213,12 +213,12 @@ update_view(Sess, ViewId, ViewsState, Qry) when is_integer(ViewId) ->
 rename_view(Sess, ViewId, ViewName) ->
     %% TODO: At the moment the command and the view always have the same owner.
     %%       Check for authorization.
-    case Sess:run_cmd(select, [ddView, [{#ddView{id=ViewId, _='_'}, [], ['$_']}]]) of
+    case erlimem_session:run_cmd(Sess, select, [ddView, [{#ddView{id=ViewId, _='_'}, [], ['$_']}]]) of
         {[OldView], true} ->
-            case Sess:run_cmd(select, [ddCmd, [{#ddCmd{id=OldView#ddView.cmd, _='_'}, [], ['$_']}]]) of
+            case erlimem_session:run_cmd(Sess, select, [ddCmd, [{#ddCmd{id=OldView#ddView.cmd, _='_'}, [], ['$_']}]]) of
                 {[OldCmd], true} ->
-                    Sess:run_cmd(write, [ddCmd, OldCmd#ddCmd{name = ViewName}]),
-                    Sess:run_cmd(write, [ddView, OldView#ddView{name = ViewName}]),
+                    erlimem_session:run_cmd(Sess, write, [ddCmd, OldCmd#ddCmd{name = ViewName}]),
+                    erlimem_session:run_cmd(Sess, write, [ddView, OldView#ddView{name = ViewName}]),
                     ok;
                 _ ->
                     ?Error("Unable to get the command to rename ~p", [OldView#ddView.cmd]),
@@ -233,19 +233,19 @@ rename_view(Sess, ViewId, ViewName) ->
 delete_view(Sess, ViewId) ->
     %% TODO: At the moment the command and the view always have the same owner.
     %%       Check for authorization.
-    case Sess:run_cmd(select, [ddView, [{#ddView{id=ViewId, _='_'}, [], ['$_']}]]) of
+    case erlimem_session:run_cmd(Sess, select, [ddView, [{#ddView{id=ViewId, _='_'}, [], ['$_']}]]) of
         {[OldView], true} ->
-            case Sess:run_cmd(select, [ddView, [{#ddView{cmd=OldView#ddView.cmd, _='_'}, [], ['$_']}]]) of
+            case erlimem_session:run_cmd(Sess, select, [ddView, [{#ddView{cmd=OldView#ddView.cmd, _='_'}, [], ['$_']}]]) of
                 {[OldView], true} ->
                     % Only one view with the command, so the command is also deleted
-                    case Sess:run_cmd(select, [ddCmd, [{#ddCmd{id=OldView#ddView.cmd, _='_'}, [], ['$_']}]]) of
+                    case erlimem_session:run_cmd(Sess, select, [ddCmd, [{#ddCmd{id=OldView#ddView.cmd, _='_'}, [], ['$_']}]]) of
                         {[OldCmd], true} ->
-                            ok = Sess:run_cmd(delete, [ddCmd, OldCmd#ddCmd.id]);
+                            ok = erlimem_session:run_cmd(Sess, delete, [ddCmd, OldCmd#ddCmd.id]);
                         _ -> ?Info("No command found to delete ~p", [OldView#ddView.cmd])
                     end;
                 _ -> ok
             end,
-            ok = Sess:run_cmd(delete, [ddView, OldView#ddView.id]),
+            ok = erlimem_session:run_cmd(Sess, delete, [ddView, OldView#ddView.id]),
             ok;
         _ ->
             ?Error("Unable to get the view to delete ~p", [ViewId]),
@@ -301,7 +301,7 @@ get_view(Sess, Name, Adapter, Owner) ->
 -spec save_dashboard({atom(), pid()}, ddEntityId(), integer(), binary(), list()) -> integer() | {error, binary()}.
 save_dashboard(Sess, Owner, -1, Name, Views) ->
     NewId = erlang:phash2(make_ref()),
-    case Sess:run_cmd(select, [ddDash, [{#ddDash{id=NewId, name='$1', _='_'}, [], ['$1']}]]) of
+    case erlimem_session:run_cmd(Sess, select, [ddDash, [{#ddDash{id=NewId, name='$1', _='_'}, [], ['$1']}]]) of
         {[DashName], true} ->
             ?Debug("Save dashboard colision saving the dashboard ~p with id ~p", [DashName, NewId]),
             save_dashboard(Sess, Owner, -1, Name, Views);
@@ -310,7 +310,7 @@ save_dashboard(Sess, Owner, -1, Name, Views) ->
     end;
 save_dashboard(Sess, Owner, DashId, Name, Views) ->
     NewDash = #ddDash{id = DashId, name = Name, owner = Owner, views = Views},
-    Sess:run_cmd(write, [ddDash, NewDash]),
+    erlimem_session:run_cmd(Sess, write, [ddDash, NewDash]),
     ?Debug("dashboard saved ~p", [NewDash]),
     DashId.
 
@@ -320,7 +320,7 @@ rename_dashboard(Sess, Id, Name) ->
         {error, _} = Error -> Error;
         [] -> {error, <<"Dashboard not found">>};
         [OldDash = #ddDash{}] ->
-            Sess:run_cmd(write, [ddDash, OldDash#ddDash{name=Name}]),
+            erlimem_session:run_cmd(Sess, write, [ddDash, OldDash#ddDash{name=Name}]),
             Name
     end.
 
@@ -330,7 +330,7 @@ delete_dashboard(Sess, Id) ->
         {error, _} = Error -> Error;
         [] -> {error, <<"Dashboard not found">>};
         [#ddDash{id = Id}] ->
-            ok = Sess:run_cmd(delete, [ddDash, Id]),
+            ok = erlimem_session:run_cmd(Sess, delete, [ddDash, Id]),
             Id
     end.
 
@@ -340,7 +340,7 @@ get_dashboards(Sess, Owner) ->
 
 -spec get_name({atom(), pid()}, ddEntityId()) -> ddIdentity().
 get_name(Sess, UserId) ->
-    case Sess:run_cmd(select, [ddAccount, [{#ddAccount{id=UserId, name='$1', _='_'}, [], ['$1']}]]) of
+    case erlimem_session:run_cmd(Sess, select, [ddAccount, [{#ddAccount{id=UserId, name='$1', _='_'}, [], ['$1']}]]) of
         {[Username], true} -> Username;
         _ -> <<"">>
     end.
@@ -349,14 +349,14 @@ get_name(Sess, UserId) ->
 add_adapter_to_cmd(undefined, CmdId, Adapter) ->
     gen_server:call(?MODULE, {add_adapter_to_cmd, CmdId, Adapter});
 add_adapter_to_cmd(Sess, CmdId, Adapter) ->
-    {[Cmd], true} = Sess:run_cmd(select, [ddCmd, [{#ddCmd{id = CmdId, _='_'}, [], ['$_']}]]),
+    {[Cmd], true} = erlimem_session:run_cmd(Sess, select, [ddCmd, [{#ddCmd{id = CmdId, _='_'}, [], ['$_']}]]),
     case lists:member(Adapter, Cmd#ddCmd.adapters) of
         false ->
             NewAdapters = [Adapter|Cmd#ddCmd.adapters];
         true ->
             NewAdapters = Cmd#ddCmd.adapters
     end,
-    Sess:run_cmd(write, [ddCmd, Cmd#ddCmd{adapters = NewAdapters}]),
+    erlimem_session:run_cmd(Sess, write, [ddCmd, Cmd#ddCmd{adapters = NewAdapters}]),
     CmdId.
 
 -spec add_d3_templates_path(atom(), string()) -> ok.
@@ -399,7 +399,7 @@ init([]) ->
                     case filelib:is_dir(ConfigPath) of
                         true ->
                             ?Info("Adding system schema: ~p", [ConfigPath]),
-                            Sess:run_cmd(create_sys_conf, [ConfigPath]);
+                            erlimem_session:run_cmd(Sess, create_sys_conf, [ConfigPath]);
                         false ->
                             ?Info("Application not running from installation", [])
                     end
@@ -414,7 +414,7 @@ init([]) ->
             ],
             ?Debug("tables to build: ~p", [TablesToBuild]),
             build_tables_on_boot(Sess, TablesToBuild),
-            Sess:run_cmd(write, [ddInterface, #ddInterface{id = ddjson, fullName = <<"DDerl">>}]),
+            erlimem_session:run_cmd(Sess, write, [ddInterface, #ddInterface{id = ddjson, fullName = <<"DDerl">>}]),
             % Initializing adapters (all the *_adapter modules compiled with dderl)
             %  doesn't include dynamically built adapters
             {ok, AdaptMods} = application:get_key(dderl, modules),
@@ -435,7 +435,7 @@ init([]) ->
 -spec build_tables_on_boot({atom(), pid()}, [tuple()]) -> ok.
 build_tables_on_boot(_, []) -> ok;
 build_tables_on_boot(Sess, [{N, Cols, Types, Default}|R]) ->
-    Sess:run_cmd(init_create_check_table, [N, {Cols, Types, Default}, []]),
+    erlimem_session:run_cmd(Sess, init_create_check_table, [N, {Cols, Types, Default}, []]),
     build_tables_on_boot(Sess, R).
 
 handle_call({add_connect, Conn}, _From, #state{sess=Sess} = State) ->
@@ -448,7 +448,7 @@ handle_call({get_connects, UserSess, UserId}, _From, #state{sess = DalSess} = St
         {error, _} = Error ->
             {reply, Error, State};
         AllCons ->
-            case UserSess:run_cmd(have_permission, [[?MANAGE_CONNS]]) of
+            case erlimem_session:run_cmd(UserSess, have_permission, [[?MANAGE_CONNS]]) of
                 true -> Cons = [C#ddConn{owner = get_name(DalSess, C#ddConn.owner)} || C <- AllCons];
                 _ ->
                     Cons = [C#ddConn{owner = get_name(DalSess, C#ddConn.owner)}
@@ -508,7 +508,7 @@ handle_call(Req,From,State) ->
 
 handle_cast({add_adapter, Id, FullName}, #state{sess=Sess} = State) ->
     Adp = #ddAdapter{id=Id,fullName=FullName},
-    Sess:run_cmd(write, [ddAdapter, Adp]),
+    erlimem_session:run_cmd(Sess, write, [ddAdapter, Adp]),
     ?Debug("add_adapter written ~p", [Adp]),
     {noreply, State};
 handle_cast({init_adapter, Adapter}, State) ->
@@ -534,7 +534,7 @@ handle_info(Req,State) ->
 
 terminate(Reason, #state{sess = Sess}) ->
     ?Debug("terminating, reason ~p", [Reason]),
-    Sess:close(),
+    erlimem_session:close(Sess),
     ok.
 
 code_change(_OldVsn, State, _Extra)     -> {ok, State}.
@@ -596,22 +596,22 @@ is_local_query(Qry) ->
 
 -spec can_connect_locally({atom(), pid()}) -> boolean().
 can_connect_locally(Sess) ->
-    Sess:run_cmd(have_permission, [[?USE_LOCAL_CONN]]) == true.
+    erlimem_session:run_cmd(Sess, have_permission, [[?USE_LOCAL_CONN]]) == true.
 
 -spec conn_permission({atom(), pid()}, ddEntityId(), #ddConn{}) -> boolean().
 conn_permission(_Sess, UserId, #ddConn{owner=UserId}) -> true; %% If it is the owner always allow usage.
 conn_permission(Sess, _UserId, #ddConn{id=ConnId, owner=system}) ->
-    Sess:run_cmd(have_permission, [?USE_SYS_CONNS]) orelse  %% If it can use system connections.
-        Sess:run_cmd(have_permission, [?USE_CONN(ConnId)]); %% or maybe only this particular connection.
+    erlimem_session:run_cmd(Sess, have_permission, [?USE_SYS_CONNS]) orelse  %% If it can use system connections.
+        erlimem_session:run_cmd(Sess, have_permission, [?USE_CONN(ConnId)]); %% or maybe only this particular connection.
 conn_permission(Sess, _UserId, #ddConn{id=ConnId}) ->
-    Sess:run_cmd(have_permission, [?USE_CONN(ConnId)]). %% Access to a connection by id.
+    erlimem_session:run_cmd(Sess, have_permission, [?USE_CONN(ConnId)]). %% Access to a connection by id.
 
 -spec add_connect_internal({atom(), pid()}, {atom(), pid()}, #ddConn{}) -> #ddConn{} | {error, binary()}.
 add_connect_internal(UserSess, DalSess, #ddConn{schm = undefined} = Conn) ->
     {ok, SchemaName} = application:get_env(imem, mnesia_schema_name),
     add_connect_internal(UserSess, DalSess, Conn#ddConn{schm = atom_to_binary(SchemaName, utf8)});
 add_connect_internal(UserSess, DalSess, #ddConn{id = null, owner = Owner} = Conn) ->
-    case UserSess:run_cmd(select, [ddConn, [{#ddConn{name='$1', owner='$2', id='$3', _='_'}
+    case erlimem_session:run_cmd(UserSess, select, [ddConn, [{#ddConn{name='$1', owner='$2', id='$3', _='_'}
                                          , [{'=:=','$1',Conn#ddConn.name},{'=:=','$2',Owner}]
                                          , ['$_']}]]) of
         {[#ddConn{id = Id} = OldCon | _], true} ->
@@ -625,7 +625,7 @@ add_connect_internal(UserSess, DalSess, #ddConn{id = null, owner = Owner} = Conn
             end;
         _ ->
             HavePermission = (UserSess =:= DalSess) orelse
-                UserSess:run_cmd(have_permission, [[manage_system, ?MANAGE_CONNS, ?CREATE_CONNS]]),
+                erlimem_session:run_cmd(UserSess, have_permission, [[manage_system, ?MANAGE_CONNS, ?CREATE_CONNS]]),
             case HavePermission of
                 true ->
                     Id = erlang:phash2(crypto:strong_rand_bytes(16)),
@@ -637,7 +637,7 @@ add_connect_internal(UserSess, DalSess, #ddConn{id = null, owner = Owner} = Conn
     end;
 add_connect_internal(UserSess, DalSess, #ddConn{id = OldId, owner = Owner} = Conn)
   when is_integer(OldId) ->
-    case UserSess:run_cmd(select, [ddConn, [{#ddConn{id=OldId, _='_'}, [], ['$_']}]]) of
+    case erlimem_session:run_cmd(UserSess, select, [ddConn, [{#ddConn{id=OldId, _='_'}, [], ['$_']}]]) of
         {[#ddConn{owner = OldOwner} = OldCon], true} ->
             %% Save the conn only if there is some difference.
             case is_same_conn(OldCon, Conn) of
@@ -677,7 +677,7 @@ check_save_conn(UserSess, DalSess, Op, Conn0) ->
 		   {C1, C2} when is_record(C1, ddConn), is_record(C2, ddConn) ->
 			   {C1, C2#ddConn{access = maps:remove(password, pl2m(C2#ddConn.access))}}
 	   end,
-    case UserSess:run_cmd(Op, [ddConn, Conn]) of
+    case erlimem_session:run_cmd(UserSess, Op, [ddConn, Conn]) of
         {error, {{Exception, M}, _Stacktrace} = Error} ->
             ?Error("failed to ~p connection with ~p : ~n~p", [Op, Conn, Error]),
             Msg = list_to_binary(atom_to_list(Exception) ++ ": " ++
@@ -700,7 +700,7 @@ pl2m([{_,_}|_] = PL) -> maps:from_list(PL).
 
 -spec check_cmd_select({atom(), pid()}, list()) -> {error, binary()} | list().
 check_cmd_select(UserSess, Args) ->
-    case UserSess:run_cmd(select, Args) of
+    case erlimem_session:run_cmd(UserSess, select, Args) of
         {error, {{Exception, M}, _Stacktrace} = Error} ->
             ?Error("select failed : ~n~p", [Error]),
             Msg = list_to_binary(atom_to_list(Exception) ++ ": " ++

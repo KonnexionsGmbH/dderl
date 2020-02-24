@@ -148,13 +148,13 @@ connect_erlimem_password(Connect, Schema, SessionId, ConnInfo, Params) ->
           Error ->
               error(list_to_binary(io_lib:format("~p", [Error])))
       end,
-    case ErlImemSess:auth(dderl,SessionId,{access,ConnInfo#{type => internal}}) of
+    case erlimem_session:auth(ErlImemSess, dderl,SessionId,{access,ConnInfo#{type => internal}}) of
         {ok, [{pwdmd5,_}|_]} ->
             User = proplists:get_value(<<"user">>, Params, <<>>),
             Password = proplists:get_value(<<"password">>, Params, []),
-            case ErlImemSess:auth(dderl,SessionId,{pwdmd5,{User,list_to_binary(Password)}}) of
+            case erlimem_session:auth(ErlImemSess, dderl,SessionId,{pwdmd5,{User,list_to_binary(Password)}}) of
                 Ok when Ok == {ok,[]}; Ok == ok ->
-                    case ErlImemSess:run_cmd(login,[]) of
+                    case erlimem_session:run_cmd(ErlImemSess, login,[]) of
                         {error,{{'SecurityException',{?PasswordChangeNeeded,_}},ST}} ->
                             ?Warn("Password expired ~s~n~p", [User, ST]),
                             {ok, ErlImemSess, #{changePass=>User}};
@@ -187,7 +187,7 @@ process_cmd({[<<"connect">>], BodyJson, SessionId}, Sess, UserId, From,
                           owner = UserId, schm = Schema,
                           access = jsx:decode(jsx:encode(BodyJson6), [return_maps])}) of
                 {error, Msg} ->
-                    ErlImemSess:close(),
+                    erlimem_session:close(ErlImemSess),
                     From ! {reply, jsx:encode(#{connect=>#{error=>Msg}})};
                 #ddConn{owner = Owner} = NewConn ->
                     ConnReply = #{conn_id=>NewConn#ddConn.id,
@@ -228,9 +228,9 @@ process_cmd({[<<"smstoken">>], BodyJson}, _Sess, _UserId, From, #priv{connection
     case lists:member(ErlImemSess, Connections) of
         true ->
             Token = proplists:get_value(<<"smstoken">>, BodyJson, <<>>),
-            case ErlImemSess:auth(dderl,<<>>,{smsott,Token}) of
+            case erlimem_session:auth(ErlImemSess, dderl,<<>>,{smsott,Token}) of
                 Ok when Ok == {ok,[]}; Ok == ok ->
-                    case ErlImemSess:run_cmd(login,[]) of
+                    case erlimem_session:run_cmd(ErlImemSess, login,[]) of
                         {error,{{'SecurityException',{?PasswordChangeNeeded,_}},ST}} ->
                             User = proplists:get_value(<<"user">>, BodyJson, <<>>),
                             ?Warn("Password expired ~s~n~p", [User, ST]),
@@ -256,8 +256,8 @@ process_cmd({[<<"change_conn_pswd">>], BodyJson}, _Sess, _UserId, From, #priv{co
         true ->
             case (imem_seco:password_strength_fun())(NewPassword) of
                 strong ->
-                    case ErlImemSess:run_cmd(
-                           change_credentials,
+                    case erlimem_session:run_cmd(
+                           ErlImemSess, change_credentials,
                            [{pwdmd5, OldPassword}, {pwdmd5, erlang:md5(NewPassword)}]
                           ) of
                         SeKey when is_integer(SeKey) ->
@@ -289,7 +289,7 @@ process_cmd({[<<"disconnect">>], ReqBody, _SessionId}, _Sess, _UserId, From, #pr
     Connection = ?D2T(proplists:get_value(<<"connection">>, BodyJson, <<>>)),
     case lists:member(Connection, Connections) of
         true ->
-            Connection:close(),
+            erlimem_session:close(Connection),
             RestConnections = lists:delete(Connection, Connections),
             From ! {reply, jsx:encode([{<<"disconnect">>, <<"ok">>}])},
             Priv#priv{connections = RestConnections};
@@ -302,7 +302,7 @@ process_cmd({[<<"remote_apps">>], ReqBody}, _Sess, _UserId, From, #priv{connecti
     Connection = ?D2T(proplists:get_value(<<"connection">>, BodyJson, <<>>)),
     case lists:member(Connection, Connections) of
         true ->
-            Apps = Connection:run_cmd(which_applications, []),
+            Apps = erlimem_session:run_cmd(Connection, which_applications, []),
             Versions = dderl_session:get_apps_version(Apps, []),
             From ! {reply, jsx:encode([{<<"remote_apps">>, Versions}])},
             Priv;
@@ -630,7 +630,7 @@ process_cmd({[<<"download_query">>], ReqBody}, _Sess, UserId, From, Priv, _SessP
     FileName = proplists:get_value(<<"fileToDownload">>, BodyJson, <<>>),
     Query = proplists:get_value(<<"queryToDownload">>, BodyJson, <<>>),
     Connection = ?D2T(proplists:get_value(<<"connection">>, BodyJson, <<>>)),
-    case check_funs(Connection:exec(Query, ?DEFAULT_ROW_SIZE, [])) of
+    case check_funs(erlimem_session:exec(Connection, Query, ?DEFAULT_ROW_SIZE, [])) of
         ok ->
             ?Debug([{session, Connection}], "query ~p -> ok", [Query]),
             From ! {reply_csv, FileName, <<>>, single};
@@ -640,8 +640,8 @@ process_cmd({[<<"download_query">>], ReqBody}, _Sess, UserId, From, Priv, _SessP
             ProducerPid = spawn(fun() ->
                 produce_csv_rows(UserId, Connection, From, StmtRefs, RowFun)
             end),
-            Connection:add_stmt_fsm(StmtRefs, {?MODULE, ProducerPid}),
-            [Connection:run_cmd(fetch_recs_async, [[{fetch_mode,push}], SR]) || SR <- StmtRefs],
+            erlimem_session:add_stmt_fsm(Connection, StmtRefs, {?MODULE, ProducerPid}),
+            [erlimem_session:run_cmd(Connection, fetch_recs_async, [[{fetch_mode,push}], SR]) || SR <- StmtRefs],
             ?Debug("process_query created statements ~p for ~p", [ProducerPid, Query]);
         {error, {{Ex, M}, _Stacktrace} = Error} ->
             ?Error("query error ~p", [Error], _Stacktrace),
@@ -707,7 +707,7 @@ produce_csv_rows(UserId, Connection, From, StmtRef, RowFun)
 
 produce_csv_rows_result({error, Error}, _UserId, Connection, From, StmtRef, _RowFun) ->
     From ! {reply_csv, <<>>, list_to_binary(io_lib:format("Error: ~p", [Error])), last},
-    Connection:run_cmd(close, [StmtRef]);
+    erlimem_session:run_cmd(Connection, close, [StmtRef]);
 produce_csv_rows_result({Rows,false}, UserId, Connection, From, StmtRef, RowFun) when is_list(Rows) ->
     if length(Rows) > 0 ->
            CsvRows = gen_adapter:make_csv_rows(UserId, Rows, RowFun, imem),
@@ -720,16 +720,16 @@ produce_csv_rows_result({Rows,true}, UserId, Connection, From, StmtRef, RowFun) 
     CsvRows = gen_adapter:make_csv_rows(UserId, Rows, RowFun, imem),
     ?Debug("Rows last ~p", [CsvRows]),
     From ! {reply_csv, <<>>, CsvRows, last},
-    Connection:run_cmd(close, [StmtRef]).
+    erlimem_session:run_cmd(Connection, close, [StmtRef]).
 
 -spec disconnect(#priv{}) -> #priv{}.
 disconnect(#priv{connections = []} = Priv) -> Priv;
 disconnect(#priv{connections = [Connection | Rest]} = Priv) ->
     ?Debug("closing the connection ~p", [Connection]),
-    try Connection:close()
-    catch Class:Error ->
+    try erlimem_session:close(Connection)
+    catch Class:Error:Stacktrace ->
             ?Error("Error trying to close the connection ~p ~p:~p~n",
-                   [Connection, Class, Error], erlang:get_stacktrace())
+                   [Connection, Class, Error], Stacktrace)
     end,
     disconnect(Priv#priv{connections = Rest}).
 
@@ -777,7 +777,7 @@ process_query(Query, Connection, {ConnId, Adapter}, SessPid) ->
     process_query(Query, Connection, {ConnId, Adapter}, [], SessPid);
 process_query(Query, {_,_ConPid}=Connection, Params, SessPid) ->
     SessPid ! {log_query, Query, Params},
-    case check_funs(Connection:exec(Query, ?DEFAULT_ROW_SIZE, Params)) of
+    case check_funs(erlimem_session:exec(Connection, Query, ?DEFAULT_ROW_SIZE, Params)) of
         ok ->
             ?Debug([{session, Connection}], "query ~p -> ok", [Query]),
             [{<<"result">>, <<"ok">>}];
@@ -806,7 +806,7 @@ process_query(Query, {_,_ConPid}=Connection, Params, SessPid) ->
                                         , update_cursor_prepare_funs = imem_adapter_funs:update_cursor_prepare(Connection, StmtRefs)
                                         , update_cursor_execute_funs = imem_adapter_funs:update_cursor_execute(Connection, StmtRefs)
                                         }, SessPid),
-            Connection:add_stmt_fsm(StmtRefs, StmtFsm),
+            erlimem_session:add_stmt_fsm(Connection, StmtRefs, StmtFsm),
             ?Debug("StmtRslt ~p ~p", [RowCols, SortSpec]),
             Columns = gen_adapter:build_column_json(lists:reverse(RowCols)),
             JSortSpec = build_srtspec_json(SortSpec),
@@ -866,7 +866,7 @@ process_table_cmd(Cmd, TableName, BodyJson, Connections) ->
     Connection = ?D2T(proplists:get_value(<<"connection">>, BodyJson, <<>>)),
     case lists:member(Connection, Connections) of
         true ->
-            case Connection:run_cmd(Cmd, [TableName]) of
+            case erlimem_session:run_cmd(Connection, Cmd, [TableName]) of
                 ok ->
                     ok;
                 {error, {{_Ex, {_M, E}}, _Stacktrace} = Error} ->

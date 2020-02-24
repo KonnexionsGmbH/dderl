@@ -77,8 +77,8 @@ initialize(HostUrl, ConsumeUrl) ->
             {FPs, _} -> 
                 try esaml_util:convert_fingerprints(FPs)
                 catch
-                    _:Error ->
-                        ?Error("No valid Certificate Thumbprints configured : ~p ~p", [Error, erlang:get_stacktrace()]),
+                    _:Error:Stacktrace ->
+                        ?Error("No valid Certificate Thumbprints configured : ~p ~p", [Error, Stacktrace]),
                         error("No valid Certificate Thumbprints configured")
                 end
         end,
