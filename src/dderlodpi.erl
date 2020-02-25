@@ -355,10 +355,10 @@ bind_exec_stmt(Conn, Stmt, {BindsMeta, BindVal}) ->
 bindTypeMapping(OraType)->
     ?TR,
     case OraType of
-        'INTEGER' -> { 'DPI_ORACLE_TYPE_NATIVE_INT', 'DPI_NATIVE_TYPE_INT64' };
-        'STRING' -> { 'DPI_ORACLE_TYPE_CHAR', 'DPI_NATIVE_TYPE_BYTES' };
-        'FLOAT' -> { 'DPI_ORACLE_TYPE_NUMBER', 'DPI_NATIVE_TYPE_DOUBLE' };
-        'TIMESTAMP' -> { 'DPI_ORACLE_TYPE_DATE', 'DPI_NATIVE_TYPE_TIMESTAMP' };
+        'INT' -> { 'DPI_ORACLE_TYPE_NATIVE_INT', 'DPI_NATIVE_TYPE_INT64' };
+        'VARCHAR2' -> { 'DPI_ORACLE_TYPE_CHAR', 'DPI_NATIVE_TYPE_BYTES' };
+        'NUMBER' -> { 'DPI_ORACLE_TYPE_NUMBER', 'DPI_NATIVE_TYPE_DOUBLE' };
+        'DATE' -> { 'DPI_ORACLE_TYPE_DATE', 'DPI_NATIVE_TYPE_TIMESTAMP' };
         'BLOB' -> { 'DPI_ORACLE_TYPE_BLOB', 'DPI_NATIVE_TYPE_LOB' };
         'CLOB' -> { 'DPI_ORACLE_TYPE_CLOB', 'DPI_NATIVE_TYPE_LOB' };
         Else ->       { error, {"Unknown Type", Else}}
@@ -392,15 +392,15 @@ execute_with_binds(#odpi_conn{context = _Ctx, connection = Conn, node = Node}, S
         [   begin
             dpi:safe(Node, fun() ->
                 case BindType of 
-                    'INTEGER' ->
+                    'INT' ->
                         % since everything is a binary now, even the ints need to be converted first
                         ok = dpi:data_setInt64(Data, list_to_integer(binary_to_list(Bind)));
-                    'FLOAT' ->
+                    'NUMBER' ->
                         % doubles are handled as binaries now to avoid precision loss, so the double that is to be inserted has to be turned back from binary to double here
                         ok = dpi:data_setDouble(Data, list_to_float(binary_to_list(Bind)));
-                    'STRING' ->
+                    'VARCHAR2' ->
                         ok = dpi:var_setFromBytes(Var, 0, Bind);
-                    'TIMESTAMP' ->
+                    'DATE' ->
                         {{Y,M,D},{Hh,Mm,Ss}} = imem_datatype:io_to_datetime(Bind), % extract values out of timestamp binary
                         ok = dpi:data_setTimestamp(Data, Y, M, D, Hh, Mm, Ss, 0, 0, 0); % fsecond and timezone hour/minute offset not supported, so they are set to 0
                     'CLOB' ->
