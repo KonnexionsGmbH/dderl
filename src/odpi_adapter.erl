@@ -2,10 +2,10 @@
 
 % all the valid type specifiers for parameterized binds
 -define(CLM_TYPES, [
-'INTEGER',
-'STRING',
-'FLOAT',
-'TIMESTAMP',
+'INT',
+'VARCHAR2',
+'NUMBER',
+'DATE',
 'BLOB',
 'CLOB'
 ]).
