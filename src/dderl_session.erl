@@ -134,8 +134,8 @@ handle_cast({process, Adapter, Typ, WReq, From, RemoteEp}, #state{session_idle_t
         true -> undefined
     end,
     State0 = try process_call({Typ, WReq}, Adapter, From, RemoteEp, State)
-    catch Class:Error ->
-            ?Error("Problem processing command: ~p:~p~n~p~n", [Class, Error, erlang:get_stacktrace()]),
+    catch Class:Error:Stacktrace ->
+            ?Error("Problem processing command: ~p:~p~n~p~n", [Class, Error, Stacktrace]),
             reply(From, [{<<"error">>, <<"Unable to process the request">>}], self()),
             State
     end,
@@ -165,11 +165,14 @@ handle_info(invalid_credentials, #state{old_state = undefined} = State) -> %% TO
     ?Debug("terminating session ~p due to invalid credentials", [self()]),
     {stop, normal, State};
 handle_info(invalid_credentials, #state{sess = OldSess} = State) ->
-    OldSess:close(),
+    erlimem_session:close(OldSess),
     {ok, Sess} = erlimem:open(local_sec, imem_meta:schema()),
     {noreply, State#state{sess = Sess}};
 handle_info({'EXIT', _Pid, normal}, #state{user = _User} = State) ->
     %?Debug("Received normal exit from ~p for ~p", [Pid, User]),
+    {noreply, State};
+handle_info({'EXIT', Pid, _}, #state{user = User} = State) ->
+    ?Debug("Received ABnormal exit from ~p for ~p", [Pid, User]),
     {noreply, State};
 handle_info({set_id, SessionToken}, State) ->
     {noreply, State#state{id = SessionToken}};
@@ -227,7 +230,7 @@ process_call({[<<"login">>], ReqData}, _Adapter, From, {SrcIp, _Port},
             case login(ReqData, From, SrcIp, ReloginTempState) of
                 #state{user_id = undefined} = NewState -> NewState#state{id = NewToken};
                 #state{sess = TmpSess, old_state = OldState} ->
-                    TmpSess:close(),
+                    erlimem_session:close(TmpSess),
                     OldState#state{lock_state = unlocked, id = NewToken}
             end
     end;
@@ -279,7 +282,7 @@ process_call({[<<"check_connection">>], ReqData}, _Adapter, From, {SrcIp,_}, Sta
 
 process_call({[<<"restart">>], _ReqData}, _Adapter, From, {SrcIp,_}, #state{sess = ErlImemSess} = State) ->
     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "restart"}, State),
-    case ErlImemSess:run_cmd(have_permission, [{dderl,restart}]) of
+    case erlimem_session:run_cmd(ErlImemSess, have_permission, [{dderl,restart}]) of
         true ->
             From ! {spawn,
                     fun() ->
@@ -304,7 +307,7 @@ process_call({[<<"login_change_pswd">>], ReqData}, _Adapter, From, {SrcIp,_}, #s
     NewPassword = maps:get(<<"new_password">>, BodyMap, []),
     case (imem_seco:password_strength_fun())(NewPassword) of
         strong ->
-            case ErlImemSess:run_cmd(
+            case erlimem_session:run_cmd(ErlImemSess,
                    change_credentials,
                    [{pwdmd5, OldPassword}, {pwdmd5, erlang:md5(NewPassword)}]
                   ) of
@@ -423,6 +426,14 @@ process_call({[<<"connect_info">>], _ReqData}, _Adapter, From, {SrcIp,_},
                                         owner => User,
                                         method => <<"tcp">>}];
                                 _ -> []
+                            end ++
+                            case [A || #{adapter := A} <- Connections, A == <<"odpi">>] of
+                                   [] -> [#{adapter => <<"odpi">>,
+                                            id => null,
+                                            name => <<"template oracle dpi">>,
+                                            owner => User,
+                                            method => <<"tns">>}];
+                                   _ -> []
                             end
                         }
                     }
@@ -532,7 +543,7 @@ process_call({[<<"download_buffer_csv">>], ReqData}, Adapter, From, {SrcIp, _},
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     ColumnPositions = proplists:get_value(<<"column_positions">>, BodyJson, []),
     Filename = proplists:get_value(<<"filename">>, BodyJson, <<>>),
-    {TableId, IndexId, Nav, RowFun, OrigClms, _FilterSpec} = Statement:get_sender_params(),
+    {TableId, IndexId, Nav, RowFun, OrigClms, _FilterSpec} = dderl_fsm:get_sender_params(Statement),
     UsedTable = case Nav of
         raw -> TableId;
         ind -> IndexId
@@ -631,8 +642,8 @@ process_call({Cmd, ReqData}, Adapter, From, {SrcIp,_},
             TmpPriv = Adapter:process_cmd({Cmd, BodyJson, Id}, Sess, UserId, From, CurrentPriv, self()),
             self() ! rearm_session_idle_timer,
             TmpPriv
-        catch Class:Error ->
-                ?Error("Problem processing command: ~p:~p~n~p~n", [Class, Error, erlang:get_stacktrace()]),
+        catch Class:Error:Stacktrace ->
+                ?Error("Problem processing command: ~p:~p~n~p~n", [Class, Error, Stacktrace]),
                 reply(From, [{<<"error">>, <<"Unable to process the request">>}], self()),
                 CurrentPriv
         end,
@@ -653,18 +664,11 @@ process_call({Cmd, ReqData}, Adapter, From, {SrcIp,_}, #state{sess = Sess, user_
 
 spawn_process_call(Adapter, CurrentPriv, From, Cmd, BodyJson, Sess, UserId, SelfPid) ->
     try 
-        % ?Info("Adapter ~p",[Adapter]),
-        % ?Info("CurrentPriv ~p",[CurrentPriv]),
-        % ?Info("Cmd ~p",[Cmd]),
-        % ?Info("BodyJson ~p",[BodyJson]),
-        % ?Info("Sess ~p",[Sess]),
-        % ?Info("UserId ~p",[UserId]),
-        % ?Info("SelfPid ~p",[SelfPid]),
         Adapter:process_cmd({Cmd, BodyJson}, Sess, UserId, From, CurrentPriv, SelfPid),
         SelfPid ! rearm_session_idle_timer
-    catch Class:Error ->
+    catch Class:Error:Stacktrace ->
             ?Error("Problem processing command: ~p:~p~n~p~n~p~n",
-                   [Class, Error, BodyJson, erlang:get_stacktrace()]),
+                   [Class, Error, BodyJson, Stacktrace]),
             reply(From, [{<<"error">>, <<"Unable to process the request">>}], SelfPid)
     end.
 
@@ -672,8 +676,8 @@ spawn_gen_process_call(Adapter, From, C, BodyJson, Sess, UserId, SelfPid) ->
     try
         gen_adapter:process_cmd({[C], BodyJson}, adapter_name(Adapter), Sess, UserId, From, undefined),
         SelfPid ! rearm_session_idle_timer
-    catch Class:Error ->
-            ?Error("Problem processing command: ~p:~p~n~p~n", [Class, Error, erlang:get_stacktrace()]),
+    catch Class:Error:Stacktrace ->
+            ?Error("Problem processing command: ~p:~p~n~p~n", [Class, Error, Stacktrace]),
             reply(From, [{<<"error">>, <<"Unable to process the request">>}], SelfPid)
     end.
 
@@ -690,10 +694,10 @@ logout(#state{sess = undefined, adapt_priv = AdaptPriv} = State) ->
     [catch Adapter:disconnect(Priv) || {Adapter, Priv} <- AdaptPriv],
     State#state{adapt_priv = []};
 logout(#state{sess = Sess, old_state = OldState} = State) ->
-    try Sess:close()
-    catch Class:Error ->
+    try erlimem_session:close(Sess)
+    catch Class:Error:Stacktrace ->
             ?Error("Error trying to close the session ~p ~p:~p~n~p~n",
-                   [Sess, Class, Error, erlang:get_stacktrace()])
+                   [Sess, Class, Error, Stacktrace])
     end,
     if OldState == undefined -> logout(State#state{sess = undefined});
        true -> logout(OldState)
@@ -767,7 +771,7 @@ login(ReqData, From, SrcIp, State) ->
     Reply0 = #{vsn => list_to_binary(Vsn), app => HostApp,
                node => Node, host => Host,
                rowNumLimit => imem_sql_expr:rownum_limit()},
-    case catch ErlImemSess:run_cmd(login,[]) of
+    case catch erlimem_session:run_cmd(ErlImemSess, login,[]) of
         {error,{{'SecurityException',{?PasswordChangeNeeded,_}},ST}} ->
             ?Warn("Password expired ~s~n~p", [State#state.user, ST]),
             {[UserId],true} = imem_meta:select(ddAccount, [{#ddAccount{name=State#state.user,
@@ -785,7 +789,7 @@ login(ReqData, From, SrcIp, State) ->
             try dderl_dal:process_login(
                          ReqDataMap, State,
                          #{auth => fun(Auth) ->
-                                       (State#state.sess):auth(dderl, Id, Auth)
+                                       erlimem_session:auth((State#state.sess), dderl, Id, Auth)
                                    end,
                            connInfo => ConnInfo,
                            relayState => fun dderl_resource:samlRelayStateHandle/2,
@@ -812,7 +816,7 @@ login(ReqData, From, SrcIp, State) ->
                     end,
                     State2
             catch
-                _ : Error ->
+                _ :Error:Stacktrace ->
                     ErrMsg =
                     case Error of
                         {{E, M}, St} ->
@@ -820,7 +824,7 @@ login(ReqData, From, SrcIp, State) ->
                             self() ! invalid_credentials,
                             M;
                         _ ->
-                            ?Error("logging in : ~p ~p", [Error , erlang:get_stacktrace()]),
+                            ?Error("logging in : ~p ~p", [Error , Stacktrace]),
                             Error
                     end,
                     act_log(From, ?LOGIN_CONNECT,

@@ -61,15 +61,17 @@ init() ->
     ],
     %% TODO: This should be added on the load of the other adapter but we don't know the id...
     AddViewResult = gen_adapter:add_cmds_views(undefined, system, imem, false, SystemViews),
-    case lists:member(need_replace, AddViewResult) of
+    CmdId = case lists:member(need_replace, AddViewResult) of
         true ->
             View = dderl_dal:get_view(undefined, <<"All ddViews">>, imem, system),
-            dderl_dal:add_adapter_to_cmd(undefined, View#ddView.cmd, oci);
+            View#ddView.cmd;
         _ ->
             [_, ViewId] = AddViewResult,
             View = dderl_dal:get_view(undefined, ViewId),
-            dderl_dal:add_adapter_to_cmd(undefined, View#ddView.cmd, oci)
-    end.
+            View#ddView.cmd
+    end,
+    dderl_dal:add_adapter_to_cmd(undefined, CmdId, odpi).
+
 
 -spec add_conn_info(undefined | #priv{}, map()) -> #priv{}.
 add_conn_info(undefined, ConnInfo) ->
@@ -145,13 +147,13 @@ connect_erlimem_password(Connect, Schema, SessionId, ConnInfo, Params) ->
           Error ->
               error(list_to_binary(io_lib:format("~p", [Error])))
       end,
-    case ErlImemSess:auth(dderl,SessionId,{access,ConnInfo#{type => internal}}) of
+    case erlimem_session:auth(ErlImemSess, dderl,SessionId,{access,ConnInfo#{type => internal}}) of
         {ok, [{pwdmd5,_}|_]} ->
             User = proplists:get_value(<<"user">>, Params, <<>>),
             Password = proplists:get_value(<<"password">>, Params, []),
-            case ErlImemSess:auth(dderl,SessionId,{pwdmd5,{User,list_to_binary(Password)}}) of
+            case erlimem_session:auth(ErlImemSess, dderl,SessionId,{pwdmd5,{User,list_to_binary(Password)}}) of
                 Ok when Ok == {ok,[]}; Ok == ok ->
-                    case ErlImemSess:run_cmd(login,[]) of
+                    case erlimem_session:run_cmd(ErlImemSess, login,[]) of
                         {error,{{'SecurityException',{?PasswordChangeNeeded,_}},ST}} ->
                             ?Warn("Password expired ~s~n~p", [User, ST]),
                             {ok, ErlImemSess, #{changePass=>User}};
@@ -184,7 +186,7 @@ process_cmd({[<<"connect">>], BodyJson, SessionId}, Sess, UserId, From,
                           owner = UserId, schm = Schema,
                           access = jsx:decode(jsx:encode(BodyJson6), [return_maps])}) of
                 {error, Msg} ->
-                    ErlImemSess:close(),
+                    erlimem_session:close(ErlImemSess),
                     From ! {reply, jsx:encode(#{connect=>#{error=>Msg}})};
                 #ddConn{owner = Owner} = NewConn ->
                     ConnReply = #{conn_id=>NewConn#ddConn.id,
@@ -225,9 +227,9 @@ process_cmd({[<<"smstoken">>], BodyJson}, _Sess, _UserId, From, #priv{connection
     case lists:member(ErlImemSess, Connections) of
         true ->
             Token = proplists:get_value(<<"smstoken">>, BodyJson, <<>>),
-            case ErlImemSess:auth(dderl,<<>>,{smsott,Token}) of
+            case erlimem_session:auth(ErlImemSess, dderl,<<>>,{smsott,Token}) of
                 Ok when Ok == {ok,[]}; Ok == ok ->
-                    case ErlImemSess:run_cmd(login,[]) of
+                    case erlimem_session:run_cmd(ErlImemSess, login,[]) of
                         {error,{{'SecurityException',{?PasswordChangeNeeded,_}},ST}} ->
                             User = proplists:get_value(<<"user">>, BodyJson, <<>>),
                             ?Warn("Password expired ~s~n~p", [User, ST]),
@@ -253,8 +255,8 @@ process_cmd({[<<"change_conn_pswd">>], BodyJson}, _Sess, _UserId, From, #priv{co
         true ->
             case (imem_seco:password_strength_fun())(NewPassword) of
                 strong ->
-                    case ErlImemSess:run_cmd(
-                           change_credentials,
+                    case erlimem_session:run_cmd(
+                           ErlImemSess, change_credentials,
                            [{pwdmd5, OldPassword}, {pwdmd5, erlang:md5(NewPassword)}]
                           ) of
                         SeKey when is_integer(SeKey) ->
@@ -286,7 +288,7 @@ process_cmd({[<<"disconnect">>], ReqBody, _SessionId}, _Sess, _UserId, From, #pr
     Connection = ?D2T(proplists:get_value(<<"connection">>, BodyJson, <<>>)),
     case lists:member(Connection, Connections) of
         true ->
-            Connection:close(),
+            erlimem_session:close(Connection),
             RestConnections = lists:delete(Connection, Connections),
             From ! {reply, jsx:encode([{<<"disconnect">>, <<"ok">>}])},
             Priv#priv{connections = RestConnections};
@@ -299,7 +301,7 @@ process_cmd({[<<"remote_apps">>], ReqBody}, _Sess, _UserId, From, #priv{connecti
     Connection = ?D2T(proplists:get_value(<<"connection">>, BodyJson, <<>>)),
     case lists:member(Connection, Connections) of
         true ->
-            Apps = Connection:run_cmd(which_applications, []),
+            Apps = erlimem_session:run_cmd(Connection, which_applications, []),
             Versions = dderl_session:get_apps_version(Apps, []),
             From ! {reply, jsx:encode([{<<"remote_apps">>, Versions}])},
             Priv;
@@ -332,7 +334,7 @@ process_cmd({[<<"browse_data">>], ReqBody}, Sess, _UserId, From, #priv{connectio
     ConnId = proplists:get_value(<<"conn_id">>, BodyJson, <<>>), %% This should be change to params...
     Row = proplists:get_value(<<"row">>, BodyJson, 0),
     Col = proplists:get_value(<<"col">>, BodyJson, 0),
-    R = Statement:row_with_key(Row),
+    R = dderl_fsm:row_with_key(Statement, Row),
     ?Debug("Row with key ~p",[R]),
     Tables = [element(1,T) || T <- tuple_to_list(element(3, R)), size(T) > 0],
     IsView = lists:any(fun(E) -> E =:= ddCmd end, Tables) andalso
@@ -447,6 +449,10 @@ process_cmd({[<<"system_views">>], ReqBody}, Sess, _UserId, From, Priv, SessPid)
             RespJson = jsx:encode([{<<"error">>, Reason}]);
         F ->
             C = dderl_dal:get_command(Sess, F#ddView.cmd),
+            ?Info("!!! C#ddCmd.command : ~p", [C#ddCmd.command]),
+            ?Info("!!! Sess : ~p", [Sess]),
+            ?Info("!!! {ConnId, imem} : ~p", [{ConnId, imem}]),
+            ?Info("!!! SessPid : ~p", [SessPid]),
             Resp = process_query(C#ddCmd.command, Sess, {ConnId, imem}, SessPid),
             ?Debug("ddViews ~p~n~p", [C#ddCmd.command, Resp]),
             RespJson = jsx:encode([{<<"system_views">>,
@@ -521,7 +527,7 @@ process_cmd({[<<"update_focus_stmt">>], BodyJson}, Sess, UserId, From, Priv, Ses
             Result = open_view(Sess, Connection, SessPid, ConnId, Binds, View),
             case proplists:get_value(<<"error">>, Result, undefined) of
                 undefined ->
-                    Statement:close(),
+                    dderl_fsm:close(Statement),
                     From ! {reply, jsx:encode(#{<<"update_focus_stmt">> => Result})};
                 Error ->
                     From ! {reply, jsx:encode([{<<"update_focus_stmt">>,[{<<"error">>, Error}]}])}
@@ -532,7 +538,7 @@ process_cmd({[<<"graph_subscribe">>], BodyJson}, _Sess, _UserId, From, Priv, _Se
     Statement = ?D2T(proplists:get_value(<<"statement">>, BodyJson, <<>>)),
     Key = proplists:get_value(<<"key">>, BodyJson, <<>>),
     Topic = proplists:get_value(<<"topic">>, BodyJson, <<>>),
-    Statement:gui_req(subscribe, {Topic, Key}, gui_resp_cb_fun(<<"graph_subscribe">>, Statement, From)),
+    dderl_fsm:gui_req(Statement, subscribe, {Topic, Key}, gui_resp_cb_fun(<<"graph_subscribe">>, Statement, From)),
     Priv;
 process_cmd({[<<"sort">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     [{<<"sort">>,BodyJson}] = ReqBody,
@@ -540,20 +546,20 @@ process_cmd({[<<"sort">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     SrtSpc = proplists:get_value(<<"spec">>, BodyJson, []),
     SortSpec = sort_json_to_term(SrtSpc),
     ?Debug("The sort spec from json: ~p", [SortSpec]),
-    Statement:gui_req(sort, SortSpec, gui_resp_cb_fun(<<"sort">>, Statement, From)),
+    dderl_fsm:gui_req(Statement, sort, SortSpec, gui_resp_cb_fun(<<"sort">>, Statement, From)),
     Priv;
 process_cmd({[<<"filter">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     [{<<"filter">>,BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     FltrSpec = proplists:get_value(<<"spec">>, BodyJson, []),
     FilterSpec = filter_json_to_term(FltrSpec),
-    Statement:gui_req(filter, FilterSpec, gui_resp_cb_fun(<<"filter">>, Statement, From)),
+    dderl_fsm:gui_req(Statement, filter, FilterSpec, gui_resp_cb_fun(<<"filter">>, Statement, From)),
     Priv;
 process_cmd({[<<"reorder">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     [{<<"reorder">>,BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     ColumnOrder = proplists:get_value(<<"column_order">>, BodyJson, []),
-    Statement:gui_req(reorder, ColumnOrder, gui_resp_cb_fun(<<"reorder">>, Statement, From)),
+    dderl_fsm:gui_req(Statement, reorder, ColumnOrder, gui_resp_cb_fun(<<"reorder">>, Statement, From)),
     Priv;
 process_cmd({[<<"drop_table">>], ReqBody}, _Sess, _UserId, From, #priv{connections = Connections} = Priv, _SessPid) ->
     [{<<"drop_table">>, BodyJson}] = ReqBody,
@@ -590,7 +596,7 @@ process_cmd({[<<"button">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
                 _ -> ButtonBin
             end
     end,
-    Statement:gui_req(button, Button, gui_resp_cb_fun(<<"button">>, Statement, From)),
+    dderl_fsm:gui_req(Statement, button, Button, gui_resp_cb_fun(<<"button">>, Statement, From)),
     Priv;
 process_cmd({[<<"update_data">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     [{<<"update_data">>,BodyJson}] = ReqBody,
@@ -598,7 +604,7 @@ process_cmd({[<<"update_data">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid
     RowId = proplists:get_value(<<"rowid">>, BodyJson, <<>>),
     CellId = proplists:get_value(<<"cellid">>, BodyJson, <<>>),
     Value = proplists:get_value(<<"value">>, BodyJson, <<>>),
-    Statement:gui_req(update, [{RowId,upd,[{CellId,Value}]}], gui_resp_cb_fun(<<"update_data">>, Statement, From)),
+    dderl_fsm:gui_req(Statement, update, [{RowId,upd,[{CellId,Value}]}], gui_resp_cb_fun(<<"update_data">>, Statement, From)),
     Priv;
 process_cmd({[<<"delete_row">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     [{<<"delete_row">>,BodyJson}] = ReqBody,
@@ -606,28 +612,28 @@ process_cmd({[<<"delete_row">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid)
     RowIds = proplists:get_value(<<"rowids">>, BodyJson, []),
     DelSpec = [{RowId,del,[]} || RowId <- RowIds],
     ?Debug("delete ~p ~p", [RowIds, DelSpec]),
-    Statement:gui_req(update, DelSpec, gui_resp_cb_fun(<<"delete_row">>, Statement, From)),
+    dderl_fsm:gui_req(Statement, update, DelSpec, gui_resp_cb_fun(<<"delete_row">>, Statement, From)),
     Priv;
 process_cmd({[<<"insert_data">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     [{<<"insert_data">>,BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     ClmIdx = proplists:get_value(<<"col">>, BodyJson, <<>>),
     Value =  proplists:get_value(<<"value">>, BodyJson, <<>>),
-    Statement:gui_req(update, [{undefined,ins,[{ClmIdx,Value}]}], gui_resp_cb_fun(<<"insert_data">>, Statement, From)),
+    dderl_fsm:gui_req(Statement, update, [{undefined,ins,[{ClmIdx,Value}]}], gui_resp_cb_fun(<<"insert_data">>, Statement, From)),
     Priv;
 process_cmd({[<<"paste_data">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     [{<<"paste_data">>, BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     ReceivedRows = proplists:get_value(<<"rows">>, BodyJson, []),
     Rows = gen_adapter:extract_modified_rows(ReceivedRows),
-    Statement:gui_req(update, Rows, gui_resp_cb_fun(<<"paste_data">>, Statement, From)),
+    dderl_fsm:gui_req(Statement, update, Rows, gui_resp_cb_fun(<<"paste_data">>, Statement, From)),
     Priv;
 process_cmd({[<<"download_query">>], ReqBody}, _Sess, UserId, From, Priv, _SessPid) ->
     [{<<"download_query">>, BodyJson}] = ReqBody,
     FileName = proplists:get_value(<<"fileToDownload">>, BodyJson, <<>>),
     Query = proplists:get_value(<<"queryToDownload">>, BodyJson, <<>>),
     Connection = ?D2T(proplists:get_value(<<"connection">>, BodyJson, <<>>)),
-    case check_funs(Connection:exec(Query, ?DEFAULT_ROW_SIZE, [])) of
+    case check_funs(erlimem_session:exec(Connection, Query, ?DEFAULT_ROW_SIZE, [])) of
         ok ->
             ?Debug([{session, Connection}], "query ~p -> ok", [Query]),
             From ! {reply_csv, FileName, <<>>, single};
@@ -637,8 +643,8 @@ process_cmd({[<<"download_query">>], ReqBody}, _Sess, UserId, From, Priv, _SessP
             ProducerPid = spawn(fun() ->
                 produce_csv_rows(UserId, Connection, From, StmtRefs, RowFun)
             end),
-            Connection:add_stmt_fsm(StmtRefs, {?MODULE, ProducerPid}),
-            [Connection:run_cmd(fetch_recs_async, [[{fetch_mode,push}], SR]) || SR <- StmtRefs],
+            erlimem_session:add_stmt_fsm(Connection, StmtRefs, {?MODULE, ProducerPid}),
+            [erlimem_session:run_cmd(Connection, fetch_recs_async, [[{fetch_mode,push}], SR]) || SR <- StmtRefs],
             ?Debug("process_query created statements ~p for ~p", [ProducerPid, Query]);
         {error, {{Ex, M}, _Stacktrace} = Error} ->
             ?Error("query error ~p", [Error], _Stacktrace),
@@ -704,7 +710,7 @@ produce_csv_rows(UserId, Connection, From, StmtRef, RowFun)
 
 produce_csv_rows_result({error, Error}, _UserId, Connection, From, StmtRef, _RowFun) ->
     From ! {reply_csv, <<>>, list_to_binary(io_lib:format("Error: ~p", [Error])), last},
-    Connection:run_cmd(close, [StmtRef]);
+    erlimem_session:run_cmd(Connection, close, [StmtRef]);
 produce_csv_rows_result({Rows,false}, UserId, Connection, From, StmtRef, RowFun) when is_list(Rows) ->
     if length(Rows) > 0 ->
            CsvRows = gen_adapter:make_csv_rows(UserId, Rows, RowFun, imem),
@@ -717,23 +723,23 @@ produce_csv_rows_result({Rows,true}, UserId, Connection, From, StmtRef, RowFun) 
     CsvRows = gen_adapter:make_csv_rows(UserId, Rows, RowFun, imem),
     ?Debug("Rows last ~p", [CsvRows]),
     From ! {reply_csv, <<>>, CsvRows, last},
-    Connection:run_cmd(close, [StmtRef]).
+    erlimem_session:run_cmd(Connection, close, [StmtRef]).
 
 -spec disconnect(#priv{}) -> #priv{}.
 disconnect(#priv{connections = []} = Priv) -> Priv;
 disconnect(#priv{connections = [Connection | Rest]} = Priv) ->
     ?Debug("closing the connection ~p", [Connection]),
-    try Connection:close()
-    catch Class:Error ->
+    try erlimem_session:close(Connection)
+    catch Class:Error:Stacktrace ->
             ?Error("Error trying to close the connection ~p ~p:~p~n",
-                   [Connection, Class, Error], erlang:get_stacktrace())
+                   [Connection, Class, Error], Stacktrace)
     end,
     disconnect(Priv#priv{connections = Rest}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 -spec gui_resp_cb_fun(binary(), {atom(), pid()}, pid()) -> fun().
 gui_resp_cb_fun(Cmd, Statement, From) ->
-    Clms = Statement:get_columns(),
+    Clms = dderl_fsm:get_columns(Statement),
     gen_adapter:build_resp_fun(Cmd, Clms, From).
 
 -spec sort_json_to_term(list()) -> [tuple()].
@@ -772,9 +778,9 @@ process_query(Query, Connection, {ConnId, Adapter}, Params, SessPid) ->
 -spec process_query(binary(), tuple(), {binary(), atom()} | [tuple()], pid()) -> list().
 process_query(Query, Connection, {ConnId, Adapter}, SessPid) ->
     process_query(Query, Connection, {ConnId, Adapter}, [], SessPid);
-process_query(Query, {_,_ConPid}=Connection, Params, SessPid) ->
+process_query(Query, Connection, Params, SessPid) ->
     SessPid ! {log_query, Query, Params},
-    case check_funs(Connection:exec(Query, ?DEFAULT_ROW_SIZE, Params)) of
+    case check_funs(erlimem_session:exec(Connection, Query, ?DEFAULT_ROW_SIZE, Params)) of
         ok ->
             ?Debug([{session, Connection}], "query ~p -> ok", [Query]),
             [{<<"result">>, <<"ok">>}];
@@ -803,7 +809,7 @@ process_query(Query, {_,_ConPid}=Connection, Params, SessPid) ->
                                         , update_cursor_prepare_funs = imem_adapter_funs:update_cursor_prepare(Connection, StmtRefs)
                                         , update_cursor_execute_funs = imem_adapter_funs:update_cursor_execute(Connection, StmtRefs)
                                         }, SessPid),
-            Connection:add_stmt_fsm(StmtRefs, StmtFsm),
+            erlimem_session:add_stmt_fsm(Connection, StmtRefs, {dderl_fsm, StmtFsm}),
             ?Debug("StmtRslt ~p ~p", [RowCols, SortSpec]),
             Columns = gen_adapter:build_column_json(lists:reverse(RowCols)),
             JSortSpec = build_srtspec_json(SortSpec),
@@ -863,7 +869,7 @@ process_table_cmd(Cmd, TableName, BodyJson, Connections) ->
     Connection = ?D2T(proplists:get_value(<<"connection">>, BodyJson, <<>>)),
     case lists:member(Connection, Connections) of
         true ->
-            case Connection:run_cmd(Cmd, [TableName]) of
+            case erlimem_session:run_cmd(Connection, Cmd, [TableName]) of
                 ok ->
                     ok;
                 {error, {{_Ex, {_M, E}}, _Stacktrace} = Error} ->

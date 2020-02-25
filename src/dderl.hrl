@@ -12,7 +12,7 @@
 
 %% DDerl adapter (connect to databases)
 -record(ddAdapter,
-                  { id                      :: atom()             %% oci | imem | ets | os_text | dfs_text | hdfs_text
+                  { id                      :: atom()             %% imem | ets | os_text | dfs_text | hdfs_text
                   , fullName                :: binary()           %% displayed in drop down box
                   }).
 -define(ddAdapter, [atom, binstr]).
@@ -29,7 +29,7 @@
                   { id                      ::ddEntityId()
                   , name                    ::binary()          %% connection name (mutable)
                   , owner                   ::ddEntityId()      %% account.id of creator / owner
-                  , adapter                 ::atom()            %% oci | imem | ets | os_text | dfs_text | hdfs_text
+                  , adapter                 ::atom()            %% imem | ets | os_text | dfs_text | hdfs_text
                   , access                  ::any()             %% erlang term depending on adapter (e.g. ip+service or tns)
                   , schm                    ::any()             %% erlang term depending on adapter (e.g. name or uri or data root path)
                   }).
