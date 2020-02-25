@@ -86,8 +86,8 @@ sql_params(Sql, Types) ->
         ++ ")((_IN_|_OUT_|_INOUT_){0,1})[^ ,\)\n\r;]+",
     try
         {match, dderl_sql_params:get_params(Sql, RegEx)}
-    catch C:R ->
-        ?Warn("~p~n~p", [{C,R}, erlang:get_stacktrace()]),
+    catch C:R:S ->
+        ?Warn("~p~n~p", [{C,R}, S]),
         re:run(Sql, RegEx, [global,{capture, [0,1,2], binary}])
     end.
 
@@ -558,12 +558,11 @@ get_view_params(Sess, ViewName, Adapter, UserId) ->
         _ -> #{error => <<"View not found">>}
     end.
 
--spec format_options(oci | imem | odpi) -> list().
-format_options(oci) -> [];
+-spec format_options(imem | odpi) -> list().
 format_options(odpi) -> [];
 format_options(imem) -> [{case_keyword, lower}].
 
--spec get_pretty_tuple(term(), oci | imem | odpi) -> {binary(), binary()}.
+-spec get_pretty_tuple(term(), imem | odpi) -> {binary(), binary()}.
 get_pretty_tuple(ParseTree, Adapter) ->
     Opts = format_options(Adapter),
     try sqlparse_fold:top_down(sqlparse_format_pretty, ParseTree, Opts) of
@@ -580,11 +579,11 @@ get_pretty_tuple(ParseTree, Adapter) ->
             {<<"prettyerror">>, iolist_to_binary(io_lib:format("~p:~p", [Class1, Error1]))}
     end.
 
--spec get_pretty_tuple_multiple(list(), oci | imem | odpi) -> {binary(), binary()}.
+-spec get_pretty_tuple_multiple(list(), imem | odpi) -> {binary(), binary()}.
 get_pretty_tuple_multiple(ParseTrees, Adapter) ->
     get_pretty_tuple_multiple(ParseTrees, [], Adapter).
 
--spec get_pretty_tuple_multiple(list(), list(), oci | imem | odpi) -> {binary(), binary()}.
+-spec get_pretty_tuple_multiple(list(), list(), imem | odpi) -> {binary(), binary()}.
 get_pretty_tuple_multiple([], Result, _Adapter) ->
     %% Same as the flat we add ; and new line after each statement.
     {<<"pretty">>, iolist_to_binary([[Pretty, ";\n"] || Pretty <- lists:reverse(Result)])};
@@ -718,9 +717,9 @@ build_resp_fun(Cmd, Clms, From) ->
             Resp = jsx:encode([{Cmd,GuiRespJson}]),
             From ! {reply, Resp}
         catch
-            _:Error ->
+            _:Error:Stacktrace ->
                 ?Error("Encoding problem ~p ~p~n~p~n~p",
-                       [Cmd, Error, GuiResp, GuiRespJson], erlang:get_stacktrace())
+                       [Cmd, Error, GuiResp, GuiRespJson], Stacktrace)
         end
     end.
 
@@ -904,11 +903,6 @@ generate_set_value(Row, Columns, [ColId | Rest], Adapter) ->
 
 -spec add_function_type(atom(), binary(), atom()) -> binary().
 add_function_type(_, <<>>, _) -> <<"NULL">>;
-add_function_type('SQLT_NUM', Value, oci) -> Value;
-add_function_type('SQLT_DAT', Value, oci) ->
-    ImemDatetime = imem_datatype:io_to_datetime(Value),
-    NewValue = imem_datatype:datetime_to_io(ImemDatetime),
-    iolist_to_binary([<<"to_date('">>, NewValue, <<"','DD.MM.YYYY HH24:MI:SS')">>]);
 add_function_type('SQLT_NUM', Value, odpi) -> Value;
 add_function_type('SQLT_DAT', Value, odpi) ->
     ImemDatetime = imem_datatype:io_to_datetime(Value),

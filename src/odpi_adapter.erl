@@ -988,8 +988,8 @@ make_binds(Binds, _CmdBinds) ->
             {[], []}, Binds),
         {Vars, Values}
     catch
-        _:Exception ->
-            ?Error("ST ~p", [erlang:get_stacktrace()]),
+        _:Exception:Stacktrace ->
+            ?Error("ST ~p", [Stacktrace]),
             {error, list_to_binary(io_lib:format("bind process error : ~p", [Exception]))}
     end.
 

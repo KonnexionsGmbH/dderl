@@ -70,7 +70,6 @@ init() ->
             View = dderl_dal:get_view(undefined, ViewId),
             View#ddView.cmd
     end,
-    dderl_dal:add_adapter_to_cmd(undefined, CmdId, oci),
     dderl_dal:add_adapter_to_cmd(undefined, CmdId, odpi).
 
 
