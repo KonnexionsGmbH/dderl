@@ -10,12 +10,12 @@ dderl
 
 WEB DataBase Browser Application.
 
-### Build (Supported erlang OTP version - 20.2)
+### Build (Supported erlang OTP version - 21+)
 
 1. `git clone https://github.com/K2InformaticsGmbH/dderl` in `$ROOT`
 1. cd `$ROOT/dderl`
-1. `NO_OCI=true rebar3 compile`
-1. To compile with erloci follow setup instruction at https://github.com/K2InformaticsGmbH/erloci and execute the above two commands without `NO_OCI=true
+1. To compile with oranif follow setup instruction at https://github.com/K2InformaticsGmbH/oranif
+1. `rebar3 compile`
 1. cd `priv/dev`
 1. `yarn install-build-prod`
 1. cd `$ROOT/dderl`
@@ -45,7 +45,6 @@ WEB DataBase Browser Application.
 
 ![screenshot](https://github.com/K2InformaticsGmbH/dderl/blob/master/docs/dderl_screenshot.png)
 
-
 ### Certificates
 DDErl runs on SSL. A default certificate/key pair is [supplied](https://github.com/k2informatics/dderl/tree/master/priv/certs). This, however can be changed either by replacing these files at installation or modifying configuration in `ddConfig` table (`[{dderl,dderl,dderlSslOpts}]`). A sample configuration is given below:
 ```erlang
@@ -65,5 +64,3 @@ To convert a PEM crt/key files to DER (accepted by erlang SSL binary certificate
 > public_key:pem_decode(PemKey).              
 [{'RSAPrivateKey',<<48,130,2,92,2,1,0,2,129,129,0,160,95,...>>,not_encrypted}]
 ```
-
-
