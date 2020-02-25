@@ -1,68 +1,60 @@
-FROM erlang:22.2.7-slim as base
+FROM alpine:3.9
 
-RUN apt-get update \
- && apt-get install -y  
+ENV OTP_VERSION="20.2"
 
-RUN apt-get install -y alien \
-                       autoconf \
-                       autotools-dev \ 
-                       build-essential \
-                       curl \
-                       git \
-                       wget \
- && git config --global credential.helper 'cache --timeout 3600' \
- && wget https://download.oracle.com/otn_software/linux/instantclient/19600/oracle-instantclient19.6-basic-19.6.0.0.0-1.x86_64.rpm \
- && alien -i *.rpm \
- && wget https://s3.amazonaws.com/rebar3/rebar3 \
- && chmod +x rebar3 \
- && mv rebar3 /usr/bin \
- && curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add - \ 
- && echo "deb https://dl.yarnpkg.com/debian/ stable main" | tee /etc/apt/sources.list.d/yarn.list \
- && apt-get update \
- && apt-get install -y yarn
+RUN set -xe \
+	&& apk add --no-cache --virtual .fetch-deps \
+		curl \
+		ca-certificates \
+	&& curl -fSL -o otp-src.tar.gz "http://www.erlang.org/download/otp_src_20.2.tar.gz" \
+	&& apk add --no-cache --virtual .build-deps \
+		dpkg-dev dpkg \
+		gcc \
+		g++ \
+		libc-dev \
+		linux-headers \
+		make \
+		autoconf \
+		ncurses-dev \
+		openssl-dev \
+		unixodbc-dev \
+		lksctp-tools-dev \
+		tar \
+    nodejs \
+    git \
+    yarn \
+	&& export ERL_TOP="/usr/src/otp_src_${OTP_VERSION%%@*}" \
+	&& mkdir -vp $ERL_TOP \
+	&& tar -xzf otp-src.tar.gz -C $ERL_TOP --strip-components=1 \
+	&& rm otp-src.tar.gz \
+	&& ( cd $ERL_TOP \
+	  && ./otp_build autoconf \
+	  && gnuArch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)" \
+	  && ./configure --build="$gnuArch" \
+	  && make -j$(getconf _NPROCESSORS_ONLN) \
+	  && make install ) \
+	&& rm -rf $ERL_TOP \
+	&& find /usr/local -regex '/usr/local/lib/erlang/\(lib/\|erts-\).*/\(man\|doc\|obj\|c_src\|emacs\|info\|examples\)' | xargs rm -rf \
+	&& find /usr/local -name src | xargs -r find | grep -v '\.hrl$' | xargs rm -v || true \
+	&& find /usr/local -name src | xargs -r find | xargs rmdir -vp || true \
+	&& scanelf --nobanner -E ET_EXEC -BF '%F' --recursive /usr/local | xargs -r strip --strip-all \
+	&& scanelf --nobanner -E ET_DYN -BF '%F' --recursive /usr/local | xargs -r strip --strip-unneeded \
+	&& runDeps="$( \
+		scanelf --needed --nobanner --format '%n#p' --recursive /usr/local \
+			| tr ',' '\n' \
+			| sort -u \
+			| awk 'system("[ -e /usr/local/lib/" $1 " ]") == 0 { next } { print "so:" $1 }' \
+	)" \
+	&& REBAR3_DOWNLOAD_URL="https://s3.amazonaws.com/rebar3/rebar3" \
+	&& curl -fSL -o rebar3 "$REBAR3_DOWNLOAD_URL" \
+	&& mkdir -p /usr/src/rebar3-src \
+	&& mv rebar3 /usr/src/rebar3-src \
+	&& cd /usr/src/rebar3-src \
+	&& install -v ./rebar3 /usr/local/bin/ \
+	&& rm -rf /usr/src/rebar3-src \
+	&& apk add --virtual .erlang-rundeps \
+		$runDeps \
+		lksctp-tools \
+		ca-certificates
 
-RUN apt-get install -y dos2unix \
-                       htop \
-                       tmux \
-                       vim
-
-# Setting Environment Variables ------------------------------------------------
-ENV ERL_INTERFACE_DIR=/usr/local/lib/erlang/lib/erl_interface-3.13.1 \
-    ORACLE_HOME=/usr/lib/oracle/19.6/client64
- 
-RUN echo "=====================================================================> Curent Date: " \
- && date \
-# Show Environment Variables ---------------------------------------------------
- && echo "=====================================================================> Environment variable ERL_INTERFACE_DIR: " \
- && echo $ERL_INTERFACE_DIR \
- && echo "=====================================================================> Environment variable ORACLE_HOME: " \
- && echo $ORACLE_HOME \
-# Show component versions ------------------------------------------------------
- && echo "=====================================================================> Version  autoconf: " \
- && autoconf -V \
- && echo "=====================================================================> Version  automake: " \
- && automake --version \
- && echo "=====================================================================> Version  curl: " \
- && curl --version \
- && echo "=====================================================================> Version  dos2unix: " \
- && dos2unix --version \
- && echo "=====================================================================> Version  gcc: " \
- && gcc --version \
- && echo "=====================================================================> Version  Git: " \
- && git --version \
- && echo "=====================================================================> Version  htop: " \
- && htop --version \
- && echo "=====================================================================> Version  rebar3: " \
- && rebar3 version \
- && echo "=====================================================================> Version  tmux: " \
- && tmux -V \
- && echo "=====================================================================> Version  Vim: " \
- && vim --version \
- && echo "=====================================================================> Version  wget: " \
- && wget --version \
- && echo "=====================================================================> Version  yarn: " \
- && yarn --version 
-
-EXPOSE 1236 8443 9443
-
-CMD ["/bin/bash"]
+CMD ["erl"]
