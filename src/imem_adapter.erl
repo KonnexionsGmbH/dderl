@@ -335,7 +335,7 @@ process_cmd({[<<"browse_data">>], ReqBody}, Sess, _UserId, From, #priv{connectio
     ConnId = proplists:get_value(<<"conn_id">>, BodyJson, <<>>), %% This should be change to params...
     Row = proplists:get_value(<<"row">>, BodyJson, 0),
     Col = proplists:get_value(<<"col">>, BodyJson, 0),
-    R = Statement:row_with_key(Row),
+    R = dderl_fsm:row_with_key(Statement, Row),
     ?Debug("Row with key ~p",[R]),
     Tables = [element(1,T) || T <- tuple_to_list(element(3, R)), size(T) > 0],
     IsView = lists:any(fun(E) -> E =:= ddCmd end, Tables) andalso
@@ -450,6 +450,10 @@ process_cmd({[<<"system_views">>], ReqBody}, Sess, _UserId, From, Priv, SessPid)
             RespJson = jsx:encode([{<<"error">>, Reason}]);
         F ->
             C = dderl_dal:get_command(Sess, F#ddView.cmd),
+            ?Info("!!! C#ddCmd.command : ~p", [C#ddCmd.command]),
+            ?Info("!!! Sess : ~p", [Sess]),
+            ?Info("!!! {ConnId, imem} : ~p", [{ConnId, imem}]),
+            ?Info("!!! SessPid : ~p", [SessPid]),
             Resp = process_query(C#ddCmd.command, Sess, {ConnId, imem}, SessPid),
             ?Debug("ddViews ~p~n~p", [C#ddCmd.command, Resp]),
             RespJson = jsx:encode([{<<"system_views">>,
@@ -524,7 +528,7 @@ process_cmd({[<<"update_focus_stmt">>], BodyJson}, Sess, UserId, From, Priv, Ses
             Result = open_view(Sess, Connection, SessPid, ConnId, Binds, View),
             case proplists:get_value(<<"error">>, Result, undefined) of
                 undefined ->
-                    Statement:close(),
+                    dderl_fsm:close(Statement),
                     From ! {reply, jsx:encode(#{<<"update_focus_stmt">> => Result})};
                 Error ->
                     From ! {reply, jsx:encode([{<<"update_focus_stmt">>,[{<<"error">>, Error}]}])}
@@ -535,7 +539,7 @@ process_cmd({[<<"graph_subscribe">>], BodyJson}, _Sess, _UserId, From, Priv, _Se
     Statement = ?D2T(proplists:get_value(<<"statement">>, BodyJson, <<>>)),
     Key = proplists:get_value(<<"key">>, BodyJson, <<>>),
     Topic = proplists:get_value(<<"topic">>, BodyJson, <<>>),
-    Statement:gui_req(subscribe, {Topic, Key}, gui_resp_cb_fun(<<"graph_subscribe">>, Statement, From)),
+    dderl_fsm:gui_req(Statement, subscribe, {Topic, Key}, gui_resp_cb_fun(<<"graph_subscribe">>, Statement, From)),
     Priv;
 process_cmd({[<<"sort">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     [{<<"sort">>,BodyJson}] = ReqBody,
@@ -543,20 +547,20 @@ process_cmd({[<<"sort">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     SrtSpc = proplists:get_value(<<"spec">>, BodyJson, []),
     SortSpec = sort_json_to_term(SrtSpc),
     ?Debug("The sort spec from json: ~p", [SortSpec]),
-    Statement:gui_req(sort, SortSpec, gui_resp_cb_fun(<<"sort">>, Statement, From)),
+    dderl_fsm:gui_req(Statement, sort, SortSpec, gui_resp_cb_fun(<<"sort">>, Statement, From)),
     Priv;
 process_cmd({[<<"filter">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     [{<<"filter">>,BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     FltrSpec = proplists:get_value(<<"spec">>, BodyJson, []),
     FilterSpec = filter_json_to_term(FltrSpec),
-    Statement:gui_req(filter, FilterSpec, gui_resp_cb_fun(<<"filter">>, Statement, From)),
+    dderl_fsm:gui_req(Statement, filter, FilterSpec, gui_resp_cb_fun(<<"filter">>, Statement, From)),
     Priv;
 process_cmd({[<<"reorder">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     [{<<"reorder">>,BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     ColumnOrder = proplists:get_value(<<"column_order">>, BodyJson, []),
-    Statement:gui_req(reorder, ColumnOrder, gui_resp_cb_fun(<<"reorder">>, Statement, From)),
+    dderl_fsm:gui_req(Statement, reorder, ColumnOrder, gui_resp_cb_fun(<<"reorder">>, Statement, From)),
     Priv;
 process_cmd({[<<"drop_table">>], ReqBody}, _Sess, _UserId, From, #priv{connections = Connections} = Priv, _SessPid) ->
     [{<<"drop_table">>, BodyJson}] = ReqBody,
@@ -593,7 +597,7 @@ process_cmd({[<<"button">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
                 _ -> ButtonBin
             end
     end,
-    Statement:gui_req(button, Button, gui_resp_cb_fun(<<"button">>, Statement, From)),
+    dderl_fsm:gui_req(Statement, button, Button, gui_resp_cb_fun(<<"button">>, Statement, From)),
     Priv;
 process_cmd({[<<"update_data">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     [{<<"update_data">>,BodyJson}] = ReqBody,
@@ -601,7 +605,7 @@ process_cmd({[<<"update_data">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid
     RowId = proplists:get_value(<<"rowid">>, BodyJson, <<>>),
     CellId = proplists:get_value(<<"cellid">>, BodyJson, <<>>),
     Value = proplists:get_value(<<"value">>, BodyJson, <<>>),
-    Statement:gui_req(update, [{RowId,upd,[{CellId,Value}]}], gui_resp_cb_fun(<<"update_data">>, Statement, From)),
+    dderl_fsm:gui_req(Statement, update, [{RowId,upd,[{CellId,Value}]}], gui_resp_cb_fun(<<"update_data">>, Statement, From)),
     Priv;
 process_cmd({[<<"delete_row">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     [{<<"delete_row">>,BodyJson}] = ReqBody,
@@ -609,21 +613,21 @@ process_cmd({[<<"delete_row">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid)
     RowIds = proplists:get_value(<<"rowids">>, BodyJson, []),
     DelSpec = [{RowId,del,[]} || RowId <- RowIds],
     ?Debug("delete ~p ~p", [RowIds, DelSpec]),
-    Statement:gui_req(update, DelSpec, gui_resp_cb_fun(<<"delete_row">>, Statement, From)),
+    dderl_fsm:gui_req(Statement, update, DelSpec, gui_resp_cb_fun(<<"delete_row">>, Statement, From)),
     Priv;
 process_cmd({[<<"insert_data">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     [{<<"insert_data">>,BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     ClmIdx = proplists:get_value(<<"col">>, BodyJson, <<>>),
     Value =  proplists:get_value(<<"value">>, BodyJson, <<>>),
-    Statement:gui_req(update, [{undefined,ins,[{ClmIdx,Value}]}], gui_resp_cb_fun(<<"insert_data">>, Statement, From)),
+    dderl_fsm:gui_req(Statement, update, [{undefined,ins,[{ClmIdx,Value}]}], gui_resp_cb_fun(<<"insert_data">>, Statement, From)),
     Priv;
 process_cmd({[<<"paste_data">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     [{<<"paste_data">>, BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     ReceivedRows = proplists:get_value(<<"rows">>, BodyJson, []),
     Rows = gen_adapter:extract_modified_rows(ReceivedRows),
-    Statement:gui_req(update, Rows, gui_resp_cb_fun(<<"paste_data">>, Statement, From)),
+    dderl_fsm:gui_req(Statement, update, Rows, gui_resp_cb_fun(<<"paste_data">>, Statement, From)),
     Priv;
 process_cmd({[<<"download_query">>], ReqBody}, _Sess, UserId, From, Priv, _SessPid) ->
     [{<<"download_query">>, BodyJson}] = ReqBody,
@@ -736,7 +740,7 @@ disconnect(#priv{connections = [Connection | Rest]} = Priv) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 -spec gui_resp_cb_fun(binary(), {atom(), pid()}, pid()) -> fun().
 gui_resp_cb_fun(Cmd, Statement, From) ->
-    Clms = Statement:get_columns(),
+    Clms = dderl_fsm:get_columns(Statement),
     gen_adapter:build_resp_fun(Cmd, Clms, From).
 
 -spec sort_json_to_term(list()) -> [tuple()].
@@ -775,7 +779,7 @@ process_query(Query, Connection, {ConnId, Adapter}, Params, SessPid) ->
 -spec process_query(binary(), tuple(), {binary(), atom()} | [tuple()], pid()) -> list().
 process_query(Query, Connection, {ConnId, Adapter}, SessPid) ->
     process_query(Query, Connection, {ConnId, Adapter}, [], SessPid);
-process_query(Query, {_,_ConPid}=Connection, Params, SessPid) ->
+process_query(Query, Connection, Params, SessPid) ->
     SessPid ! {log_query, Query, Params},
     case check_funs(erlimem_session:exec(Connection, Query, ?DEFAULT_ROW_SIZE, Params)) of
         ok ->
@@ -806,7 +810,7 @@ process_query(Query, {_,_ConPid}=Connection, Params, SessPid) ->
                                         , update_cursor_prepare_funs = imem_adapter_funs:update_cursor_prepare(Connection, StmtRefs)
                                         , update_cursor_execute_funs = imem_adapter_funs:update_cursor_execute(Connection, StmtRefs)
                                         }, SessPid),
-            erlimem_session:add_stmt_fsm(Connection, StmtRefs, StmtFsm),
+            erlimem_session:add_stmt_fsm(Connection, StmtRefs, {dderl_fsm, StmtFsm}),
             ?Debug("StmtRslt ~p ~p", [RowCols, SortSpec]),
             Columns = gen_adapter:build_column_json(lists:reverse(RowCols)),
             JSortSpec = build_srtspec_json(SortSpec),

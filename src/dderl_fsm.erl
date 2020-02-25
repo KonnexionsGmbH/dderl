@@ -182,13 +182,13 @@
 start(#fsmctxs{} = FsmCtxs, SessPid) ->
     Ctx = fsm_ctx(FsmCtxs),
 	{ok,Pid} = gen_statem:start(?MODULE, {Ctx, SessPid}, []),
-    {?MODULE,Pid}.
+    Pid.
 
 -spec start_link(#fsmctxs{}, pid()) -> {atom(), pid()}.
 start_link(#fsmctxs{} = FsmCtxs, SessPid) ->
     Ctx = fsm_ctx(FsmCtxs),
 	{ok, Pid} = gen_statem:start_link(?MODULE, {Ctx, SessPid}, []),
-    {?MODULE,Pid}.
+    Pid.
 
 -spec fsm_ctx(#fsmctxs{}) -> #ctx{}.
 fsm_ctx(#fsmctxs{ stmtRefs                   = StmtRefs
@@ -226,8 +226,8 @@ fsm_ctx(#fsmctxs{ stmtRefs                   = StmtRefs
         , stmtClass                 = StmtClass
         }.
 
--spec stop({atom(), pid()}) -> ok.
-stop({?MODULE,Pid}) ->
+-spec stop(pid()) -> ok.
+stop(Pid) ->
 	gen_statem:cast(Pid,stop).
 
 inspect_status(Pid) -> gen_statem:call(Pid, inspect_status).
@@ -235,116 +235,116 @@ inspect_status(Pid) -> gen_statem:call(Pid, inspect_status).
 inspect_state(Pid) -> gen_statem:call(Pid, inspect_state).
 
 
--spec refresh_session_ctx(#fsmctxs{}, {atom(), pid()}) -> ok.
-refresh_session_ctx(#fsmctxs{} = FsmCtxs, {?MODULE, Pid}) ->
+-spec refresh_session_ctx(pid(), #fsmctxs{}) -> ok.
+refresh_session_ctx(Pid, #fsmctxs{} = FsmCtxs) ->
     Ctx = fsm_ctx(FsmCtxs),
     ?Debug("Refreshing the session ctx"),
     gen_statem:cast(Pid, {refresh_ctx, Ctx}).
 
--spec gui_req(atom(), term(), fun(), {atom(), pid()}) -> ok.
-gui_req(button, <<"restart">>, ReplyTo, {?MODULE,Pid}) ->
+-spec gui_req(pid(), atom(), term(), fun()) -> ok.
+gui_req(Pid, button, <<"restart">>, ReplyTo) ->
     ?NoDbLog(debug, [], "button ~p", [<<"restart">>]),
     gen_statem:cast(Pid,{button, <<"restart">>, ReplyTo});
-gui_req(button, <<">|">>, ReplyTo, {?MODULE,Pid}) ->
+gui_req(Pid, button, <<">|">>, ReplyTo) ->
     ?NoDbLog(debug, [], "button ~p", [<<">|">>]),
     gen_statem:cast(Pid,{button, <<">|">>, ReplyTo});
-gui_req(button, <<"more">>, ReplyTo, {?MODULE,Pid}) ->
+gui_req(Pid, button, <<"more">>, ReplyTo) ->
     ?NoDbLog(debug, [], "button ~p", [<<"more">>]),
     gen_statem:cast(Pid,{button, <<"more">>, ReplyTo});
-gui_req(button, <<">|...">>, ReplyTo, {?MODULE,Pid}) ->
+gui_req(Pid, button, <<">|...">>, ReplyTo) ->
     ?NoDbLog(debug, [], "button ~p", [<<">|...">>]),
     gen_statem:cast(Pid,{button, <<">|...">>, ReplyTo});
-gui_req(button, <<"...">>, ReplyTo, {?MODULE,Pid}) ->
+gui_req(Pid, button, <<"...">>, ReplyTo) ->
     ?NoDbLog(debug, [], "button ~p", [<<"...">>]),
     gen_statem:cast(Pid,{button, <<"...">>, ReplyTo});
-gui_req(button, <<"pt">>, ReplyTo, {?MODULE,Pid}) ->
+gui_req(Pid, button, <<"pt">>, ReplyTo) ->
     ?NoDbLog(debug, [], "button ~p", [<<"pt">>]),
     gen_statem:cast(Pid,{button, <<"pt">>, ReplyTo});
-gui_req(button, <<"tail">>, ReplyTo, {?MODULE,Pid}) ->
+gui_req(Pid, button, <<"tail">>, ReplyTo) ->
     ?NoDbLog(debug, [], "button ~p", [<<"tail">>]),
     gen_statem:cast(Pid,{button, <<"tail">>, ReplyTo});
-gui_req(CommandStr, Parameter, ReplyTo, {?MODULE,Pid}) when is_atom(CommandStr) ->
+gui_req(Pid, CommandStr, Parameter, ReplyTo) when is_atom(CommandStr) ->
     ?NoDbLog(debug, [], "~p ~p", [CommandStr,Parameter]),
     gen_statem:cast(Pid,{CommandStr, Parameter, ReplyTo}).
 
--spec close({atom(), pid()}) -> ok.
-close({?MODULE, Pid}) ->
+-spec close(pid()) -> ok.
+close(Pid) ->
     gen_statem:cast(Pid, close_stmt).
 
--spec row_with_key(integer(), {atom(), pid()}) -> tuple().
-row_with_key(RowId, {?MODULE,Pid}) when is_integer(RowId) ->
+-spec row_with_key(pid(), integer()) -> tuple().
+row_with_key(Pid, RowId) when is_integer(RowId) ->
     % ?Debug("row_with_key ~p", [RowId]),
     gen_statem:call(Pid,{"row_with_key", RowId}).
 
--spec get_count({atom(), pid()}) -> integer().
-get_count({?MODULE, Pid}) ->
+-spec get_count(pid()) -> integer().
+get_count(Pid) ->
     gen_statem:call(Pid, get_count).
 
 %% the return tuple type #stmtcol{}. but is not imported
--spec get_columns({atom(), pid()}) -> [tuple()].
-get_columns({?MODULE, Pid}) ->
+-spec get_columns(pid()) -> [tuple()].
+get_columns(Pid) ->
     gen_statem:call(Pid, {"get_columns"}).
 
--spec get_query({atom(), pid()}) -> binary().
-get_query({?MODULE, Pid}) ->
+-spec get_query(pid()) -> binary().
+get_query(Pid) ->
     gen_statem:call(Pid, get_query).
 
--spec get_table_name({atom(), pid()}) -> term().
-get_table_name({?MODULE, Pid}) ->
+-spec get_table_name(pid()) -> term().
+get_table_name(Pid) ->
     gen_statem:call(Pid, get_table_name).
 
--spec get_distinct_count(pos_integer(), {atom(), pid()}) -> [tuple()].
-get_distinct_count(ColumnId, {?MODULE, Pid}) ->
+-spec get_distinct_count(pid(), pos_integer()) -> [tuple()].
+get_distinct_count(Pid, ColumnId) ->
     gen_statem:call(Pid, {distinct_count, ColumnId}, 60000).
 
--spec get_distinct_statistics(pos_integer(), {atom(), pid()}) -> [tuple()].
-get_distinct_statistics(ColumnId, {?MODULE, Pid}) ->
+-spec get_distinct_statistics(pid(), pos_integer()) -> [tuple()].
+get_distinct_statistics(Pid, ColumnId) ->
     gen_statem:call(Pid, {distinct_statistics, ColumnId}, 60000).
 
--spec get_statistics([pos_integer()], {atom(), pid()}) -> {integer(), list(), list(), atom()}.
-get_statistics(ColumnIds, {?MODULE, Pid}) ->
+-spec get_statistics(pid(), [pos_integer()]) -> {integer(), list(), list(), atom()}.
+get_statistics(Pid, ColumnIds) ->
     gen_statem:call(Pid, {statistics, ColumnIds}).
 
 %-spec get_statistics([pos_integer()], [integer()], tuple()) -> [tuple(), tuple()] | {error, binary()}.
-get_statistics(ColumnIds, RowIds, {?MODULE, Pid}) ->
+get_statistics(Pid, ColumnIds, RowIds) ->
     gen_statem:call(Pid, {statistics, ColumnIds, RowIds}).
 
--spec get_sender_params({atom(), pid()}) -> {}.
-get_sender_params({?MODULE, Pid}) ->
+-spec get_sender_params(pid()) -> {}.
+get_sender_params(Pid) ->
     gen_statem:call(Pid, get_sender_params).
 
--spec get_receiver_params({atom(), pid()}) -> {}.
-get_receiver_params({?MODULE, Pid}) ->
+-spec get_receiver_params(pid()) -> {}.
+get_receiver_params(Pid) ->
     gen_statem:call(Pid, get_receiver_params).
 
--spec cache_data({atom(), pid()}) -> ok.
-cache_data({?MODULE, Pid}) ->
+-spec cache_data(pid()) -> ok.
+cache_data(Pid) ->
     gen_statem:call(Pid, cache_data).
 
--spec rows({pid(), {_, _}} | {_, _}, {atom(), pid()}) -> ok.
-rows({StmtRef, {error, Error}}, {?MODULE, Pid}) ->   % from erlimem/imem_server
+-spec rows(pid(), {pid(), {_, _}} | {_, _}) -> ok.
+rows(Pid, {StmtRef, {error, Error}}) ->   % from erlimem/imem_server
     %?Info("dderl_fsm:rows from ~p ~p", [StmtRef, {error, Error}]),
     gen_statem:cast(Pid, {StmtRef, {error, Error}});
-rows({StmtRef, {Rows,Completed}}, {?MODULE,Pid}) when is_list(Rows) ->  % from erlimem/imem_server
+rows(Pid, {StmtRef, {Rows,Completed}}) when is_list(Rows) ->  % from erlimem/imem_server
     %?Info("dderl_fsm:rows from ~p ~p ~p", [StmtRef, length(Rows), Completed]),
     %?Info("dderl_fsm:rows from ~p ~p~n~p", [StmtRef, length(Rows), Rows]),
     gen_statem:cast(Pid, {rows, {StmtRef,Rows,Completed}});
-rows({Rows,Completed},{?MODULE,Pid}) when is_list(Rows) ->  % from dderloci (single source)
+rows(Pid, {Rows,Completed}) when is_list(Rows) ->  % from dderloci (single source)
     %?Info("dderl_fsm:rows ~p ~p", [length(Rows), Completed]),
     gen_statem:cast(Pid, {rows, {self(),Rows,Completed}});
-rows({StmtRef, Error}, {?MODULE, Pid}) ->   % from erlimem/imem_server
+rows(Pid, {StmtRef, Error}) ->   % from erlimem/imem_server
     %?Info("dderl_fsm:rows from ~p ~p", [StmtRef, Error]),
     gen_statem:cast(Pid, {StmtRef,{error,Error}});
-rows(Error, {?MODULE, Pid}) ->             % from dderloci (single source)
+rows(Pid, Error) ->             % from dderloci (single source)
     %?Info("dderl_fsm:rows ~p", [Error]),
     gen_statem:cast(Pid, {self(),Error}).
 
--spec rows_limit(integer(), list(), {atom(), pid()}) -> ok.
-rows_limit(NRows, Recs, {?MODULE, Pid}) ->
+-spec rows_limit(pid(), integer(), list()) -> ok.
+rows_limit(Pid, NRows, Recs) ->
     gen_statem:cast(Pid, {rows_limit, {NRows, Recs}}).
 
--spec delete({list(), _}, {atom(), pid()}) -> ok.
-delete({StmtRef, {Rows, Completed}}, {?MODULE,Pid}) ->
+-spec delete(pid(), {list(), _}) -> ok.
+delete(Pid, {StmtRef, {Rows, Completed}}) ->
     gen_statem:cast(Pid, {delete, {StmtRef, Rows, Completed}}).
 
 -spec fetch(atom(), atom(), #state{}) -> #state{}.

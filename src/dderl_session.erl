@@ -543,7 +543,7 @@ process_call({[<<"download_buffer_csv">>], ReqData}, Adapter, From, {SrcIp, _},
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     ColumnPositions = proplists:get_value(<<"column_positions">>, BodyJson, []),
     Filename = proplists:get_value(<<"filename">>, BodyJson, <<>>),
-    {TableId, IndexId, Nav, RowFun, OrigClms, _FilterSpec} = Statement:get_sender_params(),
+    {TableId, IndexId, Nav, RowFun, OrigClms, _FilterSpec} = dderl_fsm:get_sender_params(Statement),
     UsedTable = case Nav of
         raw -> TableId;
         ind -> IndexId
@@ -664,7 +664,7 @@ process_call({Cmd, ReqData}, Adapter, From, {SrcIp,_}, #state{sess = Sess, user_
 
 spawn_process_call(Adapter, CurrentPriv, From, Cmd, BodyJson, Sess, UserId, SelfPid) ->
     try 
-        % ?Info("Adapter ~p",[Adapter]),
+        ?Info("Adapter ~p",[Adapter]),
         % ?Info("CurrentPriv ~p",[CurrentPriv]),
         % ?Info("Cmd ~p",[Cmd]),
         % ?Info("BodyJson ~p",[BodyJson]),
