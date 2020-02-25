@@ -24,3 +24,4 @@ TEST*.xml
 node_modules/
 priv/swagger/yarn.*
 .rebar3/
+/dderl.dderl1@127.0.0.1/
