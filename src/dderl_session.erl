@@ -410,14 +410,6 @@ process_call({[<<"connect_info">>], _ReqData}, _Adapter, From, {SrcIp,_},
                     #{connect_info =>
                       CInfo#{connections =>
                         Connections ++
-                            case [A || #{adapter := A} <- Connections, A == <<"oci">>] of
-                                [] -> [#{adapter => <<"oci">>,
-                                        id => null,
-                                        name => <<"template oracle">>,
-                                        owner => User,
-                                        method => <<"tns">>}];
-                                _ -> []
-                            end ++
                             case [A || #{adapter := A} <- Connections, A == <<"imem">>] of
                                 [] -> [#{adapter => <<"imem">>,
                                         id => null,
@@ -719,7 +711,6 @@ get_apps_version([App|Rest], Deps) ->
 
 -spec adapter_name(atom()) -> atom().
 adapter_name(imem_adapter) -> imem;
-adapter_name(oci_adapter) -> oci;
 adapter_name(gen_adapter) -> gen;
 adapter_name(AdaptMod) ->
     [BinAdapter|_] = binary:split(atom_to_binary(AdaptMod, utf8), <<"_">>),
