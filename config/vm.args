@@ -23,3 +23,6 @@
 
 ## Tweak GC to run more often
 ##-env ERL_FULLSWEEP_AFTER 10
+
+## adding elixir files to patch
+-pa releases/${REL_VSN}/consolidated
