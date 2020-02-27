@@ -10,7 +10,6 @@ snapshot
 test/*.beam
 *.log
 *.dump
-snapshot
 *.swp
 *.swo
 package-lock.json
