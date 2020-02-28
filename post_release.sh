@@ -1,6 +1,6 @@
 . $(dirname $0)/common.sh
 app=${1:-dderl}
-rel=${2}
+rel=${2:-prod}
 
 log green "-------------------------------------------------------------------------"
 log green "post_release $rel/$app @ $(pwd)"
@@ -12,17 +12,17 @@ else
     READLINK_CMD='readlink'
 fi
 
-if [ -z "$rel" ]
-then
-    dderlPriv=$($READLINK_CMD -f priv/)
-else
-    dderlPriv=$($READLINK_CMD -f _build/$rel/rel/$app/lib/dderl-*/priv/)
-fi
+dderlPriv=$($READLINK_CMD -f _build/$rel/rel/$app/lib/dderl-*/priv/)
 
 if [ -z "$dderlPriv" ]
 then
     log red "dderlPriv dir not found"
     exit 1
+fi
+
+if [ -d "$dderlPriv/dev/node_modules" ]; then
+    log brown "$dderlPriv/dev/node_modules already exists, deleting"
+    rm -rf $dderlPriv/dev/node_modules
 fi
 
 log lightgrey "building dderl @ $dderlPriv"
