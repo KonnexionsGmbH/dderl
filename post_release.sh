@@ -5,18 +5,27 @@ rel=${2:-prod}
 log green "-------------------------------------------------------------------------"
 log green "post_release $rel/$app @ $(pwd)"
 
-dderlPriv=$(readlink -f _build/$rel/rel/$app/lib/dderl-*/priv/)
-log lightgrey "building dderl @ $dderlPriv"
-
-if [ -d "$dderlPriv/dev/node_modules" ]; then
-    log red "$dderlPriv/dev/node_modules already exists"
-	exit 1
+if [[ "$OSTYPE" == *darwin* ]]
+then
+    READLINK_CMD='greadlink'
+else
+    READLINK_CMD='readlink'
 fi
 
-if [ -d "$dderlPriv/public/dist" ]; then
-    log red "$dderlPriv/public/dist already exists"
+dderlPriv=$($READLINK_CMD -f _build/$rel/rel/$app/lib/dderl-*/priv/)
+
+if [ -z "$dderlPriv" ]
+then
+    log red "dderlPriv dir not found"
     exit 1
 fi
+
+if [ -d "$dderlPriv/dev/node_modules" ]; then
+    log brown "$dderlPriv/dev/node_modules already exists, deleting"
+    rm -rf $dderlPriv/dev/node_modules
+fi
+
+log lightgrey "building dderl @ $dderlPriv"
 
 cd $dderlPriv/dev
 log green "yarn install-build-prod @ $(pwd)"
