@@ -3,6 +3,12 @@ Application dderl
 
 Release history with new or improved features and bugfixes
 
+Version 3.9.0 (Release Date 28.02.2020)
+=======================================
+* OTP 21+ support
+* Removed tuple calls
+* Removed oci adapter
+
 Version 3.7.2 (Release Date 17.12.2019)
 ======================================
 * IMEM version changed to 3.7.2
