@@ -270,14 +270,7 @@ process_call({[<<"register_key_attest">>], ReqData}, _Adapter, From, {SrcIp,_},
             ?Info(
             "Wax: attestation object validated with cose key ~p", [CoseKey]),
             ?Info("Attestation result : ~p", [AttestationResult]),
-
-            % user = get_session(conn, :login)
-
-            % WaxDemo.User.register_new_cose_key(user, raw_id_b64, cose_key)
-
-            % conn
-            % |> put_flash(:info, "Key registered")
-            % |> redirect(to: "/me")
+            erlimem_session:run_cmd(State#state.sess, auth_add_fido2, [{RawId64, CoseKey}]),
             #{result => <<"attestation object validated">>};
         {error, _} = Error ->
             ?Info("Wax: attestation object validation failed with error ~p", [Error]),
@@ -819,7 +812,7 @@ login(ReqData, From, SrcIp, State) ->
             try dderl_dal:process_login(
                          ReqDataMap, State,
                          #{auth => fun(Auth) ->
-                                       erlimem_session:auth((State#state.sess), dderl, Id, Auth)
+                                       erlimem_session:auth(State#state.sess, dderl, Id, Auth)
                                    end,
                            connInfo => ConnInfo,
                            relayState => fun dderl_resource:samlRelayStateHandle/2,
