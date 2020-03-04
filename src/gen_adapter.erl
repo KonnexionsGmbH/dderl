@@ -319,7 +319,7 @@ process_cmd({[<<"distinct_count">>], ReqBody}, _Adapter, _Sess, _UserId, From, _
     [{<<"distinct_count">>, BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     [ColumnId|_] = proplists:get_all_values(<<"column_ids">>, BodyJson),
-    RespJson = case Statement:get_distinct_count(ColumnId) of
+    RespJson = case dderl_fsm:get_distinct_count(Statement, ColumnId) of
         {error, Error, _St} ->
             ?Error("Distinct count error ~p", [Error], _St),
             jsx:encode([{<<"distinct_count">>, [{error, Error}]}]);
@@ -348,7 +348,7 @@ process_cmd({[<<"distinct_statistics">>], ReqBody}, _Adapter, _Sess, _UserId, Fr
     [{<<"distinct_statistics">>, BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     [ColumnId|_] = proplists:get_all_values(<<"column_ids">>, BodyJson),
-    RespJson = case Statement:get_distinct_statistics(ColumnId) of
+    RespJson = case dderl_fsm:get_distinct_statistics(Statement, ColumnId) of
                    {error, Error, _St} ->
                        ?Error("Distinct statistics error ~p", [Error], _St),
                        jsx:encode([{<<"distinct_statistics">>, [{error, Error}]}]);
@@ -378,7 +378,7 @@ process_cmd({[<<"statistics">>], ReqBody}, _Adapter, _Sess, _UserId, From, _Priv
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     ColumnIds = proplists:get_value(<<"column_ids">>, BodyJson, []),
     RowIds = proplists:get_value(<<"row_ids">>, BodyJson, 0),
-    RespJson = case Statement:get_statistics(ColumnIds, RowIds) of
+    RespJson = case dderl_fsm:get_statistics(Statement, ColumnIds, RowIds) of
         {error, Error, _St} ->
             ?Error("Stats error ~p", [Error], _St),
             jsx:encode([{<<"statistics">>, [{error, Error}]}]);
@@ -411,7 +411,7 @@ process_cmd({[<<"statistics_full">>], ReqBody}, _Adapter, _Sess, _UserId, From, 
     [{<<"statistics_full">>, BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     ColumnIds = proplists:get_value(<<"column_ids">>, BodyJson, []),
-    RespJson = case Statement:get_statistics(ColumnIds) of
+    RespJson = case dderl_fsm:get_statistics(Statement, ColumnIds) of
         {error, Error, _St} ->
             ?Error("Stats error ~p", [Error], _St),
             jsx:encode([{<<"statistics_full">>, [{error, Error}]}]);
@@ -444,7 +444,7 @@ process_cmd({[<<"edit_term_or_view">>], ReqBody}, _Adapter, Sess, _UserId, From,
     StringToFormat = proplists:get_value(<<"erlang_term">>, BodyJson, <<>>),
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     Row = proplists:get_value(<<"row">>, BodyJson, 0),
-    R = Statement:row_with_key(Row),
+    R = dderl_fsm:row_with_key(Statement, Row),
     ?Debug("Row with key ~p~n~n",[R]),
     Tables = [element(1,T) || T <- tuple_to_list(element(3, R)), size(T) > 0],
     IsView = lists:any(fun(E) -> E =:= ddCmd end, Tables),
@@ -480,15 +480,15 @@ process_cmd({[<<"get_sql">>], ReqBody}, Adapter, _Sess, _UserId, From, _Priv) ->
     ColumnIds = proplists:get_value(<<"columnIds">>, BodyJson, []),
     RowIds = proplists:get_value(<<"rowIds">>, BodyJson, []),
     Operation = proplists:get_value(<<"op">>, BodyJson, <<>>),
-    Columns = Statement:get_columns(),
-    case Statement:get_table_name() of
+    Columns = dderl_fsm:get_columns(Statement),
+    case dderl_fsm:get_table_name(Statement) of
         {as, Tab, _Alias} -> TableName = Tab;
         {{as, Tab, _Alias}, _} -> TableName = Tab;
         {Tab, _} -> TableName = Tab;
         Tab when is_binary(Tab) -> TableName = Tab;
         _ -> TableName = <<>>
     end,
-    Rows = [Statement:row_with_key(Id) || Id <- RowIds],
+    Rows = [dderl_fsm:row_with_key(Statement, Id) || Id <- RowIds],
     Sql = generate_sql(TableName, Operation, Rows, Columns, ColumnIds, Adapter),
     Response = jsx:encode([{<<"get_sql">>, [{<<"sql">>, Sql}, {<<"title">>, <<"Generated Sql">>}]}]),
     From ! {reply, Response};
@@ -496,7 +496,7 @@ process_cmd({[<<"get_sql">>], ReqBody}, Adapter, _Sess, _UserId, From, _Priv) ->
 process_cmd({[<<"cache_data">>], ReqBody}, _Adapter, _Sess, _UserId, From, _Priv) ->
     [{<<"cache_data">>, BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
-    RespJson = case Statement:cache_data() of
+    RespJson = case dderl_fsm:cache_data(Statement) of
         {error, ErrorMsg, _St} ->
             ?Error("cache_data error ~p", [ErrorMsg], _St),
             jsx:encode([{<<"cache_data">>, [{error, ErrorMsg}]}]);
@@ -1030,6 +1030,6 @@ get_cell_value(Cell, Statement) ->
     % Get a proplist with row and column and get the value from a statement.
     Row = proplists:get_value(<<"row">>, Cell, 0),
     Col = proplists:get_value(<<"col">>, Cell, 0),
-    R = Statement:row_with_key(Row),
-    #rowCol{type = Type} = lists:nth(Col, Statement:get_columns()),
+    R = dderl_fsm:row_with_key(Statement, Row),
+    #rowCol{type = Type} = lists:nth(Col, dderl_fsm:get_columns(Statement)),
     {Type, element(3 + Col, R)}.
