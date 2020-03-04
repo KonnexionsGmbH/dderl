@@ -44,6 +44,7 @@
           , lock_state  = unlocked      :: unlocked | locked | screensaver
           , xsrf_token  = <<>>          :: binary()
           , is_proxy    = false         :: boolean()
+          , fido2_challenge             :: map()
          }).
 
 %% Helper functions
@@ -246,6 +247,44 @@ process_call({[<<"ping">>], _ReqData}, _Adapter, From, {SrcIp,_},
             reply(From, #{ping => #{error => show_screen_saver}}, self()),
             State#state{lock_state = screensaver}
     end;
+process_call({[<<"register_key_init">>], ReqData}, _Adapter, From, {SrcIp,_}, State) ->
+    #{<<"host_url">> := HostUrl} = jsx:decode(ReqData, [return_maps]),
+    act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "register_key_init"}, State),
+    Challenge = 'Elixir.Wax':new_registration_challenge([{origin, HostUrl}]),
+    #{bytes := Bytes} = Challenge,
+    Resp = #{<<"register_key_init">> => Challenge#{bytes => base64:encode(Bytes)}},
+    reply(From, Resp, self()),
+    State#state{fido2_challenge = Challenge};
+process_call({[<<"register_key_attest">>], ReqData}, _Adapter, From, {SrcIp,_},
+             #state{fido2_challenge = Challenge} = State) ->
+    BodyMap = jsx:decode(ReqData, [return_maps]),
+    act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "register_key_init"}, State),
+    #{<<"attestationObject">> := Attestation64,
+      <<"clientDataJSON">> := ClientData,
+      <<"rawID">> := RawId64,
+      <<"type">> := <<"public-key">>} = BodyMap,
+    Attestation = base64:decode(Attestation64),
+    Resp =
+    case 'Elixir.Wax':register(Attestation, ClientData, Challenge) of
+        {ok, {CoseKey, AttestationResult}} ->
+            ?Info(
+            "Wax: attestation object validated with cose key ~p", [CoseKey]),
+            ?Info("Attestation result : ~p", [AttestationResult]),
+
+            % user = get_session(conn, :login)
+
+            % WaxDemo.User.register_new_cose_key(user, raw_id_b64, cose_key)
+
+            % conn
+            % |> put_flash(:info, "Key registered")
+            % |> redirect(to: "/me")
+            #{result => <<"attestation object validated">>};
+        {error, _} = Error ->
+            ?Info("Wax: attestation object validation failed with error ~p", [Error]),
+            #{error => <<"attestation object validation failed">>}
+    end,
+    reply(From, #{<<"register_key_attest">> => Resp}, self()),
+    State#state{fido2_challenge = undefined};
 %% IMPORTANT:
 % This function clause is placed right after login to be able to catch all
 % request (other than login above) which are NOT to be allowed without a login

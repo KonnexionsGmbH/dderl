@@ -441,6 +441,20 @@ export function change_password(shouldConnect) {
     }
 }
 
+export function register_fido2_key() {
+    ajaxCall(null, 'register_key_init', null, 'register_key_init',
+        function (response) {
+            console.log("register_key_init challenge");
+            console.log(response);
+            triggerAttestation(response);
+        },
+        function (error) {
+            console.log("Error on fido2 key registration : ", error);
+            alert_jq("Failed to reach the server, the connection might be lost.");
+        }
+    );
+}
+
 export function smartDialogPosition(container, owner, self, checks) {
     if(!checks || checks.length === 0) {
         checks = ['right'];
@@ -694,4 +708,88 @@ export function escapeNewLines(str) {
         }
     }
     return result;
+}
+
+// fido2 helper functions
+function _arrayBufferToString(buffer) {
+    var binary = '';
+    var bytes = new Uint8Array(buffer);
+    var len = bytes.byteLength;
+    for (var i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return binary;
+}
+
+function _arrayBufferToBase64(buffer) {
+    var binary = '';
+    var bytes = new Uint8Array(buffer);
+    var len = bytes.byteLength;
+    for (var i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return window.btoa(binary);
+}
+
+function _base64ToArrayBuffer(base64) {
+    var binary_string = window.atob(base64);
+    var len = binary_string.length;
+    var bytes = new Uint8Array(len);
+    for (var i = 0; i < len; i++) {
+        bytes[i] = binary_string.charCodeAt(i);
+    }
+    return bytes.buffer;
+}
+
+function triggerAttestation(challenge) {
+    if (challenge) {
+        navigator.credentials.create({
+            publicKey: {
+                // random, cryptographically secure, at least 16 bytes
+                challenge: _base64ToArrayBuffer(challenge.bytes),
+                // relying party
+                rp: {
+                    id: challenge.rp_id,
+                    name: "K2Informatics"
+                },
+                user: {
+                    id: new Uint8Array(16),
+                    name: dderlState.username,
+                    displayName: dderlState.username
+                },
+                pubKeyCredParams: [
+                    {
+                        type: "public-key",
+                        alg: -7 // "ES256" IANA COSE Algorithms registry
+                    }
+                ],
+                attestation: "none",
+                authenticatorSelection: {
+                    requireResidentKey: false,
+                    userVerification: "discouraged"
+                }
+            }
+        }).then(function (credential) {
+            let credObj = {};
+            credObj.rawID = _arrayBufferToBase64(credential.rawId);
+            credObj.type = credential.type;
+            credObj.clientDataJSON = _arrayBufferToString(credential.response.clientDataJSON);
+            credObj.attestationObject = _arrayBufferToBase64(credential.response.attestationObject);
+            ajaxCall(null, 'register_key_attest', credObj, 'register_key_attest',
+                function (response) {
+                    console.log("register_key_attest challenge");
+                    console.log(response);
+                    if (response.error) {
+                        alert_jq(response.error);
+                    } else {
+                        alert_jq("fido2 key registered");
+                    }
+                },
+                function (error) {
+                    console.log("Error on register_key_attest : ", error);
+                    alert_jq("Failed to reach the server, the connection might be lost.");
+                }
+            );
+        });
+    }
 }
