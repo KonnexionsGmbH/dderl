@@ -206,15 +206,15 @@ handle_cast({fetch_recs_async, false, _}, #qry{fsm_ref = FsmRef, stmt_result = S
     #stmtResults{stmtRefs = Statement, rowCols = Clms} = StmtResult,
     Res = dpi_fetch_rows(Connection, Statement, ?DEFAULT_ROW_SIZE),
     case Res of
-        {error, Error} -> FsmRef:rows({error, Error});
-        {error, _DpiNifFile, _Line, #{message := Msg}} -> FsmRef:rows({error, Msg});
+        {error, Error} -> dderl_fsm:rows(FsmRef, {error, Error});
+        {error, _DpiNifFile, _Line, #{message := Msg}} -> dderl_fsm:rows(FsmRef, {error, Msg});
         {Rows, Completed} when is_list(Rows), is_boolean(Completed) ->
             Rowargs = {fix_row_format(Statement, Rows, Clms, ContainRowId), Completed},
-            try FsmRef:rows(Rowargs) of
+            try dderl_fsm:rows(FsmRef, Rowargs) of
                 ok -> ok
             catch
                 _Class:Result ->
-                    FsmRef:rows({error, Result})
+                    dderl_fsm:rows(FsmRef, {error, Result})
             end
     end,
     {noreply, State};

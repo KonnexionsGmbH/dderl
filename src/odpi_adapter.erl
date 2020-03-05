@@ -150,45 +150,33 @@ process_cmd({[<<"connect">>], BodyJson5, _SessionId}, Sess, UserId, From,
     % One slave per userid
     % TODO: Error handle the result see dpi:load/1 spec
     Node = dpi_load(build_slave_name(UserId)),
-    ConnectFun = fun() ->
-        Ctx = dpi:context_create(?DPI_MAJOR_VERSION, ?DPI_MINOR_VERSION),
-        Conn = dpi:conn_create(Ctx, User, Password, TNS, CommonParams, #{}),
-        #odpi_conn{context = Ctx, connection = Conn, node = Node}
-    end,
-    case dpi:safe(Node, ConnectFun) of
-        #odpi_conn{} = ConnRef ->
-            ?Debug("DPI loaded and connected! ~p", [ConnRef]),
-            Con = #ddConn{id = Id, name = Name, owner = UserId, adapter = odpi,
-                          access  = jsx:decode(jsx:encode(BodyJson), [return_maps])},
-                ?Debug([{user, User}], "may save/replace new connection ~p", [Con]),
-            case dderl_dal:add_connect(Sess, Con) of
-                {error, Msg} ->
-                    conn_close_and_destroy(ConnRef),
-                    From ! {reply, jsx:encode([{<<"connect">>,[{<<"error">>, Msg}]}])};
-                #ddConn{owner = Owner} = NewConn ->
-                    From ! {reply
-                            , jsx:encode(
-                                [{<<"connect">>
-                                  , [{<<"conn_id">>, NewConn#ddConn.id}
-                                     , {<<"owner">>, Owner}
-                                     , {<<"conn">>
-                                        , ?E2B(ConnRef)}
-                                    ]}])}
-            end,
-            Priv#priv{connections = [ConnRef | Connections]};
-        {error, _, _, Msg} = Error when is_list(Msg) ->
-            ?Error("DB connect error ~p", [Error]),
-            From ! {reply, jsx:encode(#{connect=>#{error=>list_to_binary(Msg)}})},
-            dpi:unload(Node),
-            Priv;
-        {error, _, _, #{message := Msg}} = Error ->
-            ?Error("DB connect error ~p", [Error]),
-            From ! {reply, jsx:encode(#{connect=>#{error=>list_to_binary(Msg)}})},
-            dpi:unload(Node),
-            Priv;
-        Error ->
-            ?Error("DB connect error ~p", [Error]),
-            From ! {reply, jsx:encode(#{connect=>#{error=>list_to_binary(io_lib:format("~p",[Error]))}})},
+    try
+        Ctx = dpi:safe(Node, dpi, context_create, [?DPI_MAJOR_VERSION, ?DPI_MINOR_VERSION]),
+        Conn = dpi:safe(Node, dpi, conn_create, [Ctx, User, Password, TNS, CommonParams, #{}]),
+        ConnRef = #odpi_conn{context = Ctx, connection = Conn, node = Node},
+    
+        ?Debug("DPI loaded and connected! ~p", [ConnRef]),
+        Con = #ddConn{id = Id, name = Name, owner = UserId, adapter = odpi,
+                        access  = jsx:decode(jsx:encode(BodyJson), [return_maps])},
+        ?Debug([{user, User}], "may save/replace new connection ~p", [Con]),
+        case dderl_dal:add_connect(Sess, Con) of
+            {error, Msg} ->
+                conn_close_and_destroy(ConnRef),
+                From ! {reply, jsx:encode([{<<"connect">>,[{<<"error">>, Msg}]}])};
+            #ddConn{owner = Owner} = NewConn ->
+                From ! {reply
+                        , jsx:encode(
+                            [{<<"connect">>
+                                , [{<<"conn_id">>, NewConn#ddConn.id}
+                                , {<<"owner">>, Owner}
+                                    , {<<"conn">>
+                                    , ?E2B(ConnRef)}
+                                ]}])}
+        end,
+        Priv#priv{connections = [ConnRef | Connections]}
+    catch Class:Exception:Stacktrace ->
+            ?Error("DB connect error ~p:~p~n~p", [Class, Exception, Stacktrace]),
+            From ! {reply, jsx:encode(#{connect=>#{error=>list_to_binary(io_lib:format("~p:~p",[Class, Exception]))}})},
             dpi:unload(Node),
             Priv
     end;
@@ -533,7 +521,7 @@ process_cmd({[<<"button">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
             Query = FsmStmt:get_query(),
             case dderl_dal:is_local_query(Query) of
                 true ->
-                    FsmStmt:gui_req(button, <<"restart">>, gui_resp_cb_fun(<<"button">>, FsmStmt, From));
+                    dderl_fsm:gui_req(FsmStmt, button, <<"restart">>, gui_resp_cb_fun(<<"button">>, FsmStmt, From));
                 _ ->
                     Connection = ?D2T(proplists:get_value(<<"connection">>, BodyJson, <<>>)),
                     %% TODO: Fix restart if there is a need to link again.
@@ -545,20 +533,20 @@ process_cmd({[<<"button">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
                         {ok, #stmtResults{} = StmtRslt, TableName} ->
                             dderlodpi:add_fsm(StmtRslt#stmtResults.stmtRefs, FsmStmt),
                             FsmCtx = generate_fsmctx(StmtRslt, Query, BindVals, Connection, TableName),
-                            FsmStmt:gui_req(button, <<"restart">>, gui_resp_cb_fun(<<"button">>, FsmStmt, From)),
+                            dderl_fsm:gui_req(FsmStmt, button, <<"restart">>, gui_resp_cb_fun(<<"button">>, FsmStmt, From)),
                             FsmStmt:refresh_session_ctx(FsmCtx);
                         _ ->
                             From ! {reply, jsx:encode([{<<"button">>, [{<<"error">>, <<"unable to refresh the table">>}]}])}
                     end
             end;
         ButtonInt when is_integer(ButtonInt) ->
-            FsmStmt:gui_req(button, ButtonInt, gui_resp_cb_fun(<<"button">>, FsmStmt, From));
+            dderl_fsm:gui_req(FsmStmt, button, ButtonInt, gui_resp_cb_fun(<<"button">>, FsmStmt, From));
         ButtonBin when is_binary(ButtonBin) ->
             case string:to_integer(binary_to_list(ButtonBin)) of
                 {error, _} -> Button = ButtonBin;
                 {Target, []} -> Button = Target
             end,
-            FsmStmt:gui_req(button, Button, gui_resp_cb_fun(<<"button">>, FsmStmt, From))
+            dderl_fsm:gui_req(FsmStmt, button, Button, gui_resp_cb_fun(<<"button">>, FsmStmt, From))
     end,
     Priv;
 process_cmd({[<<"update_data">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
