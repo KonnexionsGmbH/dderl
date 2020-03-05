@@ -766,6 +766,26 @@ process_login(#{<<"samluser">>:=User} = Body, State,
   when is_function(StateUpdateFun, 2), is_function(AuthFun, 1) ->
     process_login_reply(AuthFun({saml, User}), Body, Ctx,
                         StateUpdateFun(State, User));
+process_login(#{<<"fido2">> := #{<<"authenticatorData">> := AuthenticatorDataB64,
+                                 <<"clientDataJSON">> := ClientDataJson,
+                                 <<"rawID">> := RawIdB64, <<"sig">> := SigB64,
+                                 <<"type">> := <<"public-key">>}} = Body, State,
+              #{auth := AuthFun, stateGetFido2Challenge := GetChallenge, stateGetUsr := GetUser} = Ctx)
+  when is_function(AuthFun, 1), is_function(GetChallenge, 1), is_function(GetUser, 1) ->
+    Challege = GetChallenge(State),
+    AuthenticatorData = base64:decode(AuthenticatorDataB64),
+    Sig = base64:decode(SigB64),
+    Result =
+    case 'Elixir.Wax':authenticate(RawIdB64, AuthenticatorData, Sig, ClientDataJson, Challege) of
+        {ok, _} ->
+            User = GetUser(State),
+            ?Info("Wax: successful authentication for user : ~s", [User]),
+            User;
+        {error, _} = Error ->
+            ?Error("Wax: authentication failed with error ~p", [Error]),
+            Error
+    end,
+    process_login_reply(AuthFun({fido2, Result}), Body, Ctx, State);
 process_login(Body, State, #{connInfo := ConnInfo, auth := AuthFun} = Ctx)
   when is_map(ConnInfo), is_function(AuthFun, 1) ->
     process_login_reply(AuthFun({access, ConnInfo}), Body, Ctx, State).
@@ -791,6 +811,13 @@ process_login_reply({SKey, [{smsott, Data}|_]}, _Body,
   when is_function(StateUpdateFun, 2) ->
     {#{smsott=>fix_login_data(Data)}, StateUpdateFun(State, SKey)};
 
+process_login_reply({ok, [{fido2, Data}|_]}, #{<<"host_url">> := Host}, Ctx, State) ->
+    fido2_auth_challenge(Data, Ctx, State, Host);
+process_login_reply({SKey, [{fido2, Data}|_]}, #{<<"host_url">> := Host},
+                    #{stateUpdateSKey := StateUpdateFun} = Ctx, State)
+  when is_function(StateUpdateFun, 2) ->
+    fido2_auth_challenge(Data, Ctx, StateUpdateFun(State, SKey), Host);
+
 process_login_reply({SKey, [{saml, _Data}|_]}, Body,
                     #{urlPrefix := UrlPrefix,
                       stateUpdateSKey := StateUpdateFun,
@@ -811,6 +838,12 @@ process_login_reply({SKey, [{saml, _Data}|_]}, Body,
 fix_login_data(#{accountName:=undefined}=Data) ->
     fix_login_data(Data#{accountName=><<"">>});
 fix_login_data(Data) -> Data.
+
+fido2_auth_challenge(#{credentials := Creds}, 
+                     #{stateUpdateFido2Challenge := StateUdpateChal}, State, Host)
+  when is_function(StateUdpateChal, 2) ->
+    Challenge = #{bytes := Bytes} = 'Elixir.Wax':new_authentication_challenge(Creds, [{origin, Host}]),
+    {#{fido2 => Challenge#{bytes => base64:encode(Bytes)}}, StateUdpateChal(State, Challenge)}.
 
 %% Functions used to extract rows from fsm using ets directly.
 %% Used by data_sender and csv_export_buffer.

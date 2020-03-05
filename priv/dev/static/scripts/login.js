@@ -142,7 +142,11 @@ function loginCb(resp) {
                 val: ""
             }]
         });
-    } else if (resp.hasOwnProperty('saml')) {
+    } else if (resp.hasOwnProperty('fido2')) {
+        console.log('fido2 authentication');
+        triggerFido2Authentication(resp.fido2);
+    }
+    else if (resp.hasOwnProperty('saml')) {
         if (resp.saml.hasOwnProperty('form')) {
             if (dderlState.screensaver && window.tab) {
                 window.tab.document.body.innerHTML = resp.saml.form;
@@ -398,5 +402,117 @@ export function change_login_password(loggedInUser, shouldConnect) {
             });
         }
         else alert_jq("Confirm password missmatch!");
+    });
+}
+
+// fido2 helper functions
+function _arrayBufferToString(buffer) {
+    var binary = '';
+    var bytes = new Uint8Array(buffer);
+    var len = bytes.byteLength;
+    for (var i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return binary;
+}
+
+function _arrayBufferToBase64(buffer) {
+    return window.btoa(_arrayBufferToString(buffer));
+}
+
+function _base64ToArrayBuffer(base64) {
+    var binary_string = window.atob(base64);
+    var len = binary_string.length;
+    var bytes = new Uint8Array(len);
+    for (var i = 0; i < len; i++) {
+        bytes[i] = binary_string.charCodeAt(i);
+    }
+    return bytes.buffer;
+}
+
+export function triggerFido2Attestation(challenge) {
+    if (challenge) {
+        navigator.credentials.create({
+            publicKey: {
+                // random, cryptographically secure, at least 16 bytes
+                challenge: _base64ToArrayBuffer(challenge.bytes),
+                // relying party
+                rp: {
+                    id: challenge.rp_id,
+                    name: "K2Informatics"
+                },
+                user: {
+                    id: new Uint8Array(16),
+                    name: dderlState.username,
+                    displayName: dderlState.username
+                },
+                pubKeyCredParams: [
+                    {
+                        type: "public-key",
+                        alg: -7 // "ES256" IANA COSE Algorithms registry
+                    }
+                ],
+                attestation: "none",
+                authenticatorSelection: {
+                    requireResidentKey: false,
+                    userVerification: "discouraged"
+                }
+            }
+        }).then(function (credential) {
+            let credObj = {};
+            credObj.rawID = _arrayBufferToBase64(credential.rawId);
+            credObj.type = credential.type;
+            credObj.clientDataJSON = _arrayBufferToString(credential.response.clientDataJSON);
+            credObj.attestationObject = _arrayBufferToBase64(credential.response.attestationObject);
+            ajaxCall(null, 'register_key_attest', credObj, 'register_key_attest',
+                function (response) {
+                    console.log("register_key_attest challenge");
+                    console.log(response);
+                    if (response.error) {
+                        alert_jq(response.error);
+                    } else {
+                        alert_jq("fido2 key registered");
+                    }
+                },
+                function (error) {
+                    console.log("Error on register_key_attest : ", error);
+                    alert_jq("Failed to reach the server, the connection might be lost.");
+                }
+            );
+        });
+    }
+}
+
+function triggerFido2Authentication(challenge) {
+    navigator.credentials.get({
+        publicKey: {
+            challenge: _base64ToArrayBuffer(challenge.bytes),
+            allowCredentials:
+                Object.keys(challenge.allow_credentials).map(
+                    credId => {
+                        return {
+                            id: _base64ToArrayBuffer(credId),
+                            type: "public-key",
+                            transports: ["usb", "nfc", "ble"]
+                        };
+                    }),
+            userVerification: "discouraged"
+        }
+    }).then(function (credential) {
+        let credObj = {};
+        credObj.rawID = _arrayBufferToBase64(credential.rawId);
+        credObj.type = credential.type;
+        credObj.clientDataJSON = _arrayBufferToString(credential.response.clientDataJSON);
+        credObj.authenticatorData = _arrayBufferToBase64(credential.response.authenticatorData);
+        credObj.sig = _arrayBufferToBase64(credential.response.signature);
+        ajaxCall(null, 'login', { fido2: credObj }, 'login', loginCb,
+            function (error) {
+                console.log("Error on login : ", error);
+                alert_jq("Failed to reach the server, the connection might be lost.");
+            }
+        );
+    }).catch((err) => {
+        console.log(err);
+        logout(true);
     });
 }

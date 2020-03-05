@@ -817,6 +817,9 @@ login(ReqData, From, SrcIp, State) ->
                            connInfo => ConnInfo,
                            relayState => fun dderl_resource:samlRelayStateHandle/2,
                            stateUpdateUsr =>  fun(St, Usr) -> St#state{user=Usr} end,
+                           stateGetUsr =>  fun(St) -> St#state.user end,
+                           stateUpdateFido2Challenge =>  fun(St, Chal) -> St#state{fido2_challenge=Chal} end,
+                           stateGetFido2Challenge =>  fun(St) -> St#state.fido2_challenge end,
                            stateUpdateSKey =>  fun(St, _) -> St end,
                            urlPrefix => dderl:get_url_suffix()}) of
                 {{E,M},St} when is_atom(E) ->
