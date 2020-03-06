@@ -250,10 +250,8 @@ process_call({[<<"ping">>], _ReqData}, _Adapter, From, {SrcIp,_},
 process_call({[<<"register_key_init">>], ReqData}, _Adapter, From, {SrcIp,_}, State) ->
     #{<<"host_url">> := HostUrl} = jsx:decode(ReqData, [return_maps]),
     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "register_key_init"}, State),
-    Challenge = 'Elixir.Wax':new_registration_challenge([{origin, HostUrl}]),
-    #{bytes := Bytes} = Challenge,
-    Resp = #{<<"register_key_init">> => Challenge#{bytes => base64:encode(Bytes)}},
-    reply(From, Resp, self()),
+    {Challenge, RegisterConfig} = dderl_dal:fido2_register_config(dderl, State#state.user, HostUrl),
+    reply(From, #{<<"register_key_init">> => RegisterConfig}, self()),
     State#state{fido2_challenge = Challenge};
 process_call({[<<"register_key_attest">>], ReqData}, _Adapter, From, {SrcIp,_},
              #state{fido2_challenge = Challenge} = State) ->
@@ -814,7 +812,7 @@ login(ReqData, From, SrcIp, State) ->
                          #{auth => fun(Auth) ->
                                        erlimem_session:auth(State#state.sess, dderl, Id, Auth)
                                    end,
-                           connInfo => ConnInfo,
+                           connInfo => ConnInfo, app => dderl,
                            relayState => fun dderl_resource:samlRelayStateHandle/2,
                            stateUpdateUsr =>  fun(St, Usr) -> St#state{user=Usr} end,
                            stateGetUsr =>  fun(St) -> St#state.user end,

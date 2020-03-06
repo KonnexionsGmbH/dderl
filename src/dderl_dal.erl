@@ -45,6 +45,7 @@
         ,get_d3_templates_path/1
         ,get_host_app/0
         ,is_proxy/2
+        ,fido2_register_config/3
         ]).
 
 -record(state, { schema :: term()
@@ -749,8 +750,12 @@ get_restartable_apps() ->
 -spec process_login(map(), any(),
                     #{auth => fun((any()) -> ok | {any(), list()}),
                       connInfo => map(),
+                      app => atom(),
                       stateUpdateUsr =>  fun((any(), any()) -> any()),
                       stateUpdateSKey => fun((any(), any()) -> any()),
+                      stateGetUsr => fun((any()) -> any()),
+                      stateUpdateFido2Challenge => fun((any(), any()) -> any()),
+                      stateGetFido2Challenge => fun((any()) -> any()),
                       relayState => fun((any(), any()) -> any()),
                       urlPrefix => list()}) -> ok | map().
 process_login(#{<<"smsott">> := Token} = Body, State,
@@ -772,11 +777,11 @@ process_login(#{<<"fido2">> := #{<<"authenticatorData">> := AuthenticatorDataB64
                                  <<"type">> := <<"public-key">>}} = Body, State,
               #{auth := AuthFun, stateGetFido2Challenge := GetChallenge, stateGetUsr := GetUser} = Ctx)
   when is_function(AuthFun, 1), is_function(GetChallenge, 1), is_function(GetUser, 1) ->
-    Challege = GetChallenge(State),
+    Challenge = GetChallenge(State),
     AuthenticatorData = base64:decode(AuthenticatorDataB64),
     Sig = base64:decode(SigB64),
     Result =
-    case 'Elixir.Wax':authenticate(RawIdB64, AuthenticatorData, Sig, ClientDataJson, Challege) of
+    case 'Elixir.Wax':authenticate(RawIdB64, AuthenticatorData, Sig, ClientDataJson, Challenge) of
         {ok, _} ->
             User = GetUser(State),
             ?Info("Wax: successful authentication for user : ~s", [User]),
@@ -840,11 +845,17 @@ fix_login_data(#{accountName:=undefined}=Data) ->
     fix_login_data(Data#{accountName=><<"">>});
 fix_login_data(Data) -> Data.
 
-fido2_auth_challenge(Creds, 
-                     #{stateUpdateFido2Challenge := StateUdpateChal}, State, Host)
-  when is_function(StateUdpateChal, 2) ->
-    Challenge = #{bytes := Bytes} = 'Elixir.Wax':new_authentication_challenge(Creds, [{origin, Host}]),
-    {#{fido2 => Challenge#{bytes => base64:encode(Bytes)}}, StateUdpateChal(State, Challenge)}.
+fido2_auth_challenge(Creds, #{app := App, stateGetUsr := GetUser,
+                              stateUpdateFido2Challenge := StateUdpateChal}, State, Host)
+  when is_function(StateUdpateChal, 2), is_function(GetUser), is_atom(App) ->
+    User = GetUser(State),
+    AuthConfig = ?FIDO2_AUTH_CONFIG(App, User),
+    CredConfig = ?FIDO2_AUTH_CRED_CONFIG(App, User),
+    Challenge = 'Elixir.Wax':new_authentication_challenge(Creds, [{origin, Host}]),
+    #{allow_credentials := Credentials, bytes := Bytes} = Challenge,
+    Config = #{baseConfig => AuthConfig#{challenge => base64:encode(Bytes)},
+               credConfig => CredConfig, credentials => Credentials},
+    {#{fido2 => Config}, StateUdpateChal(State, Challenge)}.
 
 %% Functions used to extract rows from fsm using ets directly.
 %% Used by data_sender and csv_export_buffer.
@@ -892,3 +903,10 @@ exec_is_proxy_fun(Fun, NetCtx) ->
             ?Error("proxy check fail : ~p", [Error]),
             false
     end.
+
+fido2_register_config(App, Username, HostUrl) when is_binary(HostUrl), is_atom(App) ->
+    Regconfig = #{rp := RpInfo} = ?FIDO2_REGISTRATION_CONFIG(App, Username),
+    Challenge = 'Elixir.Wax':new_registration_challenge([{origin, HostUrl}]),
+    #{bytes := Bytes, rp_id := RpId} = Challenge,
+    {Challenge, Regconfig#{challenge => base64:encode(Bytes),
+                           rp => RpInfo#{rp_id => RpId}}}.

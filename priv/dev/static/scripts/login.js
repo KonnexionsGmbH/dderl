@@ -442,56 +442,37 @@ function _base64ToArrayBuffer(base64) {
     return bytes.buffer;
 }
 
-export function triggerFido2Attestation(challenge) {
-    if (challenge) {
-        navigator.credentials.create({
-            publicKey: {
-                // random, cryptographically secure, at least 16 bytes
-                challenge: _base64ToArrayBuffer(challenge.bytes),
-                // relying party
-                rp: {
-                    id: challenge.rp_id,
-                    name: "K2Informatics"
-                },
-                user: {
-                    id: new Uint8Array(16),
-                    name: dderlState.username,
-                    displayName: dderlState.username
-                },
-                pubKeyCredParams: [
-                    {
-                        type: "public-key",
-                        alg: -7 // "ES256" IANA COSE Algorithms registry
+export function triggerFido2Registration(registerConfig) {
+    if (registerConfig) {
+        let user = {};
+        user.id = new Uint8Array(16);
+        user.name = dderlState.username;
+        user.displayName = dderlState.username;
+        registerConfig.challenge = _base64ToArrayBuffer(registerConfig.challenge);
+        registerConfig.user = user;
+        navigator.credentials.create({ publicKey: registerConfig }).then(
+            function (credential) {
+                let credObj = {};
+                credObj.rawID = _arrayBufferToBase64(credential.rawId);
+                credObj.type = credential.type;
+                credObj.clientDataJSON = _arrayBufferToString(credential.response.clientDataJSON);
+                credObj.attestationObject = _arrayBufferToBase64(credential.response.attestationObject);
+                ajaxCall(null, 'register_key_attest', credObj, 'register_key_attest',
+                    function (response) {
+                        console.log("register_key_attest challenge");
+                        console.log(response);
+                        if (response.error) {
+                            alert_jq(response.error);
+                        } else {
+                            alert_jq("fido2 key registered");
+                        }
+                    },
+                    function (error) {
+                        console.log("Error on register_key_attest : ", error);
+                        alert_jq("Failed to reach the server, the connection might be lost.");
                     }
-                ],
-                attestation: "none",
-                authenticatorSelection: {
-                    requireResidentKey: false,
-                    userVerification: "discouraged"
-                }
-            }
-        }).then(function (credential) {
-            let credObj = {};
-            credObj.rawID = _arrayBufferToBase64(credential.rawId);
-            credObj.type = credential.type;
-            credObj.clientDataJSON = _arrayBufferToString(credential.response.clientDataJSON);
-            credObj.attestationObject = _arrayBufferToBase64(credential.response.attestationObject);
-            ajaxCall(null, 'register_key_attest', credObj, 'register_key_attest',
-                function (response) {
-                    console.log("register_key_attest challenge");
-                    console.log(response);
-                    if (response.error) {
-                        alert_jq(response.error);
-                    } else {
-                        alert_jq("fido2 key registered");
-                    }
-                },
-                function (error) {
-                    console.log("Error on register_key_attest : ", error);
-                    alert_jq("Failed to reach the server, the connection might be lost.");
-                }
-            );
-        });
+                );
+            });
     }
 }
 
@@ -504,36 +485,32 @@ export function isWebAuthnSupported() {
     return true;
 }
 
-function triggerFido2Authentication(challenge) {
-    navigator.credentials.get({
-        publicKey: {
-            challenge: _base64ToArrayBuffer(challenge.bytes),
-            allowCredentials:
-                Object.keys(challenge.allow_credentials).map(
-                    credId => {
-                        return {
-                            id: _base64ToArrayBuffer(credId),
-                            type: "public-key",
-                            transports: ["usb", "nfc", "ble"]
-                        };
-                    }),
-            userVerification: "discouraged"
-        }
-    }).then(function (credential) {
-        let credObj = {};
-        credObj.rawID = _arrayBufferToBase64(credential.rawId);
-        credObj.type = credential.type;
-        credObj.clientDataJSON = _arrayBufferToString(credential.response.clientDataJSON);
-        credObj.authenticatorData = _arrayBufferToBase64(credential.response.authenticatorData);
-        credObj.sig = _arrayBufferToBase64(credential.response.signature);
-        ajaxCall(null, 'login', { fido2: credObj }, 'login', loginCb,
-            function (error) {
-                console.log("Error on login : ", error);
-                alert_jq("Failed to reach the server, the connection might be lost.");
-            }
-        );
-    }).catch((err) => {
-        console.log(err);
-        logout(true);
-    });
+function triggerFido2Authentication(authConfig) {
+    let credConfig = authConfig.credConfig;
+    let baseConfig = authConfig.baseConfig;
+    let allowCredentials = Object.keys(authConfig.credentials).map(
+        credId => {
+            credConfig.id = _base64ToArrayBuffer(credId);
+            return credConfig;
+        });
+    baseConfig.challenge = _base64ToArrayBuffer(baseConfig.challenge);
+    baseConfig.allowCredentials = allowCredentials;
+    navigator.credentials.get({ publicKey: baseConfig }).then(
+        function (credential) {
+            let credObj = {};
+            credObj.rawID = _arrayBufferToBase64(credential.rawId);
+            credObj.type = credential.type;
+            credObj.clientDataJSON = _arrayBufferToString(credential.response.clientDataJSON);
+            credObj.authenticatorData = _arrayBufferToBase64(credential.response.authenticatorData);
+            credObj.sig = _arrayBufferToBase64(credential.response.signature);
+            ajaxCall(null, 'login', { fido2: credObj }, 'login', loginCb,
+                function (error) {
+                    console.log("Error on login : ", error);
+                    alert_jq("Failed to reach the server, the connection might be lost.");
+                }
+            );
+        }).catch((err) => {
+            console.log('error while authenticating', err);
+            logout(true);
+        });
 }

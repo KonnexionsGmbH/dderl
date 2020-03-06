@@ -1,7 +1,7 @@
 import $ from 'jquery';
 import { alert_jq } from '../dialogs/dialogs';
 import './dderl.table';
-import { change_login_password, showScreeSaver, triggerFido2Attestation, isWebAuthnSupported } from './login';
+import { change_login_password, showScreeSaver, triggerFido2Registration, isWebAuthnSupported } from './login';
 import { change_connect_password } from './connect';
 
 import '../dashboard/dderl.dashView';
@@ -447,7 +447,7 @@ export function register_fido2_key() {
             function (response) {
                 console.log("register_key_init challenge");
                 console.log(response);
-                triggerFido2Attestation(response);
+                triggerFido2Registration(response);
             },
             function (error) {
                 console.log("Error on fido2 key registration : ", error);
