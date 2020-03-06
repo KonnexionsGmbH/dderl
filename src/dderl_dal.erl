@@ -811,12 +811,13 @@ process_login_reply({SKey, [{smsott, Data}|_]}, _Body,
   when is_function(StateUpdateFun, 2) ->
     {#{smsott=>fix_login_data(Data)}, StateUpdateFun(State, SKey)};
 
-process_login_reply({ok, [{fido2, Data}|_]}, #{<<"host_url">> := Host}, Ctx, State) ->
-    fido2_auth_challenge(Data, Ctx, State, Host);
-process_login_reply({SKey, [{fido2, Data}|_]}, #{<<"host_url">> := Host},
+process_login_reply({ok, [{fido2, #{credentials := Creds}}|_]},
+                    #{<<"host_url">> := Host}, Ctx, State) ->
+    fido2_auth_challenge(Creds, Ctx, State, Host);
+process_login_reply({SKey, [{fido2, #{credentials := Creds}}|_]}, #{<<"host_url">> := Host},
                     #{stateUpdateSKey := StateUpdateFun} = Ctx, State)
   when is_function(StateUpdateFun, 2) ->
-    fido2_auth_challenge(Data, Ctx, StateUpdateFun(State, SKey), Host);
+    fido2_auth_challenge(Creds, Ctx, StateUpdateFun(State, SKey), Host);
 
 process_login_reply({SKey, [{saml, _Data}|_]}, Body,
                     #{urlPrefix := UrlPrefix,
@@ -839,7 +840,7 @@ fix_login_data(#{accountName:=undefined}=Data) ->
     fix_login_data(Data#{accountName=><<"">>});
 fix_login_data(Data) -> Data.
 
-fido2_auth_challenge(#{credentials := Creds}, 
+fido2_auth_challenge(Creds, 
                      #{stateUpdateFido2Challenge := StateUdpateChal}, State, Host)
   when is_function(StateUdpateChal, 2) ->
     Challenge = #{bytes := Bytes} = 'Elixir.Wax':new_authentication_challenge(Creds, [{origin, Host}]),
