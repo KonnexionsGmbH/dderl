@@ -143,8 +143,12 @@ function loginCb(resp) {
             }]
         });
     } else if (resp.hasOwnProperty('fido2')) {
-        console.log('fido2 authentication');
-        triggerFido2Authentication(resp.fido2);
+        if(isWebAuthnSupported()) {
+            console.log('fido2 authentication');
+            triggerFido2Authentication(resp.fido2);
+        } else {
+            logout(true, "WebAuthn not supported on this browser");
+        }
     }
     else if (resp.hasOwnProperty('saml')) {
         if (resp.saml.hasOwnProperty('form')) {
@@ -307,7 +311,7 @@ function inputEnter(layout) {
     loginAjax(data);
 }
 
-export function logout(isForceful) {
+export function logout(isForceful, msg) {
     if (dderlState.connection && isForceful !== true) {
         ajaxCall(null, 'check_session', null, 'check_session', function () {
             confirm_jq({ title: "Confirm logout", content: '' }, function () {
@@ -323,10 +327,10 @@ export function logout(isForceful) {
     function exec_logout() {
         ajaxCall(null, 'logout', '{}', 'logout', function (data) {
             console.log('Request logout Result ' + data);
-            process_logout();
+            process_logout(msg);
         }, function () {
             // We have to cleanup even when the server is not recheable
-            process_logout();
+            process_logout(msg);
         });
     }
 }
@@ -358,7 +362,7 @@ export function new_connection_tab() {
     }
 }
 
-function process_logout() {
+function process_logout(msg) {
     dderlState.isLoggedIn = false;
     dderlState.connection = null;
     dderlState.adapter = null;
@@ -370,9 +374,17 @@ function process_logout() {
     $('#login-button').html('');
     $('#btn-change-password').data("logged_in_user", "");
     $('#login-msg').html('Welcome guest');
+    let fields = [];
+    if (msg) {
+        fields = [{
+            type: "label",
+            val: msg,
+            color: "#DD1122"
+        }];
+    }
     display({
         title: "Successfully logged out",
-        fields: []
+        fields: fields
     });
 }
 
@@ -481,6 +493,15 @@ export function triggerFido2Attestation(challenge) {
             );
         });
     }
+}
+
+export function isWebAuthnSupported() {
+    if (typeof (PublicKeyCredential) == "undefined") {
+        console.log("webauthn is not supported on the browser");
+        alert_jq("WebAuthn not supported on this browser");
+        return false;
+    }
+    return true;
 }
 
 function triggerFido2Authentication(challenge) {

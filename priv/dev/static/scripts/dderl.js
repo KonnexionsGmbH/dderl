@@ -1,8 +1,8 @@
 import $ from 'jquery';
-import {alert_jq} from '../dialogs/dialogs';
+import { alert_jq } from '../dialogs/dialogs';
 import './dderl.table';
-import {change_login_password, showScreeSaver, triggerFido2Attestation} from './login';
-import {change_connect_password} from './connect';
+import { change_login_password, showScreeSaver, triggerFido2Attestation, isWebAuthnSupported } from './login';
+import { change_connect_password } from './connect';
 
 import '../dashboard/dderl.dashView';
 import '../dashboard/dderl.dashboard';
@@ -442,17 +442,19 @@ export function change_password(shouldConnect) {
 }
 
 export function register_fido2_key() {
-    ajaxCall(null, 'register_key_init', null, 'register_key_init',
-        function (response) {
-            console.log("register_key_init challenge");
-            console.log(response);
-            triggerFido2Attestation(response);
-        },
-        function (error) {
-            console.log("Error on fido2 key registration : ", error);
-            alert_jq("Failed to reach the server, the connection might be lost.");
-        }
-    );
+    if (isWebAuthnSupported()) {
+        ajaxCall(null, 'register_key_init', null, 'register_key_init',
+            function (response) {
+                console.log("register_key_init challenge");
+                console.log(response);
+                triggerFido2Attestation(response);
+            },
+            function (error) {
+                console.log("Error on fido2 key registration : ", error);
+                alert_jq("Failed to reach the server, the connection might be lost.");
+            }
+        );
+    }
 }
 
 export function smartDialogPosition(container, owner, self, checks) {
