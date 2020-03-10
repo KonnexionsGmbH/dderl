@@ -225,7 +225,7 @@
                     #{attestation => <<"none">>,
                       authenticatorSelection =>
                               #{requireResidentKey => false,
-                              userVerification => <<"discouraged">>},
+                                userVerification => <<"discouraged">>},
                       pubKeyCredParams => [#{alg => -7,type => <<"public-key">>}],
                       rp => #{name => <<"K2 Informatics GmbH">>}},
                      "FIDO2 Regestration config")).

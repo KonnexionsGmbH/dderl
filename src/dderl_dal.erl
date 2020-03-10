@@ -45,7 +45,7 @@
         ,get_d3_templates_path/1
         ,get_host_app/0
         ,is_proxy/2
-        ,fido2_register_config/3
+        ,fido2_register_config/4
         ]).
 
 -record(state, { schema :: term()
@@ -904,9 +904,19 @@ exec_is_proxy_fun(Fun, NetCtx) ->
             false
     end.
 
-fido2_register_config(App, Username, HostUrl) when is_binary(HostUrl), is_atom(App) ->
+fido2_register_config(App, UserId, Username, HostUrl) when is_binary(HostUrl), is_atom(App) ->
     Regconfig = #{rp := RpInfo} = ?FIDO2_REGISTRATION_CONFIG(App, Username),
     Challenge = 'Elixir.Wax':new_registration_challenge([{origin, HostUrl}]),
     #{bytes := Bytes, rp_id := RpId} = Challenge,
+    Creds = case imem_seco:get_fido2_creds(UserId) of
+        none -> [];
+        {ok, Fido2Creds} -> Fido2Creds
+    end,
+    CredConfig = ?FIDO2_AUTH_CRED_CONFIG(App, Username),
+    ExcludeCreds = lists:map(
+        fun({CredId, _}) ->
+            CredConfig#{id => CredId}
+        end, Creds),
     {Challenge, Regconfig#{challenge => base64:encode(Bytes),
-                           rp => RpInfo#{rp_id => RpId}}}.
+                           excludeCredentials => ExcludeCreds,
+                           rp => RpInfo#{id => RpId}}}.

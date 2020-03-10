@@ -247,10 +247,11 @@ process_call({[<<"ping">>], _ReqData}, _Adapter, From, {SrcIp,_},
             reply(From, #{ping => #{error => show_screen_saver}}, self()),
             State#state{lock_state = screensaver}
     end;
-process_call({[<<"register_key_init">>], ReqData}, _Adapter, From, {SrcIp,_}, State) ->
+process_call({[<<"register_key_init">>], ReqData}, _Adapter, From, {SrcIp,_},
+    #state{user_id = UserId, user = UserName} = State) ->
     #{<<"host_url">> := HostUrl} = jsx:decode(ReqData, [return_maps]),
     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "register_key_init"}, State),
-    {Challenge, RegisterConfig} = dderl_dal:fido2_register_config(dderl, State#state.user, HostUrl),
+    {Challenge, RegisterConfig} = dderl_dal:fido2_register_config(dderl, UserId, UserName, HostUrl),
     reply(From, #{<<"register_key_init">> => RegisterConfig}, self()),
     State#state{fido2_challenge = Challenge};
 process_call({[<<"register_key_attest">>], ReqData}, _Adapter, From, {SrcIp,_},

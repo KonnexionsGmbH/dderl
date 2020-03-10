@@ -450,6 +450,11 @@ export function triggerFido2Registration(registerConfig) {
         user.displayName = dderlState.username;
         registerConfig.challenge = _base64ToArrayBuffer(registerConfig.challenge);
         registerConfig.user = user;
+        let excludeCredentials = registerConfig.excludeCredentials.map(
+            exCred => {
+                exCred.id = _base64ToArrayBuffer(exCred.id);
+                return exCred;
+            });
         navigator.credentials.create({ publicKey: registerConfig }).then(
             function (credential) {
                 let credObj = {};
@@ -457,6 +462,7 @@ export function triggerFido2Registration(registerConfig) {
                 credObj.type = credential.type;
                 credObj.clientDataJSON = _arrayBufferToString(credential.response.clientDataJSON);
                 credObj.attestationObject = _arrayBufferToBase64(credential.response.attestationObject);
+                credObj.excludeCredentials = excludeCredentials;
                 ajaxCall(null, 'register_key_attest', credObj, 'register_key_attest',
                     function (response) {
                         console.log("register_key_attest challenge");
@@ -472,6 +478,9 @@ export function triggerFido2Registration(registerConfig) {
                         alert_jq("Failed to reach the server, the connection might be lost.");
                     }
                 );
+            }).catch((err) => {
+                console.log('error while registering', err);
+                alert_jq(err);
             });
     }
 }
@@ -511,6 +520,6 @@ function triggerFido2Authentication(authConfig) {
             );
         }).catch((err) => {
             console.log('error while authenticating', err);
-            logout(true);
+            logout(true, err);
         });
 }
