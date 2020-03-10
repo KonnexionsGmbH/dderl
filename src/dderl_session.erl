@@ -248,10 +248,10 @@ process_call({[<<"ping">>], _ReqData}, _Adapter, From, {SrcIp,_},
             State#state{lock_state = screensaver}
     end;
 process_call({[<<"register_key_init">>], ReqData}, _Adapter, From, {SrcIp,_},
-    #state{user_id = UserId, user = UserName} = State) ->
+    #state{sess = Session, user = UserName} = State) ->
     #{<<"host_url">> := HostUrl} = jsx:decode(ReqData, [return_maps]),
     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "register_key_init"}, State),
-    {Challenge, RegisterConfig} = dderl_dal:fido2_register_config(dderl, UserId, UserName, HostUrl),
+    {Challenge, RegisterConfig} = dderl_dal:fido2_register_config(dderl, Session, UserName, HostUrl),
     reply(From, #{<<"register_key_init">> => RegisterConfig}, self()),
     State#state{fido2_challenge = Challenge};
 process_call({[<<"register_key_attest">>], ReqData}, _Adapter, From, {SrcIp,_},
@@ -265,10 +265,7 @@ process_call({[<<"register_key_attest">>], ReqData}, _Adapter, From, {SrcIp,_},
     Attestation = base64:decode(Attestation64),
     Resp =
     case 'Elixir.Wax':register(Attestation, ClientData, Challenge) of
-        {ok, {CoseKey, AttestationResult}} ->
-            ?Info(
-            "Wax: attestation object validated with cose key ~p", [CoseKey]),
-            ?Info("Attestation result : ~p", [AttestationResult]),
+        {ok, {CoseKey, _AttestationResult}} ->
             erlimem_session:run_cmd(State#state.sess, auth_add_fido2, [{RawId64, CoseKey}]),
             #{result => <<"attestation object validated">>};
         {error, _} = Error ->

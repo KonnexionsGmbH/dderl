@@ -904,11 +904,12 @@ exec_is_proxy_fun(Fun, NetCtx) ->
             false
     end.
 
-fido2_register_config(App, UserId, Username, HostUrl) when is_binary(HostUrl), is_atom(App) ->
+fido2_register_config(App, Session, Username, HostUrl) when is_binary(HostUrl), is_atom(App) ->
     Regconfig = #{rp := RpInfo} = ?FIDO2_REGISTRATION_CONFIG(App, Username),
     Challenge = 'Elixir.Wax':new_registration_challenge([{origin, HostUrl}]),
     #{bytes := Bytes, rp_id := RpId} = Challenge,
-    Creds = case imem_seco:get_fido2_creds(UserId) of
+    Creds =
+    case erlimem_session:run_cmd(Session, get_fido2_creds, []) of
         none -> [];
         {ok, Fido2Creds} -> Fido2Creds
     end,
