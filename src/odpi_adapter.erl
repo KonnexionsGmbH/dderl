@@ -518,7 +518,7 @@ process_cmd({[<<"button">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     FsmStmt = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     case proplists:get_value(<<"btn">>, BodyJson, <<">">>) of
         <<"restart">> ->
-            Query = FsmStmt:get_query(),
+            Query = dderl_fsm:get_query(FsmStmt),
             case dderl_dal:is_local_query(Query) of
                 true ->
                     dderl_fsm:gui_req(FsmStmt, button, <<"restart">>, gui_resp_cb_fun(<<"button">>, FsmStmt, From));
@@ -534,7 +534,7 @@ process_cmd({[<<"button">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
                             dderlodpi:add_fsm(StmtRslt#stmtResults.stmtRefs, FsmStmt),
                             FsmCtx = generate_fsmctx(StmtRslt, Query, BindVals, Connection, TableName),
                             dderl_fsm:gui_req(FsmStmt, button, <<"restart">>, gui_resp_cb_fun(<<"button">>, FsmStmt, From)),
-                            FsmStmt:refresh_session_ctx(FsmCtx);
+                            dderl_fsm:refresh_session_ctx(FsmStmt, FsmCtx);
                         _ ->
                             From ! {reply, jsx:encode([{<<"button">>, [{<<"error">>, <<"unable to refresh the table">>}]}])}
                     end
