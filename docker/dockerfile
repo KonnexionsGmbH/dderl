@@ -1,4 +1,4 @@
-FROM erlang:22.2.8-slim as base
+FROM erlang:22.3-slim as base
 
 # Supplement necessary system software -----------------------------------------
 RUN apt-get update \

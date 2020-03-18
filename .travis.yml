@@ -4,7 +4,7 @@ dist: trusty
 language: erlang
 otp_release:
 # - 20.3 # disabling 20.3 as cowboy 2.0 is not supported with 20.3 and hence it has been blacklisted in rebar.config
-  - 22.2.8
+  - 22.3
 
 
 env:
