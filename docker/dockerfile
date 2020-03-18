@@ -1,4 +1,4 @@
-FROM erlang:22.3-slim as base
+FROM erlang:22.2.8-slim as base
 
 # Supplement necessary system software -----------------------------------------
 RUN apt-get update \
@@ -28,7 +28,7 @@ RUN apt-get install -y dos2unix \
                        vim
 
 # Setting Environment Variables ------------------------------------------------
-ENV ERL_INTERFACE_DIR=/usr/local/lib/erlang/lib/erl_interface-3.13.2 \
+ENV ERL_INTERFACE_DIR=/usr/local/lib/erlang/lib/erl_interface-3.13.1 \
     ORACLE_HOME=/usr/lib/oracle/19.6/client64
  
 RUN echo "=====================================================================> Curent Date: " \
