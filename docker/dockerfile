@@ -1,15 +1,16 @@
-FROM erlang:22.2.7-slim as base
+FROM erlang:22.3-slim as base
 
+# Supplement necessary system software -----------------------------------------
 RUN apt-get update \
- && apt-get install -y  
+ && apt-get install -yq  
 
-RUN apt-get install -y alien \
-                       autoconf \
-                       autotools-dev \ 
-                       build-essential \
-                       curl \
-                       git \
-                       wget \
+RUN apt-get install -yq alien \
+                        autoconf \
+                        autotools-dev \ 
+                        build-essential \
+                        curl \
+                        git \
+                        wget \
  && git config --global credential.helper 'cache --timeout 3600' \
  && wget https://download.oracle.com/otn_software/linux/instantclient/19600/oracle-instantclient19.6-basic-19.6.0.0.0-1.x86_64.rpm \
  && alien -i *.rpm \
@@ -44,6 +45,8 @@ RUN echo "=====================================================================>
  && automake --version \
  && echo "=====================================================================> Version  curl: " \
  && curl --version \
+ && echo "=====================================================================> Version  debian: " \
+ && cat /etc/os-release \
  && echo "=====================================================================> Version  dos2unix: " \
  && dos2unix --version \
  && echo "=====================================================================> Version  gcc: " \
@@ -56,7 +59,7 @@ RUN echo "=====================================================================>
  && rebar3 version \
  && echo "=====================================================================> Version  tmux: " \
  && tmux -V \
- && echo "=====================================================================> Version  Vim: " \
+ && echo "=====================================================================> Version  vim: " \
  && vim --version \
  && echo "=====================================================================> Version  wget: " \
  && wget --version \
