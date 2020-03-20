@@ -3,6 +3,10 @@ Application dderl
 
 Release history with new or improved features and bugfixes
 
+Version 3.9.2 (Release Date 20.03.2020)
+=======================================
+* fixed docker image
+
 Version 3.9.0 (Release Date 28.02.2020)
 =======================================
 * OTP 21+ support
