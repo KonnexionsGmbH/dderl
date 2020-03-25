@@ -8,7 +8,6 @@ rebar.lock
 rebar3.crashdump
 snapshot
 test/*.beam
-*.log
 *.dump
 *.swp
 *.swo
