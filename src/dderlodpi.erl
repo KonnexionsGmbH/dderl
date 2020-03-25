@@ -1189,15 +1189,15 @@ R = get_rows(Conn, Stmt, NRows, Acc, VarsDatas), % gets all the results from the
 R. % return query results
 
 %% this recursive function fetches all the rows. It does so by calling yet another recursive function that fetches all the fields in a row.
-get_rows(_Conn, _, 0, Acc, _VarsDatas) -> ?TR, {lists:reverse(Acc), false};
+get_rows(_Conn, _, 0, Acc, _VarsDatas) -> {lists:reverse(Acc), false};
 get_rows(Conn, Stmt, NRows, Acc, VarsDatas) ->
-    ?TR,
     case dpi:stmt_fetch(Stmt) of % try to fetch a row
-        #{found := true} -> % got a row: get the values in that row and then do the recursive call to try to get another row
-            get_rows(Conn, Stmt, NRows -1, [get_column_values(Conn, Stmt, 1, VarsDatas, length(Acc)+1) | Acc], VarsDatas); % recursive call
+        #{found := true, bufferRowIndex := Index} -> % got a row: get the values in that row and then do the recursive call to try to get another row
+            get_rows(Conn, Stmt, NRows -1, [get_column_values(Conn, Stmt, 1, VarsDatas, Index+1) | Acc], VarsDatas); % recursive call
         #{found := false} -> % no more rows: that was all of them
             {lists:reverse(Acc), true} % reverse the list so it's in the right order again after it was pieced together the other way around
     end.
+
 
 %% get all the fields in one row
 get_column_values(_Conn, _Stmt, ColIdx, VarsDatas, _RowIndex) when ColIdx > length(VarsDatas) -> ?TR(1), [];
