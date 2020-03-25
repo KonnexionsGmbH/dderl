@@ -142,7 +142,15 @@ function loginCb(resp) {
                 val: ""
             }]
         });
-    } else if (resp.hasOwnProperty('saml')) {
+    } else if (resp.hasOwnProperty('fido2')) {
+        if(isWebAuthnSupported()) {
+            console.log('fido2 authentication');
+            triggerFido2Authentication(resp.fido2);
+        } else {
+            logout(true, "WebAuthn not supported on this browser");
+        }
+    }
+    else if (resp.hasOwnProperty('saml')) {
         if (resp.saml.hasOwnProperty('form')) {
             if (dderlState.screensaver && window.tab) {
                 window.tab.document.body.innerHTML = resp.saml.form;
@@ -303,7 +311,7 @@ function inputEnter(layout) {
     loginAjax(data);
 }
 
-export function logout(isForceful) {
+export function logout(isForceful, msg) {
     if (dderlState.connection && isForceful !== true) {
         ajaxCall(null, 'check_session', null, 'check_session', function () {
             confirm_jq({ title: "Confirm logout", content: '' }, function () {
@@ -319,10 +327,10 @@ export function logout(isForceful) {
     function exec_logout() {
         ajaxCall(null, 'logout', '{}', 'logout', function (data) {
             console.log('Request logout Result ' + data);
-            process_logout();
+            process_logout(msg);
         }, function () {
             // We have to cleanup even when the server is not recheable
-            process_logout();
+            process_logout(msg);
         });
     }
 }
@@ -354,7 +362,7 @@ export function new_connection_tab() {
     }
 }
 
-function process_logout() {
+function process_logout(msg) {
     dderlState.isLoggedIn = false;
     dderlState.connection = null;
     dderlState.adapter = null;
@@ -366,9 +374,17 @@ function process_logout() {
     $('#login-button').html('');
     $('#btn-change-password').data("logged_in_user", "");
     $('#login-msg').html('Welcome guest');
+    let fields = [];
+    if (msg) {
+        fields = [{
+            type: "label",
+            val: msg,
+            color: "#DD1122"
+        }];
+    }
     display({
         title: "Successfully logged out",
-        fields: []
+        fields: fields
     });
 }
 
@@ -399,4 +415,111 @@ export function change_login_password(loggedInUser, shouldConnect) {
         }
         else alert_jq("Confirm password missmatch!");
     });
+}
+
+// fido2 helper functions
+function _arrayBufferToString(buffer) {
+    var binary = '';
+    var bytes = new Uint8Array(buffer);
+    var len = bytes.byteLength;
+    for (var i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return binary;
+}
+
+function _arrayBufferToBase64(buffer) {
+    return window.btoa(_arrayBufferToString(buffer));
+}
+
+function _base64ToArrayBuffer(base64) {
+    var binary_string = window.atob(base64);
+    var len = binary_string.length;
+    var bytes = new Uint8Array(len);
+    for (var i = 0; i < len; i++) {
+        bytes[i] = binary_string.charCodeAt(i);
+    }
+    return bytes.buffer;
+}
+
+export function triggerFido2Registration(registerConfig) {
+    if (registerConfig) {
+        let user = {};
+        user.id = new Uint8Array(16);
+        user.name = dderlState.username;
+        user.displayName = dderlState.username;
+        registerConfig.challenge = _base64ToArrayBuffer(registerConfig.challenge);
+        registerConfig.user = user;
+        let excludeCredentials = registerConfig.excludeCredentials.map(
+            exCred => {
+                exCred.id = _base64ToArrayBuffer(exCred.id);
+                return exCred;
+            });
+        navigator.credentials.create({ publicKey: registerConfig }).then(
+            function (credential) {
+                let credObj = {};
+                credObj.rawID = _arrayBufferToBase64(credential.rawId);
+                credObj.type = credential.type;
+                credObj.clientDataJSON = _arrayBufferToString(credential.response.clientDataJSON);
+                credObj.attestationObject = _arrayBufferToBase64(credential.response.attestationObject);
+                credObj.excludeCredentials = excludeCredentials;
+                ajaxCall(null, 'register_key_attest', credObj, 'register_key_attest',
+                    function (response) {
+                        console.log("register_key_attest challenge");
+                        console.log(response);
+                        if (response.error) {
+                            alert_jq(response.error);
+                        } else {
+                            alert_jq("fido2 key registered");
+                        }
+                    },
+                    function (error) {
+                        console.log("Error on register_key_attest : ", error);
+                        alert_jq("Failed to reach the server, the connection might be lost.");
+                    }
+                );
+            }).catch((err) => {
+                console.log('error while registering', err);
+                alert_jq(err);
+            });
+    }
+}
+
+export function isWebAuthnSupported() {
+    if (typeof (PublicKeyCredential) == "undefined") {
+        console.log("webauthn is not supported on the browser");
+        alert_jq("WebAuthn not supported on this browser");
+        return false;
+    }
+    return true;
+}
+
+function triggerFido2Authentication(authConfig) {
+    let credConfig = authConfig.credConfig;
+    let baseConfig = authConfig.baseConfig;
+    let allowCredentials = Object.keys(authConfig.credentials).map(
+        credId => {
+            credConfig.id = _base64ToArrayBuffer(credId);
+            return credConfig;
+        });
+    baseConfig.challenge = _base64ToArrayBuffer(baseConfig.challenge);
+    baseConfig.allowCredentials = allowCredentials;
+    navigator.credentials.get({ publicKey: baseConfig }).then(
+        function (credential) {
+            let credObj = {};
+            credObj.rawID = _arrayBufferToBase64(credential.rawId);
+            credObj.type = credential.type;
+            credObj.clientDataJSON = _arrayBufferToString(credential.response.clientDataJSON);
+            credObj.authenticatorData = _arrayBufferToBase64(credential.response.authenticatorData);
+            credObj.sig = _arrayBufferToBase64(credential.response.signature);
+            ajaxCall(null, 'login', { fido2: credObj }, 'login', loginCb,
+                function (error) {
+                    console.log("Error on login : ", error);
+                    alert_jq("Failed to reach the server, the connection might be lost.");
+                }
+            );
+        }).catch((err) => {
+            console.log('error while authenticating', err);
+            logout(true, err);
+        });
 }
