@@ -1,6 +1,6 @@
 #!/bin/bash
 
-exec &> >(tee -i run_create_image_dderl_dev.log)
+exec &> >(tee -i docker/run_create_image_dderl_dev.log)
 sleep .1
 
 # ------------------------------------------------------------------------------

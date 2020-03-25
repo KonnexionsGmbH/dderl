@@ -10,6 +10,8 @@ RUN apt-get install -yq alien \
                         build-essential \
                         curl \
                         git \
+                        openssl \
+                        procps \
                         wget \
  && git config --global credential.helper 'cache --timeout 3600' \
  && wget https://download.oracle.com/otn_software/linux/instantclient/19600/oracle-instantclient19.6-basic-19.6.0.0.0-1.x86_64.rpm \
@@ -28,7 +30,7 @@ RUN apt-get install -y dos2unix \
                        vim
 
 # Setting Environment Variables ------------------------------------------------
-ENV ERL_INTERFACE_DIR=/usr/local/lib/erlang/lib/erl_interface-3.13.1 \
+ENV ERL_INTERFACE_DIR=/usr/local/lib/erlang/lib/erl_interface-3.13.2 \
     ORACLE_HOME=/usr/lib/oracle/19.6/client64
  
 RUN echo "=====================================================================> Curent Date: " \
@@ -55,6 +57,10 @@ RUN echo "=====================================================================>
  && git --version \
  && echo "=====================================================================> Version  htop: " \
  && htop --version \
+ && echo "=====================================================================> Version  openssl: " \
+ && openssl version -a \
+ && echo "=====================================================================> Version  procps-ng: " \
+ && ps --version \
  && echo "=====================================================================> Version  rebar3: " \
  && rebar3 version \
  && echo "=====================================================================> Version  tmux: " \

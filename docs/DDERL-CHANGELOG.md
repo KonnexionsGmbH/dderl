@@ -3,6 +3,10 @@ Application dderl
 
 Release history with new or improved features and bugfixes
 
+Version 3.9.4 (Release Date 25.03.2020)
+=======================================
+* Minor fixes with docker images
+
 Version 3.9.3 (Release Date 23.03.2020)
 =======================================
 * Prometheus v4.5.0
