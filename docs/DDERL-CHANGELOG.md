@@ -5,6 +5,10 @@ Release history with new or improved features and bugfixes
 
 Version 3.9.5 (Release Date 27.03.2020)
 =======================================
+* mimetypes dependency removed
+
+Version 3.9.5 (Release Date 27.03.2020)
+=======================================
 * Log formatting config in vars.config
 * Minor fixes with docker images
 
