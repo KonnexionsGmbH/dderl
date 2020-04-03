@@ -1,4 +1,4 @@
-dderl
+DDerl: Data Discovery Tool.
 =====
 
 ![Travis (.org)](https://img.shields.io/travis/K2InformaticsGmbH/dderl.svg)
@@ -6,9 +6,7 @@ dderl
 ![GitHub](https://img.shields.io/github/license/K2InformaticsGmbH/dderl.svg)
 ![GitHub release](https://img.shields.io/github/release/K2InformaticsGmbH/dderl.svg)
 ![GitHub Release Date](https://img.shields.io/github/release-date/K2InformaticsGmbH/dderl.svg)
-![GitHub commits since latest release](https://img.shields.io/github/commits-since/K2InformaticsGmbH/dderl/3.7.2.svg)
-
-WEB DataBase Browser Application.
+![GitHub commits since latest release](https://img.shields.io/github/commits-since/K2InformaticsGmbH/dderl/3.9.4.svg)
 
 ### Build (Supported erlang OTP version - 21+)
 

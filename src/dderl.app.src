@@ -3,7 +3,7 @@
 {application, dderl,
  [
   {description, "Web based tool for exploring databases"},
-  {vsn, "3.9.0"},
+  {vsn, "3.9.6"},
   {registered, []},
   {applications, [kernel,
                   stdlib,
@@ -12,7 +12,6 @@
                   cowboy,
                   erlimem,
                   esaml,
-                  mimetypes,
                   oranif,
                   wax,
                   prometheus]},
