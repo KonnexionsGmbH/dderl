@@ -1,6 +1,6 @@
--module(dperl_ora).
+-module(dperl_service_oracle).
 
--include("dperl_ora.hrl").
+-include("dperl_service_oracle.hrl").
 
 -behavior(dperl_worker).
 -behavior(cowboy_middleware).
