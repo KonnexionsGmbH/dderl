@@ -399,10 +399,10 @@ local_ips(ListenerAddresses) ->
         end, [], ListenerAddresses
     ).
 
-init_resources(#{credential := #{user := User, password := Password},
-                 links := Links} = Resources,
-               #state{active_link = ActiveLink} = State) ->
-    #{opt := Opts, tns := TNS} = lists:nth(ActiveLink, Links),
+init_resources(#{credential := #{user := _User, password := _Password},
+                 links := Links} = _Resources,
+               #state{active_link = ActiveLink} = _State) ->
+    #{opt := _Opts, tns := _TNS} = lists:nth(ActiveLink, Links),
     {error, unimplemented}.
     %% TODO : reimplement without erlocipool
     %Options = dperl_dal:oci_opts(?ERLOCIPOOL_LOG_CB, Opts),
@@ -481,7 +481,7 @@ init_resources(#{credential := #{user := User, password := Password},
     %end.
 
 -spec create_stmt(atom(), binary(), list()) -> tuple().
-create_stmt(Pool, Sql, Binds) ->
+create_stmt(_Pool, _Sql, _Binds) ->
     {error, unimplemented}.
     %% TODO
     % ?OciStmt(Pool, Sql, Binds, Stmt),

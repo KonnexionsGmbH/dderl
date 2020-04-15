@@ -79,8 +79,8 @@ run(#{
   #{<<"access_token">> := AccessToken} = Auth = jsx:decode(list_to_binary(BodyJson), [return_maps]),
   io:format("Auth ~p~n", [Auth]),
   io:format("-----~nUserInfo :~n~p~n-----~n", [userinfo(AccessToken)]),
-  io:format("-----~nSleep :~n~p~n-----~n", [sleep(AccessToken)]).%,
-  %io:format("-----~nActivity :~n~p~n-- Activity --~n", [activity(AccessToken)]).
+  io:format("-----~nSleep :~n~p~n-----~n", [sleep(AccessToken)]),
+  io:format("-----~nActivity :~n~p~n-- Activity --~n", [activity(AccessToken)]).
 
 userinfo(AccessToken) ->
   {ok,{{"HTTP/1.1",200,"OK"}, _, UserInfoJson}} = httpc:request(
