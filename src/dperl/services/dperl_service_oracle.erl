@@ -362,12 +362,12 @@ init_interface(#{baseUrl := BaseUrl, commonWhitelist := CWhiteList,
         end, FilteredListenerIps),
         {ok, State#state{listeners = FilteredListenerIps, port = Port}}
     catch
-        error : {badmatch,{error,{already_started,_}}} = Error ->
-            ?SError("error:~p~n~p", [Error, erlang:get_stacktrace()]),
+        error:{badmatch,{error,{already_started,_}}} = Error:Stacktrace ->
+            ?SError("error:~p~n~p", [Error, Stacktrace]),
             stop_listeners(Error, FilteredListenerIps, Port),
             init_interface(Intf, State);
-        Class:Error ->
-            ?SError("~p:~p~n~p", [Class, Error, erlang:get_stacktrace()]),
+        Class:Error:Stacktrace ->
+            ?SError("~p:~p~n~p", [Class, Error, Stacktrace]),
             {error, Error}
     end.
 

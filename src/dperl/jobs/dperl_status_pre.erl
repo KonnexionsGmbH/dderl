@@ -7,8 +7,8 @@
 preprocess(MetricKey, Value, Timestamp, Node, Ctx) ->
     try preprocess_internal(MetricKey, Value, Timestamp, Node, Ctx)
     catch
-        Error:Exception ->
-            ?Error("Unable to format the Metric ~p : ~p, error ~p:~p ~p", [MetricKey, Value, Error, Exception, erlang:get_stacktrace()]),
+        Error:Exception:Stacktrace ->
+            ?Error("Unable to format the Metric ~p : ~p, error ~p:~p ~p", [MetricKey, Value, Error, Exception, Stacktrace]),
             {[], Ctx}
     end.
 

@@ -1,7 +1,7 @@
 -module(dperl_metrics).
 
 -include("dperl.hrl").
--include("dperl_status.hrl").
+-include_lib("jobs/dperl_status.hrl").
 
 -behaviour(imem_gen_metrics).
 

@@ -1,6 +1,6 @@
 -module(dperl_file_copy).
 
--include("dperl.hrl").
+-include_lib("dperl/dperl.hrl").
 
 -behavior(dperl_worker).
 
@@ -128,14 +128,14 @@ handle_info(execute, #state{name = Job} = State) ->
             erlang:send_after(?CYCLE_ALWAYS_WAIT(?MODULE, Job), self(), execute),
             {noreply, State5}
     catch
-        error:{sfh_error, Error, State5} ->
-            ?JError("~p ~p step_failed~n~p", [?MODULE, Error, erlang:get_stacktrace()]),
+        error:{sfh_error, Error, State5}:Stacktrace ->
+            ?JError("~p ~p step_failed~n~p", [?MODULE, Error, Stacktrace]),
             dperl_dal:update_job_dyn(Job, #{}, error),
             erlang:send_after(?CYCLE_ERROR_WAIT(?MODULE, Job), self(), execute),
             dperl_dal:job_error(get(jstate), <<"step failed">>, Error),
             {noreply, State5};
-        Class:Error ->
-            ?JError("~p ~p ~p~n~p", [?MODULE, Class, Error, erlang:get_stacktrace()]),
+        Class:Error:Stacktrace ->
+            ?JError("~p ~p ~p~n~p", [?MODULE, Class, Error, Stacktrace]),
             dperl_dal:update_job_dyn(Job, error),
             erlang:send_after(?CYCLE_ERROR_WAIT(?MODULE, Job), self(), execute),
             dperl_dal:job_error(get(jstate), atom_to_binary(Class, utf8), Error),

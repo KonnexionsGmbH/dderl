@@ -408,9 +408,8 @@ report_status(Module, StatusTable, {Channel, ShortId}, JobName, Status) ->
         write_channel(StatusTable,
           [atom_to_list(Module), Channel, ShortId, JobName], Status)
     catch
-        C:E ->
-            ?Error("~p,~p to ~p : ~p",
-                   [Channel, ShortId, StatusTable, {C,E}], ?ST)
+        C:E:S ->
+            ?Error("~p,~p to ~p : ~p", [Channel, ShortId, StatusTable, {C,E}], S)
     end.
 
 %% pusher report_status

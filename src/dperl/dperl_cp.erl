@@ -145,8 +145,8 @@ check_workers([JobOrService | JobsOrServices], DNodes) ->
                     end
             end
     catch
-        _:Error ->
-            ?Error("invalid new config ~p. job/service skipped", [Error], ?ST),
+        _:Error:Stacktrace ->
+            ?Error("invalid new config ~p. job/service skipped", [Error], Stacktrace),
             dperl_dal:disable(JobOrService),
             ok
     end,
@@ -258,9 +258,9 @@ start(JobOrService, Mod, Name) ->
     ?Debug("start ~p_~s", [Mod, Name]),
     try dperl_worker:start(imem_config:reference_resolve(JobOrService))
     catch
-        _:Error ->
+        _:Error:Stacktrace ->
             ?Error([{enum, dperl_dal:to_atom(Name)}],
-                   "~p disabled, on start ~p", [Mod, Error], ?ST),
+                   "~p disabled, on start ~p", [Mod, Error], Stacktrace),
             dperl_dal:disable(JobOrService)
     end.
 
@@ -272,9 +272,9 @@ stop(JobOrService, Mod, Name) ->
             ?Debug("stop ~p_~s", [Mod, Name]),
             try dperl_worker:stop(Mod, Name)
             catch
-                _:Error ->
+                _:Error:Stacktrace ->
                     ?Error([{enum, dperl_dal:to_atom(Name)}],
-                           "~p disabled, on stop ~p at ~p", [Mod, Error, ?ST]),
+                           "~p disabled, on stop ~p at ~p", [Mod, Error, Stacktrace]),
                     dperl_dal:disable(JobOrService)
             end;
         false -> no_op

@@ -1,7 +1,7 @@
 -ifndef(_dperl_STATUS_HRL_).
 -define(_dperl_STATUS_HRL_, true).
 
--include("dperl.hrl").
+-include_lib("dperl/dperl.hrl").
 
 -record(context, {
             name                           :: list(),

@@ -84,20 +84,20 @@ execute(Mod, Job, State, #{sync := _, cleanup := _, refresh := _}
         = Args)
   when is_map(Args) ->
     try execute(sync, Mod, Job, State, Args) catch
-        Class:{step_failed, NewArgs} when is_map(NewArgs) ->
-            ?JError("~p ~p step_failed~n~p", [Mod, Class, erlang:get_stacktrace()]),
+        Class:{step_failed, NewArgs}:Stacktrace when is_map(NewArgs) ->
+            ?JError("~p ~p step_failed~n~p", [Mod, Class, Stacktrace]),
             dperl_dal:update_job_dyn(Job, error),
             ?RESTART_AFTER(?CYCLE_ERROR_WAIT(Mod, Job), NewArgs),
             dperl_dal:job_error(get(jstate), atom_to_binary(Class, utf8), Class),
             State;
-        Class:{step_failed, NewState} ->
-            ?JError("~p ~p step_failed~n~p", [Mod, Class, erlang:get_stacktrace()]),
+        Class:{step_failed, NewState}:Stacktrace ->
+            ?JError("~p ~p step_failed~n~p", [Mod, Class, Stacktrace]),
             dperl_dal:update_job_dyn(Job, Mod:get_status(NewState), error),
             ?RESTART_AFTER(?CYCLE_ERROR_WAIT(Mod, Job), Args),
             dperl_dal:job_error(get(jstate), <<"step failed">>, Class),
             NewState;
-        Class:Error ->
-            ?JError("~p ~p ~p~n~p", [Mod, Class, Error, erlang:get_stacktrace()]),
+        Class:Error:Stacktrace ->
+            ?JError("~p ~p ~p~n~p", [Mod, Class, Error, Stacktrace]),
             dperl_dal:update_job_dyn(Job, error),
             ?RESTART_AFTER(?CYCLE_ERROR_WAIT(Mod, Job), Args),
             dperl_dal:job_error(get(jstate), atom_to_binary(Class, utf8), Class),

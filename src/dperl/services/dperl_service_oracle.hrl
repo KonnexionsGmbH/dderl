@@ -1,7 +1,7 @@
 -ifndef(_dperl_ora_).
 -define(_dperl_ora_, true).
 
--include("dperl.hrl").
+-include_lib("dperl/dperl.hrl").
 
 -define(MAX_COMMENT_LENGTH, 200).
 -define(MAX_REQUESTOR_LENGTH, 20).

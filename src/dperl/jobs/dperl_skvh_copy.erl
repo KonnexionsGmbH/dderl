@@ -1,6 +1,6 @@
 -module(dperl_skvh_copy).
 
--include("dperl.hrl").
+-include_lib("dperl/dperl.hrl").
 
 -behavior(dperl_worker).
 -behavior(dperl_strategy_scr).
@@ -159,10 +159,10 @@ terminate(Reason, #state{srcImemSess = SrcSession, dstImemSess = DstSession}) ->
         [Session:close() || Session <- [SrcSession, DstSession], Session /= undefined],
         ?JInfo("terminate ~p", [Reason])
     catch
-        _:Error ->
+        _:Error:Stacktrace ->
         dperl_dal:job_error(<<"terminate">>, <<"terminate">>, Error),
         ?JError("terminate ~p:~p ~p",
-                [Reason, Error, erlang:get_stacktrace()])
+                [Reason, Error, Stacktrace])
     end.
 
 code_change(OldVsn, State, Extra) ->
