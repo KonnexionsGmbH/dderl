@@ -527,7 +527,16 @@ import {dderlState, escapeNewLines, unescapeNewLines} from '../../scripts/dderl'
 
     function jsonFromBoundRange(ranges, boundRange, columns, usedCols) {
         var rowObjects, clipTextCells;
-
+        var coulumnNames = [];
+        usedCols.forEach(e => {
+            var columnName = columns[e].name;
+            if(/^\"(.*)\"$/.test(columnName)) {
+                // removing extra quotes ""test"" to "test"
+                coulumnNames[e] = columnName.substring(1, columnName.length - 1);
+            } else {
+                coulumnNames[e] = columnName;
+            }
+        });
         var gridData = _grid.getData();
         if (_grid.getData() instanceof Slick.Data.DataView) {
             gridData = _grid.getData().getItems();
@@ -541,7 +550,7 @@ import {dderlState, escapeNewLines, unescapeNewLines} from '../../scripts/dderl'
             clipTextCells = {};
             var isRowEmpty = true;
             for (var j = 0; j < usedCols.length; ++j) {
-                clipTextCells[columns[usedCols[j]].name] = null;
+                clipTextCells[coulumnNames[usedCols[j]]] = null;
                 for(var rg = 0; rg < ranges.length; ++rg) {
                     if(ranges[rg].contains(i, usedCols[j])) {
                         if(gridData[i][columns[usedCols[j]].field] !== "'$not_a_value'") {
@@ -549,9 +558,9 @@ import {dderlState, escapeNewLines, unescapeNewLines} from '../../scripts/dderl'
                                 currentId = uniqueid() + counter.toString();
                                 ++counter;
                                 numericIdList[currentId] = escapeNewLines(gridData[i][columns[usedCols[j]].field]);
-                                clipTextCells[columns[usedCols[j]].name] = currentId;
+                                clipTextCells[coulumnNames[usedCols[j]]] = currentId;
                             } else if (columns[usedCols[j]].type === "text" || gridData[i][columns[usedCols[j]].field]) {
-                                clipTextCells[columns[usedCols[j]].name] = escapeNewLines(gridData[i][columns[usedCols[j]].field]);
+                                clipTextCells[coulumnNames[usedCols[j]]] = _toJson(escapeNewLines(gridData[i][columns[usedCols[j]].field]));
                             }
                             isRowEmpty = false;
                         }
@@ -571,6 +580,19 @@ import {dderlState, escapeNewLines, unescapeNewLines} from '../../scripts/dderl'
             result = result.replace("\"" + currentId + "\"", numericIdList[currentId]);
         }
         return result;
+    }
+
+    function _toJson(str) {
+        if(str === "null") {
+            return null;
+        } else if(str.startsWith("{") || str.startsWith("[")) {
+            try {
+                return JSON.parse(str);
+            } catch (e) {
+                return str;
+            }
+        }
+        return str;
     }
 
     function uniqueid() {
