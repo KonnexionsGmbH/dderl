@@ -16,7 +16,7 @@
 
 -record(state, {name, channel, client_id, client_secret, password, email,
                 cb_uri, is_connected = false, access_token, api_url, oauth_url,
-                last_day, infos = []}).
+                last_sleep_day, last_activity_day, last_readiness_day, infos = []}).
 
 % dperl_strategy_scr export
 -export([connect_check_src/1, get_source_events/2, connect_check_dst/1,
@@ -110,22 +110,24 @@ report_status(_Key, _Status, _State) -> no_op.
 
 do_cleanup(State, _BlkCount) ->
     {ok, State1} = connect_check_src(State),
-    {DayQuery, State2} = get_day(State1),
-    State3 = lists:foldl(
-        fun(Fun, Acc) ->
-            try Fun(DayQuery, Acc)
-            catch E:C:S ->
-                ?JError("E : ~p, C : ~p, S : ~p", [E, C, S]),
-                {ok, Acc1} = connect_check_src(Acc#state{is_connected = false}),
-                Fun(Acc1)
+    State2 = lists:foldl(
+        fun(Type, Acc) ->
+            case get_day(Type, Acc) of
+                fetched -> Acc;
+                Day ->
+                    try fetch_metric(Type, Day, Acc)
+                    catch E:C:S ->
+                        ?JError("E : ~p, C : ~p, S : ~p", [E, C, S]),
+                        {ok, Acc1} = connect_check_src(Acc#state{is_connected = false}),
+                        fetch_metric(Type, Day, Acc1)
+                    end
             end
-        end, State2, [fun fetch_userinfo/2, fun fetch_activity/2,
-                      fun fetch_sleep/2, fun fetch_readiness/2]),
-    case State3#state.infos of
-        [_] ->
-            {ok, finish, State3#state{infos = []}};
-        Infos ->
-            ?Info("Infos : ~p", [Infos]),
+        end, State1, ["sleep", "activity", "readiness"]),
+    State3 = fetch_userinfo(State2),
+    case State2#state.infos of
+        [] ->
+            {ok, finish, State3};
+        _ ->
             {ok, State3}
     end.
 
@@ -142,12 +144,19 @@ update_dst(Key, Val, #state{channel = Channel} = State) when is_binary(Val) ->
 update_dst(Key, Val, State) ->
     update_dst(Key, imem_json:encode(Val), State).
 
-get_status(#state{last_day = LastDay}) ->
-    #{lastDay => LastDay}.
+get_status(#state{last_sleep_day = LastSleepDay,
+                  last_activity_day = LastActivityDay,
+                  last_readiness_day = LastReadinessDay}) ->
+    #{lastSleepDay => LastSleepDay, lastActivityDay => LastActivityDay,
+      lastReadinessDay => LastReadinessDay}.
 
 init_state([]) -> #state{};
-init_state([#dperlNodeJobDyn{state = #{lastDay := LastDay}} | _]) ->
-    #state{last_day = LastDay};
+init_state([#dperlNodeJobDyn{state = State} | _]) ->
+    LastSleepDay = maps:get(lastSleepDay, State, undefined),
+    LastActivityDay = maps:get(lastActivityDay, State, undefined),
+    LastReadinessDay = maps:get(lastReadinessDay, State, undefined),
+    #state{last_sleep_day = LastSleepDay, last_activity_day = LastActivityDay,
+           last_readiness_day = LastReadinessDay};
 init_state([_ | Others]) ->
     init_state(Others).
 
@@ -156,7 +165,7 @@ init({#dperlJob{name=Name, dstArgs = #{channel := Channel},
                             client_secret := ClientSecret, user_email := Email,
                             cb_uri := CallbackUri, api_url := ApiUrl,
                             oauth_url := OauthUrl}}, State}) ->
-    ?JInfo("Starting from : ~s", [State#state.last_day]),
+    ?JInfo("Starting ..."),
     ChannelBin = dperl_dal:to_binary(Channel),
     dperl_dal:create_check_channel(ChannelBin),
     {ok, State#state{channel = ChannelBin, client_id = ClientId,
@@ -183,7 +192,7 @@ terminate(Reason, _State) ->
     httpc:reset_cookies(?MODULE),
     ?JInfo("terminate ~p", [Reason]).
 
-fetch_userinfo(_, #state{api_url = ApiUrl, access_token = AccessToken} = State) ->
+fetch_userinfo(#state{api_url = ApiUrl, access_token = AccessToken} = State) ->
     {ok,{{"HTTP/1.1",200,"OK"}, _, UserInfoJson}} = httpc:request(
       get, {ApiUrl ++ "/v1/userinfo", [{"Authorization", "Bearer " ++ binary_to_list(AccessToken)}]},
       [{autoredirect, false}], [], ?MODULE
@@ -192,71 +201,67 @@ fetch_userinfo(_, #state{api_url = ApiUrl, access_token = AccessToken} = State) 
     Info = {["ouraring", "userinfo"], UserInfo},
     State#state{infos = [Info | State#state.infos]}.
 
-get_day(State) ->
-    Key = ["ouraring", "sleep"],
+get_day(Type, State) ->
+    LastDay = get_last_day(Type, State),
+    Key = ["ouraring", Type],
     Yesterday = edate:yesterday(),
-    YDayStr = edate:date_to_string(Yesterday),
-    Day =
     case dperl_dal:read_channel(State#state.channel, Key) of
         ?NOT_FOUND ->
-            case State#state.last_day of
+            case LastDay of
                 undefined ->
-                     SDays = ?SHIFT_DAYS(State#state.name),
-                    edate:date_to_string(edate:shift(-1 * SDays, days));
-                YDayStr ->
-                    YDayStr;
+                    SDays = ?SHIFT_DAYS(State#state.name),
+                    edate:shift(-1 * SDays, days);
+                Yesterday ->
+                    Yesterday;
                 LastDay ->
-                    edate:date_to_string(edate:shift(edate:string_to_date(LastDay), 1, days))
+                    edate:shift(LastDay, 1, days)
             end;
         #{<<"_day">> := DayBin} ->
             DayStr = binary_to_list(DayBin),
             case {edate:string_to_date(DayStr), Yesterday} of
-                {D, D} -> DayStr;
-                {D1, D2} when D1 < D2 -> edate:date_to_string(edate:shift(D1, 1, day));
-                {_, Yesterday} -> edate:date_to_string(Yesterday)
+                {D, D} -> fetched;
+                {D1, D2} when D1 < D2 -> edate:shift(D1, 1, day);
+                {_, Yesterday} -> Yesterday
             end
-    end,
-    DayQuery = "?start=" ++ Day ++ "&end=" ++ Day,
-    {DayQuery, State#state{last_day = Day}}.
-
-fetch_sleep(DayQuery, #state{api_url = ApiUrl, access_token = AccessToken} = State) ->
-    {ok,{{"HTTP/1.1",200,"OK"}, _, SleepInfoJson}} = httpc:request(
-        get, {ApiUrl ++ "/v1/sleep" ++ DayQuery, [{"Authorization", "Bearer " ++ binary_to_list(AccessToken)}]},
-        [{autoredirect, false}], [], ?MODULE
-    ),
-    case imem_json:decode(list_to_binary(SleepInfoJson), [return_maps]) of
-        #{<<"sleep">> := []} ->
-            State;
-        Sleep ->
-            Info = {["ouraring", "sleep"], Sleep#{<<"_day">> => list_to_binary(State#state.last_day)}},
-            State#state{infos = [Info | State#state.infos]}
     end.
 
-fetch_activity(DayQuery, #state{api_url = ApiUrl, access_token = AccessToken} = State) ->
-    {ok,{{"HTTP/1.1",200,"OK"}, _, ActivityInfoJson}} = httpc:request(
-        get, {ApiUrl ++ "/v1/activity" ++ DayQuery, [{"Authorization", "Bearer " ++ binary_to_list(AccessToken)}]},
-        [{autoredirect, false}], [], ?MODULE
-    ),
-    case imem_json:decode(list_to_binary(ActivityInfoJson), [return_maps]) of
-        #{<<"activity">> := []} ->
-            State;
-        Activity ->
-            Info = {["ouraring", "activity"], Activity#{<<"_day">> => list_to_binary(State#state.last_day)}},
-            State#state{infos = [Info | State#state.infos]}
+fetch_metric(Type, Day, #state{api_url = ApiUrl, access_token = AccessToken} = State) ->
+    ?JInfo("Fetching metric for ~s on ~p", [Type, Day]),
+    {ok,{{"HTTP/1.1",200,"OK"}, _, MetricJson}} = httpc:request(
+        get, {ApiUrl ++ "/v1/" ++ Type ++ day_query(Day), [{"Authorization", "Bearer " ++ binary_to_list(AccessToken)}]},
+        [{autoredirect, false}], [], ?MODULE),
+    TypeBin = list_to_binary(Type),
+    case imem_json:decode(list_to_binary(MetricJson), [return_maps]) of
+        #{TypeBin := []} ->
+            NextDay = next_day(Day),
+            case NextDay =< edate:yesterday() of
+                true ->
+                    fetch_metric(Type, NextDay, State);
+                false ->
+                    State
+            end;
+        Metric ->
+            Info = {["ouraring", Type], Metric#{<<"_day">> => list_to_binary(edate:date_to_string(Day))}},
+            set_metric_day(Type, Day, State#state{infos = [Info | State#state.infos]})
     end.
 
-fetch_readiness(DayQuery, #state{api_url = ApiUrl, access_token = AccessToken} = State) ->
-    {ok,{{"HTTP/1.1",200,"OK"}, _, ReadinessJson}} = httpc:request(
-        get, {ApiUrl ++ "/v1/readiness" ++ DayQuery, [{"Authorization", "Bearer " ++ binary_to_list(AccessToken)}]},
-        [{autoredirect, false}], [], ?MODULE
-    ),
-    case imem_json:decode(list_to_binary(ReadinessJson), [return_maps]) of
-        #{<<"readiness">> := []} ->
-            State;
-        Readiness ->
-            Info = {["ouraring", "readiness"], Readiness#{<<"_day">> => list_to_binary(State#state.last_day)}},
-            State#state{infos = [Info | State#state.infos]}
-    end.
+next_day(Day) when is_list(Day) ->
+    next_day(edate:string_to_date(Day));
+next_day(Day) when is_tuple(Day) ->
+    edate:shift(Day, 1, day).
+
+day_query(Day) when is_tuple(Day) ->
+    day_query(edate:date_to_string(Day));
+day_query(Day) when is_list(Day) ->
+    "?start=" ++ Day ++ "&end=" ++ Day.
+
+get_last_day("sleep", #state{last_sleep_day = LastSleepDay}) -> LastSleepDay;
+get_last_day("activity", #state{last_activity_day = LastActivityDay}) -> LastActivityDay;
+get_last_day("readiness", #state{last_readiness_day = LastReadinessDay}) -> LastReadinessDay.
+
+set_metric_day("sleep", Day, State) -> State#state{last_sleep_day = Day};
+set_metric_day("activity", Day, State) -> State#state{last_activity_day = Day};
+set_metric_day("readiness", Day, State) -> State#state{last_readiness_day = Day}.
 
 % format_links(Links) ->
 %     lists:map(
