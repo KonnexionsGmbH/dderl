@@ -16,7 +16,8 @@
 
 -record(state, {name, channel, client_id, client_secret, password, email,
                 cb_uri, is_connected = false, access_token, api_url, oauth_url,
-                last_sleep_day, last_activity_day, last_readiness_day, infos = []}).
+                last_sleep_day, last_activity_day, last_readiness_day,
+                infos = [], auth_time, auth_expiry}).
 
 % dperl_strategy_scr export
 -export([connect_check_src/1, get_source_events/2, connect_check_dst/1,
@@ -24,22 +25,27 @@
          fetch_src/2, fetch_dst/2, delete_dst/2, insert_dst/3,
          update_dst/3, report_status/3]).
 
+connect_check_src(#state{is_connected = true, auth_expiry = ExpiresIn, auth_time = AuthTime} = State) ->
+    case imem_datatype:sec_diff(AuthTime) of
+        Diff when Diff >= (ExpiresIn - 100) ->
+            % access token will expire in 100 seconds or less
+            connect_check_src(State#state{is_connected = false});
+        _ ->
+            {ok, State}
+    end;
 connect_check_src(#state{is_connected = false, client_id = ClientId, cb_uri = CallbackUri,
                          client_secret = ClientSecret, password = Password,
                          email = Email, oauth_url = OauthUrl} = State) ->
-    inets:start(httpc, [{profile, ?MODULE}]),
-    ok = httpc:set_options([{cookies, enabled}], ?MODULE),
+    httpc:reset_cookies(?MODULE),
     Url = OauthUrl ++ "/oauth/authorize"
     ++ "?response_type=code"
     ++ "&client_id=" ++ ClientId
     ++ "&redirect_uri=" ++ edoc_lib:escape_uri(CallbackUri)
     ++ "&scope=email+personal+daily"
     ++ "&state=" ++ "test",
-    %io:format(">>>>>>>>>> authorize: ~s~n", [Url]),
     case httpc:request(get, {Url, []}, [{autoredirect, false}], [], ?MODULE) of
         {ok, {{"HTTP/1.1",302,"Found"}, RespHeader302, []}} ->
             RedirectUri = OauthUrl ++ proplists:get_value("location", RespHeader302),
-            % io:format(">>>>>>>>>> 302 Redirect: ~s~n", [RedirectUri]),
             {ok, {{"HTTP/1.1",200,"OK"}, RespHeader, _Body}} = httpc:request(get, {RedirectUri, []}, [{autoredirect, false}], [], ?MODULE),
             SetCookieHeader = proplists:get_value("set-cookie", RespHeader),
             {match, [XRefCookie]} = re:run(SetCookieHeader, ".*_xsrf=(.*);.*", [{capture, [1], list}]),
@@ -52,7 +58,6 @@ connect_check_src(#state{is_connected = false, client_id = ClientId, cb_uri = Ca
             }, [{autoredirect, false}], [], ?MODULE
             ),
             RedirectUri_1 = OauthUrl ++ proplists:get_value("location", RespHeader302_1),
-            % io:format(">>>>>>>>>> 302 Redirect: ~s~n", [RedirectUri_1]),
             {ok, {{"HTTP/1.1",200,"OK"}, _, _}} = httpc:request(get, {RedirectUri_1, []}, [{autoredirect, false}], [], ?MODULE),
             {ok, {{"HTTP/1.1",302,"Found"}, RespHeader302_2, []}} = httpc:request(
             post, {
@@ -65,10 +70,8 @@ connect_check_src(#state{is_connected = false, client_id = ClientId, cb_uri = Ca
             }, [{autoredirect, false}], [], ?MODULE
             ),
             RedirectUri_2 = proplists:get_value("location", RespHeader302_2),
-            % io:format(">>>>>>>>>> 302 RedirectUri: ~s~n", [RedirectUri_2]),
             #{query := QueryString} = uri_string:parse(RedirectUri_2),
             #{"code" := Code} = maps:from_list(uri_string:dissect_query(QueryString)),
-            % io:format(">>>>>>>>>> Code: ~p~n", [Code]),
             {ok, {{"HTTP/1.1",200,"OK"}, _, BodyJson}} = httpc:request(
             post, {
                 OauthUrl ++ "/oauth/token", [], "application/x-www-form-urlencoded",
@@ -79,13 +82,13 @@ connect_check_src(#state{is_connected = false, client_id = ClientId, cb_uri = Ca
                 ++ "&client_secret=" ++ ClientSecret
             }, [{autoredirect, false}], [], ?MODULE
             ),
-            #{<<"access_token">> := AccessToken} = Auth = jsx:decode(list_to_binary(BodyJson), [return_maps]),
-            ?JInfo("Auth is : ~p", [Auth]),
-            {ok, State#state{is_connected = true, access_token = AccessToken}};
-        {ok, {{_, 200, _}, _, Body}} ->
-            ?JInfo("code : ~p body :  ~p", [200, Body]),
-            ?JInfo("!!!! cookies :~p", [httpc:which_cookies(?MODULE)]),
-            {error, Body, State}
+            #{<<"access_token">> := AccessToken, <<"expires_in">> := ExpiresIn} = Auth = jsx:decode(list_to_binary(BodyJson), [return_maps]),
+            ?JInfo("Authentication successful : ~p", [Auth]),
+            {ok, State#state{is_connected = true, access_token = AccessToken,
+                             auth_expiry = ExpiresIn, auth_time = imem_meta:time()}};
+        Error ->
+            ?JError("Unexpected response : ~p", [Error]),
+            {error, invalid_return, State}
     end;
 connect_check_src(State) -> {ok, State}.
 
@@ -109,26 +112,17 @@ insert_dst(Key, Val, State) ->
 report_status(_Key, _Status, _State) -> no_op.
 
 do_cleanup(State, _BlkCount) ->
-    {ok, State1} = connect_check_src(State),
-    State2 = lists:foldl(
-        fun(Type, Acc) ->
-            case get_day(Type, Acc) of
-                fetched -> Acc;
-                Day ->
-                    try fetch_metric(Type, Day, Acc)
-                    catch E:C:S ->
-                        ?JError("E : ~p, C : ~p, S : ~p", [E, C, S]),
-                        {ok, Acc1} = connect_check_src(Acc#state{is_connected = false}),
-                        fetch_metric(Type, Day, Acc1)
-                    end
-            end
-        end, State1, ["sleep", "activity", "readiness"]),
-    State3 = fetch_userinfo(State2),
-    case State2#state.infos of
-        [] ->
-            {ok, finish, State3};
-        _ ->
-            {ok, State3}
+    Types = ["sleep", "activity", "readiness", "userinfo"],
+    case fetch_metrics(Types, State) of
+        {ok, State2} ->
+            case State2#state.infos of
+                [_] ->
+                    {ok, finish, State2};
+                _ ->
+                    {ok, State2}
+            end;
+        {error, Error} ->
+            {error, Error, State#state{is_connected = false}}
     end.
 
 delete_dst(Key, #state{channel = Channel} = State) ->
@@ -168,6 +162,8 @@ init({#dperlJob{name=Name, dstArgs = #{channel := Channel},
     ?JInfo("Starting ..."),
     ChannelBin = dperl_dal:to_binary(Channel),
     dperl_dal:create_check_channel(ChannelBin),
+    inets:start(httpc, [{profile, ?MODULE}]),
+    ok = httpc:set_options([{cookies, enabled}], ?MODULE),
     {ok, State#state{channel = ChannelBin, client_id = ClientId,
                      client_secret = ClientSecret, password = Password,
                      email = Email, cb_uri = CallbackUri, name = Name,
@@ -192,14 +188,57 @@ terminate(Reason, _State) ->
     httpc:reset_cookies(?MODULE),
     ?JInfo("terminate ~p", [Reason]).
 
+fetch_metrics([], State) -> {ok, State};
+fetch_metrics(["userinfo" | Types], State) ->
+    case fetch_userinfo(State) of
+        {error, Error} ->
+            {error, Error};
+        State1 ->
+            fetch_metrics(Types, State1)
+    end;
+fetch_metrics([Type | Types], State) ->
+    case get_day(Type, State) of
+        fetched ->
+            fetch_metrics(Types, State);
+        Day ->
+            case fetch_metric(Type, Day, State) of
+                {error, Error} ->
+                    {error, Error};
+                State1 ->
+                    fetch_metrics(Types, State1)
+            end
+    end.
+
+fetch_metric(Type, Day, #state{api_url = ApiUrl, access_token = AccessToken} = State) ->
+    ?JInfo("Fetching metric for ~s on ~p", [Type, Day]),
+    Url = ApiUrl ++ "/v1/" ++ Type ++ day_query(Day),
+    TypeBin = list_to_binary(Type),
+    case exec_req(Url, AccessToken) of
+        #{TypeBin := []} ->
+            NextDay = next_day(Day),
+            case NextDay =< edate:yesterday() of
+                true ->
+                    fetch_metric(Type, NextDay, State);
+                false ->
+                    State
+            end;
+        Metric when is_map(Metric) ->
+            Info = {["ouraring", Type], Metric#{<<"_day">> => list_to_binary(edate:date_to_string(Day))}},
+            set_metric_day(Type, Day, State#state{infos = [Info | State#state.infos]});
+        {error, Error} ->
+            ?JError("Error fetching ~s for ~p : ~p", [Type, Day, Error]),
+            {error, Error}
+    end.
+
 fetch_userinfo(#state{api_url = ApiUrl, access_token = AccessToken} = State) ->
-    {ok,{{"HTTP/1.1",200,"OK"}, _, UserInfoJson}} = httpc:request(
-      get, {ApiUrl ++ "/v1/userinfo", [{"Authorization", "Bearer " ++ binary_to_list(AccessToken)}]},
-      [{autoredirect, false}], [], ?MODULE
-    ),
-    UserInfo = imem_json:decode(list_to_binary(UserInfoJson), [return_maps]),
-    Info = {["ouraring", "userinfo"], UserInfo},
-    State#state{infos = [Info | State#state.infos]}.
+    case exec_req(ApiUrl ++ "/v1/userinfo", AccessToken) of
+        UserInfo when is_map(UserInfo) ->
+            Info = {["ouraring", "userinfo"], UserInfo},
+            State#state{infos = [Info | State#state.infos]};
+        {error, Error} ->
+            ?JError("Error fetching userinfo : ~p", [Error]),
+            {error, Error}
+    end.
 
 get_day(Type, State) ->
     LastDay = get_last_day(Type, State),
@@ -225,24 +264,13 @@ get_day(Type, State) ->
             end
     end.
 
-fetch_metric(Type, Day, #state{api_url = ApiUrl, access_token = AccessToken} = State) ->
-    ?JInfo("Fetching metric for ~s on ~p", [Type, Day]),
-    {ok,{{"HTTP/1.1",200,"OK"}, _, MetricJson}} = httpc:request(
-        get, {ApiUrl ++ "/v1/" ++ Type ++ day_query(Day), [{"Authorization", "Bearer " ++ binary_to_list(AccessToken)}]},
-        [{autoredirect, false}], [], ?MODULE),
-    TypeBin = list_to_binary(Type),
-    case imem_json:decode(list_to_binary(MetricJson), [return_maps]) of
-        #{TypeBin := []} ->
-            NextDay = next_day(Day),
-            case NextDay =< edate:yesterday() of
-                true ->
-                    fetch_metric(Type, NextDay, State);
-                false ->
-                    State
-            end;
-        Metric ->
-            Info = {["ouraring", Type], Metric#{<<"_day">> => list_to_binary(edate:date_to_string(Day))}},
-            set_metric_day(Type, Day, State#state{infos = [Info | State#state.infos]})
+exec_req(Url, AccessToken) ->
+    AuthHeader = [{"Authorization", "Bearer " ++ binary_to_list(AccessToken)}],
+    case httpc:request(get, {Url, AuthHeader}, [{autoredirect, false}], [], ?MODULE) of
+        {ok, {{_, 200, "OK"}, _, Result}} ->
+            imem_json:decode(list_to_binary(Result), [return_maps]);
+        Error ->
+            {error, Error}
     end.
 
 next_day(Day) when is_list(Day) ->
