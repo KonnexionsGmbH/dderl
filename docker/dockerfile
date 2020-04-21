@@ -14,6 +14,7 @@ RUN apt-get install -yq alien \
                         curl \
                         git \
                         libaio1 \
+                        net-tools \
                         openssl \
                         procps \
                         wget \
@@ -38,8 +39,7 @@ RUN apt-get install -y dos2unix \
                        vim
 
 # Setting Environment Variables ------------------------------------------------
-ENV ERL_INTERFACE_DIR=/usr/local/lib/erlang/lib/erl_interface-3.13.2 \
-    ORACLE_HOME=/usr/lib/oracle/19.6/client64
+ENV ORACLE_HOME=/usr/lib/oracle/19.6/client64
     
 ENV LD_LIBRARY_PATH="$ORACLE_HOME/lib:$LD_LIBRARY_PATH" \
     PATH="$ORACLE_HOME:$PATH"
@@ -47,8 +47,6 @@ ENV LD_LIBRARY_PATH="$ORACLE_HOME/lib:$LD_LIBRARY_PATH" \
 RUN echo "=====================================================================> Curent Date: " \
  && date \
 # Show Environment Variables ---------------------------------------------------
- && echo "=====================================================================> Environment variable ERL_INTERFACE_DIR: " \
- && echo $ERL_INTERFACE_DIR \
  && echo "=====================================================================> Environment variable LD_LIBRARY_PATH: " \
  && echo $LD_LIBRARY_PATH \
  && echo "=====================================================================> Environment variable ORACLE_HOME: " \

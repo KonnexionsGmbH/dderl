@@ -44,6 +44,7 @@ DDerl: Data Discovery Tool.
 ![screenshot](https://github.com/K2InformaticsGmbH/dderl/blob/master/docs/dderl_screenshot.png)
 
 ### Certificates
+
 DDErl runs on SSL. A default certificate/key pair is [supplied](https://github.com/k2informatics/dderl/tree/master/priv/certs). This, however can be changed either by replacing these files at installation or modifying configuration in `ddConfig` table (`[{dderl,dderl,dderlSslOpts}]`). A sample configuration is given below:
 ```erlang
 [{cert,<<48,...,107>>},
@@ -62,3 +63,8 @@ To convert a PEM crt/key files to DER (accepted by erlang SSL binary certificate
 > public_key:pem_decode(PemKey).              
 [{'RSAPrivateKey',<<48,130,2,92,2,1,0,2,129,129,0,160,95,...>>,not_encrypted}]
 ```
+
+### Using the Docker Image from DockerHub
+
+On DockerHub an image is available for the further development of dderl. For details, the corresponding documentation can be found here: https://hub.docker.com/repository/docker/konnexionsgmbh/dderl_dev.
+
