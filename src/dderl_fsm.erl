@@ -329,13 +329,13 @@ rows(Pid, {StmtRef, {Rows,Completed}}) when is_list(Rows) ->  % from erlimem/ime
     %?Info("dderl_fsm:rows from ~p ~p ~p", [StmtRef, length(Rows), Completed]),
     %?Info("dderl_fsm:rows from ~p ~p~n~p", [StmtRef, length(Rows), Rows]),
     gen_statem:cast(Pid, {rows, {StmtRef,Rows,Completed}});
-rows(Pid, {Rows,Completed}) when is_list(Rows) ->  % from dderloci (single source)
+rows(Pid, {Rows,Completed}) when is_list(Rows) ->
     %?Info("dderl_fsm:rows ~p ~p", [length(Rows), Completed]),
     gen_statem:cast(Pid, {rows, {self(),Rows,Completed}});
 rows(Pid, {StmtRef, Error}) ->   % from erlimem/imem_server
     %?Info("dderl_fsm:rows from ~p ~p", [StmtRef, Error]),
     gen_statem:cast(Pid, {StmtRef,{error,Error}});
-rows(Pid, Error) ->             % from dderloci (single source)
+rows(Pid, Error) ->
     %?Info("dderl_fsm:rows ~p", [Error]),
     gen_statem:cast(Pid, {self(),Error}).
 
@@ -1540,11 +1540,15 @@ handle_call({"row_with_key", RowId}, From, SN, #state{tableId=TableId}=State) ->
 handle_call(_Evt, From, passthrough, State) ->
     {next_state, passthrough, State, [{reply, From, {error, ?PassThroughOnlyRestart, []}}]};
 % Full column(s)
+handle_call({statistics, [null|ColumnIds]}, From, SN, State) ->
+    handle_call({statistics, ColumnIds}, From, SN, State);
 handle_call({statistics, ColumnIds}, From, SN, #state{nav = Nav, tableId = TableId, indexId = IndexId, rowFun = RowFun, ctx=#ctx{rowCols=RowCols}} = State) ->
     case Nav of
         raw -> TableUsed = TableId;
         _ ->   TableUsed = IndexId
     end,
+    ?Info("RowCols ~p ~p~n",[length(RowCols), RowCols]),
+    ?Info("ColumnIds ~p ~p~n",[length(ColumnIds),ColumnIds]),
     ColNames = [(lists:nth(ColId, RowCols))#rowCol.alias || ColId <- ColumnIds],
     ?Debug("Getting the stats for the columns ~p names ~p", [ColumnIds, ColNames]),
 
