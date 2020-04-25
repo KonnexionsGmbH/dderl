@@ -1,5 +1,5 @@
 -module(imem_adapter).
--author('Bikram Chatterjee <bikram.chatterjee@k2informatics.ch>').
+-author('Bikram Chatterjee <bikram@konnexions.ch>').
 
 -include("dderl.hrl").
 -include("gres.hrl").
