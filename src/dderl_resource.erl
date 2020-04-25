@@ -1,6 +1,6 @@
 %% @doc POST ajax handler.
 -module(dderl_resource).
--author('Bikram Chatterjee <bikram.chatterjee@k2informatics.ch>').
+-author('Bikram Chatterjee <bikram@konnexions.ch>').
 
 -behaviour(cowboy_loop).
  

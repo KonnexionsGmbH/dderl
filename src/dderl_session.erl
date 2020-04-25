@@ -1,5 +1,5 @@
 -module(dderl_session).
--author('Bikram Chatterjee <bikram.chatterjee@k2informatics.ch>').
+-author('Bikram Chatterjee <bikram@konnexions.ch>').
 
 -behavior(gen_server).
 
