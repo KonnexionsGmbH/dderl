@@ -383,7 +383,6 @@ parse_args(#{default := _} = Args) ->
             Error
     end.
 
-process_default(#{proto := cifs, root := _} = Default) -> {ok, Default};
 process_default(#{proto := sftp, host := _, user := _, password := _,
                   root := _} = Default) ->
     {ok, Default#{opts => maps:get(opts, Default, []),
@@ -392,6 +391,7 @@ process_default(#{proto := sftp, host := _, user := _, key := _,
                   root := _} = Default) ->
     {ok, Default#{port => maps:get(port, Default, ?SSH_DEFAULT_PORT),
                   opts => maps:get(opts, Default, [])}};
+process_default(#{proto := local, root := _} = Default) -> {ok, Default};
 process_default(Default) ->
     ?JError("Invalid Default : ~p", [Default]),
     {error, badarg}.
@@ -724,14 +724,14 @@ all_test_() ->
 
 parse_args_invalid_dst_test() ->
     put(name, <<"test">>),
-    ?assertEqual({error, badarg}, parse_args(#{status_dir => s, status_path => s, status_extra => e}, #{default => #{proto => cifs, root => r, mask => ""}}, #{default => #{}}, s)).
+    ?assertEqual({error, badarg}, parse_args(#{status_dir => s, status_path => s, status_extra => e}, #{default => #{proto => local, root => r, mask => ""}}, #{default => #{}}, s)).
 
 init_error_test() ->
     put(name, <<"test">>),
     ?assertEqual({stop, badarg},
                  init({#dperlJob{name = <<"test">>, args = #{status_dir => "test", status_path => "config", status_extra => "e"},
-                                dstArgs = #{default => #{proto => cifs, root => r, mask => ""}},
-                                srcArgs = #{default => #{proto => cifs, root => r, mask => ""}}}, #state{}})).
+                                dstArgs = #{default => #{proto => local, root => r, mask => ""}},
+                                srcArgs = #{default => #{proto => local, root => r, mask => ""}}}, #state{}})).
 
 dstFileName_test_() ->
     {inparallel, [
