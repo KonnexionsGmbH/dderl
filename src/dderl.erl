@@ -1,5 +1,5 @@
 -module(dderl).
--author('Bikram Chatterjee <bikram.chatterjee@k2informatics.ch>').
+-author('Bikram Chatterjee <bikram@konnexions.ch>').
 
 -behaviour(application).
 

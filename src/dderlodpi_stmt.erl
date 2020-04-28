@@ -310,21 +310,6 @@ create_changedkey_vals([], _Cols) -> [];
 create_changedkey_vals([Val | Rest], [#rowCol{} | RestCols]) ->
     [Val | create_changedkey_vals(Rest, RestCols)].
 
-%% TODO: Evaluate if this is necessary as data conversion seems dangerous and a refresh always recommended.
-%create_changedkey_vals([Value | Rest], [#rowCol{type = 'SQLT_NUM', len = Scale, prec = dynamic} | RestCols]) ->
-%    Number = imem_datatype:io_to_decimal(Value, undefined, Scale),
-%    [Number | create_changedkey_vals(Rest, RestCols)];
-%create_changedkey_vals([Value | Rest], [#rowCol{type = Type, len = Len, prec = Prec} | RestCols]) ->
-%    FormattedValue = case Type of
-%        'SQLT_DAT' -> dderloci_utils:dderltime_to_ora(Value);
-%        'SQLT_TIMESTAMP' -> dderloci_utils:dderlts_to_ora(Value);
-%        'SQLT_TIMESTAMP_TZ' -> dderloci_utils:dderltstz_to_ora(Value);
-%        'SQLT_NUM' -> imem_datatype:io_to_decimal(Value, Len, Prec);
-%        'SQLT_BIN' -> imem_datatype:binary_to_io(Value);
-%        _ -> Value 
-%    end,
-%    [FormattedValue | create_changedkey_vals(Rest, RestCols)].
-
 -spec inserted_changed_keys([binary()], [#row{}], list()) -> [tuple()].
 inserted_changed_keys([], [], _) -> [];
 inserted_changed_keys([RowId | RestRowIds], [Row | RestRows], Columns) ->
@@ -389,17 +374,6 @@ get_modified_cols([OrigVal | RestOrig], [Value | RestValues], [#rowCol{type = 'D
         Value ->
             get_modified_cols(RestOrig, RestValues, Columns, Pos + 1);
         _ ->
-            [Pos | get_modified_cols(RestOrig, RestValues, Columns, Pos + 1)]
-    end;
-get_modified_cols([Number | RestOrig], [Value | RestValues], [#rowCol{type = Type} | Columns], Pos) when
-        %Type =:= 'DPI_ORACLE_TYPE_NUMBER';
-        Type =:= 'DPI_ORACLE_TYPE_NATIVE_DOUBLE';
-        Type =:= 'DPI_ORACLE_TYPE_NATIVE_FLOAT' ->
-    Result = dderloci_utils:clean_dynamic_prec(dderlodpi:number_to_binary(Number)),
-    if
-        Result =:= Value ->
-            get_modified_cols(RestOrig, RestValues, Columns, Pos + 1);
-        true ->
             [Pos | get_modified_cols(RestOrig, RestValues, Columns, Pos + 1)]
     end;
 get_modified_cols([OrigVal | RestOrig], [OrigVal | RestValues], [#rowCol{} | Columns], Pos) ->

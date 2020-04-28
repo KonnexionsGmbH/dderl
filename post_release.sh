@@ -1,3 +1,5 @@
+#!/bin/bash
+
 . $(dirname $0)/common.sh
 app=${1:-dderl}
 rel=${2:-prod}
