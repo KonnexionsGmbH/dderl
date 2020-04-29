@@ -1,5 +1,5 @@
 -module(erlformat).
--author("bikram.chatterjee@k2informatics.ch").
+-author("bikram@konnexions.ch").
 
 -export([format/3]).
 

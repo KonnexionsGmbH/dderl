@@ -181,11 +181,6 @@
 -define(BACKGROUND_COLOR(__ConnClass),
         ?GET_CONFIG(backgroundColor, [__ConnClass], <<"rgb(220,220,220)">>,
                 "Background color of dderl for a particular connection class")).
-
-%% OCI Adapter configs
--define(NLSLANG, ?GET_CONFIG(nls_lang, [], #{language   => <<"GERMAN">>,
-                                            territory   => <<"SWITZERLAND">>,
-                                            charset     => <<"AL32UTF8">>}, "OCI NSL Language connect option")).
 %% CSV Configs
 -define(COL_SEP_CHAR(__UserId, __Adapter),
         ?GET_CONFIG(csvExportDelimiter, [__UserId, __Adapter], ";",

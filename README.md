@@ -1,52 +1,35 @@
-dderl
+DDErl: Data Discovery Tool.
 =====
 
-![Travis (.org)](https://img.shields.io/travis/K2InformaticsGmbH/dderl.svg)
-![Coveralls github](https://img.shields.io/coveralls/github/K2InformaticsGmbH/dderl.svg)
-![GitHub](https://img.shields.io/github/license/K2InformaticsGmbH/dderl.svg)
-![GitHub release](https://img.shields.io/github/release/K2InformaticsGmbH/dderl.svg)
-![GitHub Release Date](https://img.shields.io/github/release-date/K2InformaticsGmbH/dderl.svg)
-![GitHub commits since latest release](https://img.shields.io/github/commits-since/K2InformaticsGmbH/dderl/3.7.2.svg)
-
-WEB DataBase Browser Application.
-
-### Build (Supported erlang OTP version - 21+)
-
-1. `git clone https://github.com/K2InformaticsGmbH/dderl` in `$ROOT`
-1. cd `$ROOT/dderl`
-1. To compile with oranif follow setup instruction at https://github.com/K2InformaticsGmbH/oranif
-1. `rebar3 compile`
-1. cd `priv/dev`
-1. `yarn install-build-prod`
-1. cd `$ROOT/dderl`
-1. `./start.sh`
+### Build
+1. Build backend and frontend `rebar3 as ui compile`
+1. Build backend only `rebar3 compile`
+1. Build frontend only `bash ./build_fe.sh`
+### Start Console
+1. `rebar3 shell` or `ESCRIPT_EMULATOR=werl rebar3 shell` (for GUI in windows) or `ERL_FLAGS="-proto_dist imem_inet_tcp" rebar3 shell` (to start with imem_inet_tcp as proto_dist)
 1. go to https://127.0.0.1:8443/dderl in your browser
-
 ### Features
-
 1. Browse mnesia and oracle tables in the browser
-2. Add and update data
-3. Import and Export data
-4. Send and receive data from one desitination to other on the same session
-5. SQL support for queries
-6. Filter, Sort, Distinct and Statistics on data
-7. Multifactor authentication support (SMS, SAML and username/password)
-8. JSON parsing with SQL 
-9. Tailing of tables 
-10. Log table rotation and purging
-11. Snapshot and restore table
-12. Cluster backup and restore
-13. Configuration encryption for ssl certificates and passwords
-14. D3 graph support to plot graphs
-15. Save views of tables 
-16. Query history support
-17. Connect to other imem server over TCP with SSL
-18. CSV file parsing
-
-![screenshot](https://github.com/K2InformaticsGmbH/dderl/blob/master/docs/dderl_screenshot.png)
+1. Add and update data
+1. Import and Export data
+1. Send and receive data from one desitination to other on the same session
+1. SQL support for queries
+1. Filter, Sort, Distinct and Statistics on data
+1. Multifactor authentication support (SMS, SAML and username/password)
+1. JSON parsing with SQL 
+1. Tailing of tables 
+1. Log table rotation and purging
+1. Snapshot and restore table
+1. Cluster backup and restore
+1. Configuration encryption for ssl certificates and passwords
+1. D3 graph support to plot graphs
+1. Save views of tables 
+1. Query history support
+1. Connect to other imem server over TCP with SSL
+1. CSV file parsing
 
 ### Certificates
-DDErl runs on SSL. A default certificate/key pair is [supplied](https://github.com/k2informatics/dderl/tree/master/priv/certs). This, however can be changed either by replacing these files at installation or modifying configuration in `ddConfig` table (`[{dderl,dderl,dderlSslOpts}]`). A sample configuration is given below:
+DDErl runs on SSL. A default certificate/key pair is [supplied](https://bitbucket.org/konnexions/dderl/src/master/priv/certs/). This, however can be changed either by replacing these files at installation or modifying configuration in `ddConfig` table (`[{dderl,dderl,dderlSslOpts}]`). A sample configuration is given below:
 ```erlang
 [{cert,<<48,...,107>>},
  {key,{'RSAPrivateKey',<<48,...,192>>}},
@@ -64,3 +47,8 @@ To convert a PEM crt/key files to DER (accepted by erlang SSL binary certificate
 > public_key:pem_decode(PemKey).              
 [{'RSAPrivateKey',<<48,130,2,92,2,1,0,2,129,129,0,160,95,...>>,not_encrypted}]
 ```
+
+### Using the Docker Image from DockerHub
+
+On DockerHub an image is available for the further development of dderl. For details, the corresponding documentation can be found [here](https://hub.docker.com/repository/docker/konnexionsgmbh/dderl_dev).
+

@@ -97,9 +97,6 @@ get_sortfun() ->
 fix_format('$not_a_value') -> <<>>;
 fix_format(Value) -> Value.
 
-%% TODO: Taken from dderloci, put in a common place
-%        after migration to oranif
-
 build_full_map(Clms) ->
     [#bind{tag = list_to_atom([$$|integer_to_list(Tag)])
         , name = Alias

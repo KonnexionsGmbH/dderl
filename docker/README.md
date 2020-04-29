@@ -1,49 +1,118 @@
-# Docker Usage
+# Development Environment `dderl` Image
 
-This project supports the use of Docker for development in a current Debian environment. 
-For this purpose, either the script `run_create_image_dderl_dev` and the Docker file in the directory `priv/docker` can be used to create a special Docker image or the existing Docker image `konnexionsgmbh/dderl_dev` available in the Docker Hub can be downloaded and used.
+This image supports the use of a Docker container for the further development of `dderl` in a Debian environment. 
 
-The following assumes that the default name `dderl_dev' is used for the Docker image and for the Docker container.
+## 1 Introduction
 
-## 1 Create Docker image from scratch
+## 2. Creating a new `dderl_dev` Docker container
 
-1. If required, the Docker file in the directory `docker` can be customized.
-2. If uploading the Docker image to the Docker Hub is not desired, then the `docker push konnexionsgmbh/%REPOSITORY%` command must be commented out in the script `run_create_image_dderl_dev`.
-3. Run the script `run_create_image_dderl_dev`.
-4. After successful execution (see log file `run_create_image_dderl_dev.log`) the Docker container `dderl_dev` is running and can be used with the Bash Shell for example (see chapter 6.3).
+## 2.1 Getting started
 
-## 2 Use Docker image from Docker Hub
+    > REM Assuming the path prefix for the local repository mapping is //C/dderl
+    > docker run -it -p 443:8443 \
+            --name dderl_dev \
+            -v //C/dderl:dderl \
+            konnexionsgmbh/dderl_dev
+            
+    > REM Stopping the container
+    > docker stop dderl_dev
+    
+    > REM Restarting the container
+    > docker start dderl_dev
 
-An image that already exists on Docker Hub can be downloaded as follows:
+    > REM Entering a running container
+    > docker exec -it dderl_dev
 
-    docker pull konnexionsgmbh/dderl_dev
+## 2.2 Detailed Syntax
 
-## 3 Working with an existing Docker image
+A new container can be created with the `docker run` command.
 
-### 3.1 Creating the Docker container
+##### Syntax:
 
-First the Docker container must be created and started  (Example for a data directory: `D:\SoftDevelopment\Projects\Konnexions\dderl_idea\dderl`):
+    docker run -it 
+               [-p <port>:8443] \
+               [--name <container_name>] \
+               [-v <directory_repository>:dderl] \
+               konnexionsgmbh/dderl_dev 
+               <cmd>
+ 
+##### Parameters:
 
-    docker run -it --name dderl_dev -p 8443:8443 -v /var/run/docker.sock:/var/run/docker.sock -v <data directory path>:/dderl konnexionsgmbh/dderl_dev bash
+- **port** - an optional listener port             
+- **container_name** - an optional container identification 
+- **directory_repository** - an optional local repository directory - the default value is expecting the repository inside the container 
+- **cmd** - the command to be executed in the container, e.g. `bash` for running the `bash` shell
 
-Afterwards you are inside the Docker container.
+Detailed documentation for the command `docker run` can be found [here](https://docs.docker.com/engine/reference/run/).
 
-### 3.2 Starting an existing Docker container
+##### Examples:
 
-You can start an existing Docker container as follows
+1. Creating a new Docker container named `dderl_dev` using a repository inside the Docker container:  
 
-    docker start dderl_dev
+    `docker run -it --name dderl_dev konnexionsgmbh/dderl_dev`
 
-This command switches into the running Docker container:
+2. Creating a new Docker container named `dderl_dev` using the local repository in the local Windows directory `D:\SoftDevelopment\Projects\Konnexions\dderl_idea\dderl`:  
 
-    docker exec -it dderl_dev bash
+    `docker run -it --name dderl_dev -v //D/SoftDevelopment/Projects/Konnexions/dderl_idea/dderl:/dderl konnexionsgmbh/dderl_dev`
+
+2. Creating a new Docker container named `dderl_dev` using the local repository in the local Linux directory `/dderl` and mapping port `8443` to port `8000`:  
+
+    `docker run -it --name dderl_dev -p 8000:8443 -v /dderl:/dderl konnexionsgmbh/dderl_dev`
+
+## 3 Working with an existing `dderl_dev` Docker container
+
+### 3.1 Starting a stopped container
+
+A previously stopped container can be started with the `docker start` command.
+
+##### Syntax:
+
+    docker start <container_name>
+
+##### Parameter:
+
+- **container_name** - the mandatory container identification, that is an UUID long identifier, an UUID short identifier or a previously given name 
+
+Detailed documentation for the command `docker start` can be found [here](https://docs.docker.com/engine/reference/commandline/start/).
+
+### 3.2 Entering a running container
+
+A running container can be entered with the `docker exec` command.
+
+##### Syntax:
+
+    docker exec -it <container_name> <cmd>
+
+##### Parameter:
+
+- **container_name** - the mandatory container identification, that is an UUID long identifier, an UUID short identifier or a previously given name 
+- **cmd** - the command to be executed in the container, e.g. `bash` for running the `bash` shell
+
+Detailed documentation for the command `docker exec` can be found [here](https://docs.docker.com/engine/reference/commandline/exec/).
 
 ## 4 Working inside a running Docker container
 
-Inside the Docker container you can switch to the dderl repository with the following command:
+### 4.1 `dderl` development
 
-    cd dderl
+Inside the Docker container you can either clone a `dderl` repository or switch to an existing `dderl` repository. 
+If a Docker container with an Oracle database is located on the host computer it can be accessed by using the IP address of the host computer.
+Any `dderl` script can be executed inside the Docker container, for example:
 
-If a Docker container with an Oracle database is located on the host computer it can be accessed using the IP address of the host computer. Now any `dderl` script can be executed, for example:
-
+    rebar3 compile
+    rebar3 as prod release
     ./start.sh 
+    
+The following port numbers are exposed and can be mapped if necessary:
+
+    1236
+    7000-7020
+    8125
+    8443
+    9443    
+
+### 4.2 Available software
+
+The Docker Image is based on the latest official Erlang Image on Docker Hub, which is currently `22.3-slim`.
+With the following command you can check which other software versions are included in the Docker image:
+
+    apt list --installed

@@ -35,15 +35,6 @@
 bind_arg_types() ->
     [atom_to_binary(T,utf8) || T <- ?CLM_TYPES].
 
-%-define(TRACE_FUNCTION_CALLS, '_').
--ifdef(TRACE_FUNCTION_CALLS).
-    -define (TR, io:format("adapter call ~p/~p~n", [?FUNCTION_NAME, ?FUNCTION_ARITY])).
-    -define (TR(__V), io:format("adapter call ~p/~p (~p)~n", [?FUNCTION_NAME, ?FUNCTION_ARITY, __V])).
--else.
-    -define (TR, nop).
-    -define (TR(__V), nop).
--endif.
-
 -spec init() -> ok.
 init() ->
     ?Info("Init called"),
@@ -65,7 +56,6 @@ add_conn_info(Priv, _ConnInfo) -> Priv.
 
 -spec connect_map(#ddConn{}) -> map().
 connect_map(#ddConn{adapter = odpi} = C) ->
-    ?TR,
     add_conn_extra(C, #{id => C#ddConn.id,
                         name => C#ddConn.name,
                         adapter => <<"odpi">>,
@@ -73,10 +63,8 @@ connect_map(#ddConn{adapter = odpi} = C) ->
 
 add_conn_extra(#ddConn{access = Access}, Conn)
   when is_map(Access), is_map(Conn) ->
-      ?TR,
        	maps:merge(Conn, maps:remove(owner,maps:remove(<<"owner">>,Access)));
 add_conn_extra(#ddConn{access = Access}, Conn0) when is_list(Access), is_map(Conn0) ->
-    ?TR,
     Conn = Conn0#{user => proplists:get_value(user, Access, <<>>),
                   charset => proplists:get_value(charset, Access, <<>>),
                   tns => proplists:get_value(tnsstr, Access, <<>>),
@@ -98,12 +86,10 @@ add_conn_extra(#ddConn{access = Access}, Conn0) when is_list(Access), is_map(Con
                 
 process_cmd({[<<"connect">>], ReqBody, _SessionId}, Sess, UserId, From,
             undefined, SessPid) ->
-                ?TR(a),
     process_cmd({[<<"connect">>], ReqBody, _SessionId}, Sess, UserId, From,
                 #priv{connections = []}, SessPid);
 process_cmd({[<<"connect">>], BodyJson5, _SessionId}, Sess, UserId, From,
             #priv{connections = Connections} = Priv, _SessPid) ->
-                ?TR(b),
     {value, {<<"password">>, Password}, BodyJson4} = lists:keytake(<<"password">>, 1, BodyJson5),
     {value, {<<"owner">>, _Owner}, BodyJson3} = lists:keytake(<<"owner">>, 1, BodyJson4),
     {value, {<<"id">>, Id}, BodyJson2} = lists:keytake(<<"id">>, 1, BodyJson3),
@@ -144,62 +130,117 @@ process_cmd({[<<"connect">>], BodyJson5, _SessionId}, Sess, UserId, From,
                     end])),
             ?Info("user ~p, TNS ~p", [User, NewTnsstr]),
             NewTnsstr
-    end,
-    % Hard coded utf8 as dderl doesn't support other encodings for now.
-    CommonParams = #{encoding => "AL32UTF8", nencoding => "AL32UTF8"},
-    % One slave per userid
-    % TODO: Error handle the result see dpi:load/1 spec
-    Node = dpi_load(build_slave_name(UserId)),
-    ConnectFun = fun() ->
-        Ctx = dpi:context_create(?DPI_MAJOR_VERSION, ?DPI_MINOR_VERSION),
-        Conn = dpi:conn_create(Ctx, User, Password, TNS, CommonParams, #{}),
-        #odpi_conn{context = Ctx, connection = Conn, node = Node}
-    end,
-    case dpi:safe(Node, ConnectFun) of
-        #odpi_conn{} = ConnRef ->
-            ?Debug("DPI loaded and connected! ~p", [ConnRef]),
-            Con = #ddConn{id = Id, name = Name, owner = UserId, adapter = odpi,
-                          access  = jsx:decode(jsx:encode(BodyJson), [return_maps])},
-                ?Debug([{user, User}], "may save/replace new connection ~p", [Con]),
-            case dderl_dal:add_connect(Sess, Con) of
-                {error, Msg} ->
-                    conn_close_and_destroy(ConnRef),
-                    From ! {reply, jsx:encode([{<<"connect">>,[{<<"error">>, Msg}]}])};
-                #ddConn{owner = Owner} = NewConn ->
-                    From ! {reply
-                            , jsx:encode(
-                                [{<<"connect">>
-                                  , [{<<"conn_id">>, NewConn#ddConn.id}
-                                     , {<<"owner">>, Owner}
-                                     , {<<"conn">>
-                                        , ?E2B(ConnRef)}
-                                    ]}])}
-            end,
-            Priv#priv{connections = [ConnRef | Connections]};
-        {error, _, _, Msg} = Error when is_list(Msg) ->
-            ?Error("DB connect error ~p", [Error]),
-            From ! {reply, jsx:encode(#{connect=>#{error=>list_to_binary(Msg)}})},
-            dpi:unload(Node),
-            Priv;
-        {error, _, _, #{message := Msg}} = Error ->
-            ?Error("DB connect error ~p", [Error]),
-            From ! {reply, jsx:encode(#{connect=>#{error=>list_to_binary(Msg)}})},
-            dpi:unload(Node),
-            Priv;
-        Error ->
-            ?Error("DB connect error ~p", [Error]),
-            From ! {reply, jsx:encode(#{connect=>#{error=>list_to_binary(io_lib:format("~p",[Error]))}})},
-            dpi:unload(Node),
-            Priv
+    end,    
+    try
+        % One slave per userid
+        Node = case dpi_load(build_slave_name(UserId)) of
+            N when is_atom(N) ->
+                case lists:member(N, nodes(hidden)) of
+                    true -> N;
+                    _ -> error({dpi_slave_crash, N})
+                end;
+            ErrorLoad -> error([ErrorLoad])
+        end,
+        Context = case dpi:safe(
+            Node, dpi, context_create, [?DPI_MAJOR_VERSION, ?DPI_MINOR_VERSION]
+        ) of
+            Ctx when is_reference(Ctx) -> Ctx;
+            {error, Src, L, ErrorCtx} -> error([{Src, L, ErrorCtx}, Node])
+        end,
+        Connection = case dpi:safe(
+            Node, dpi, conn_create,
+            [
+                Context, User, Password, TNS,
+                % Hard coded utf8 as we don't support other encodings yet
+                #{encoding => "AL32UTF8", nencoding => "AL32UTF8"},
+                #{}
+            ]
+        ) of
+            Conn when is_reference(Conn) -> Conn;
+            {error, SrcConnect, LConnect, ErrorConnect} ->
+                error([{SrcConnect, LConnect, ErrorConnect}, Node, Context])
+        end,
+        ConnRef = #odpi_conn{
+            node = Node,
+            context = Context,
+            connection = Connection
+        },
+        ?Info("DPI loaded and connected! ~p", [ConnRef]),
+
+        Con = #ddConn{
+            id = Id, name = Name, owner = UserId, adapter = odpi,
+            access  = jsx:decode(jsx:encode(BodyJson), [return_maps])
+        },
+        ?Debug([{user, User}], "may save/replace new connection ~p", [Con]),
+        case dderl_dal:add_connect(Sess, Con) of
+            {error, Msg} ->
+                conn_close_and_destroy(ConnRef),
+                From ! {reply, jsx:encode(#{connect => #{error => Msg}})};
+            #ddConn{owner = Owner} = NewConn ->
+                From ! {
+                    reply,
+                    jsx:encode(
+                        #{connect =>
+                            #{
+                                conn_id => NewConn#ddConn.id,
+                                owner => Owner,
+                                conn => ?E2B(ConnRef)
+                            }
+                        }
+                    )
+                }
+        end,
+        Priv#priv{connections = [ConnRef | Connections]}
+    catch Class:Exception:Stacktrace ->
+        Error0 = case Exception of
+            [E, SlaveNode, Cntx] ->
+                spawn(
+                    fun() ->
+                        try
+                            dpi:context_destroy(Cntx),
+                            dpi:unload(SlaveNode)
+                        catch
+                            Class:Exception:ST ->
+                                ?Error(
+                                    "destroy context ~p and shutdown slave "
+                                    "~p~n~p:~p~n~p",
+                                    [Cntx, SlaveNode, Class, Exception, ST]
+                                )
+                        end
+                    end
+                ),
+                E;
+            [E, SlaveNode] ->
+                spawn(
+                    fun() ->
+                        try dpi:unload(SlaveNode) catch
+                            Class:Exception:ST ->
+                                ?Error(
+                                    "shutdown slave ~p~n~p:~p~n~p",
+                                    [SlaveNode, Class, Exception, ST]
+                                )
+                        end
+                    end
+                ),
+                E;
+            E -> E
+        end,
+        Error = case Error0 of
+            {S, Line, #{message := Message} = Err} ->
+                ?Error("ORANIF: ~s:~p => ~p", [S, Line, Err]),
+                list_to_binary(io_lib:format("~p: ~s", [Class, Message]));
+            Err -> list_to_binary(io_lib:format("~p:~p", [Class, Err]))
+        end,
+        ?Error("DB connect error ~p:~s~n~p", [Class, Error, Stacktrace]),
+        From ! {reply, jsx:encode(#{connect => #{error => Error}})},
+        Priv
     end;
 
-process_cmd({[<<"change_conn_pswd">>], ReqBody}, _Sess, _UserId, From, #priv{connections = Connections} = Priv, _SessPid) ->
-    ?TR(c),
-    [{<<"change_pswd">>, BodyJson}] = ReqBody,
+process_cmd({[<<"change_conn_pswd">>], BodyJson}, _Sess, _UserId, From, #priv{connections = Connections} = Priv, _SessPid) ->
     Connection = ?D2T(proplists:get_value(<<"connection">>, BodyJson, <<>>)),
     User     = proplists:get_value(<<"user">>, BodyJson, <<>>),
-    Password = binary_to_list(proplists:get_value(<<"password">>, BodyJson, <<>>)),
-    NewPassword = binary_to_list(proplists:get_value(<<"new_password">>, BodyJson, <<>>)),
+    Password = list_to_binary(proplists:get_value(<<"password">>, BodyJson, <<>>)),
+    NewPassword = proplists:get_value(<<"new_password">>, BodyJson, <<>>),
     case lists:member(Connection, Connections) of
         true ->
             case dderlodpi:change_password(Connection, User, Password, NewPassword) of
@@ -218,7 +259,6 @@ process_cmd({[<<"change_conn_pswd">>], ReqBody}, _Sess, _UserId, From, #priv{con
     end;
 
 process_cmd({[<<"disconnect">>], ReqBody, _SessionId}, _Sess, _UserId, From, #priv{connections = Connections} = Priv, _SessPid) ->
-    ?TR(d),
     [{<<"disconnect">>, BodyJson}] = ReqBody,
     Connection = ?D2T(proplists:get_value(<<"connection">>, BodyJson, <<>>)),
     case lists:member(Connection, Connections) of
@@ -238,7 +278,6 @@ process_cmd({[<<"disconnect">>], ReqBody, _SessionId}, _Sess, _UserId, From, #pr
             Priv
     end;
 process_cmd({[<<"remote_apps">>], ReqBody}, _Sess, _UserId, From, #priv{connections = Connections} = Priv, _SessPid) ->
-    ?TR(e),
     [{<<"remote_apps">>, BodyJson}] = ReqBody,
     Connection = ?D2T(proplists:get_value(<<"connection">>, BodyJson, <<>>)),
     case lists:member(Connection, Connections) of
@@ -254,7 +293,6 @@ process_cmd({[<<"remote_apps">>], ReqBody}, _Sess, _UserId, From, #priv{connecti
     end;
 
 process_cmd({[<<"query">>], ReqBody}, Sess, _UserId, From, #priv{connections = Connections} = Priv, SessPid) ->
-    ?TR(f),
     [{<<"query">>,BodyJson}] = ReqBody,
     case make_binds(proplists:get_value(<<"binds">>, BodyJson, null)) of
         {error, Error} -> From ! {reply, jsx:encode([{<<"error">>, Error}])};
@@ -276,7 +314,6 @@ process_cmd({[<<"query">>], ReqBody}, Sess, _UserId, From, #priv{connections = C
     Priv;
 
 process_cmd({[<<"browse_data">>], ReqBody}, Sess, _UserId, From, #priv{connections = Connections} = Priv, SessPid) ->
-    ?TR(g),
     [{<<"browse_data">>,BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     Connection = ?D2T(proplists:get_value(<<"connection">>, BodyJson, <<>>)),
@@ -368,7 +405,6 @@ process_cmd({[<<"browse_data">>], ReqBody}, Sess, _UserId, From, #priv{connectio
 
 % views
 process_cmd({[<<"views">>], ReqBody}, Sess, UserId, From, Priv, SessPid) ->
-    ?TR(h),
     ?Info("Process command: ~p~n", [views]),
     [{<<"views">>, BodyJson}] = ReqBody,
     %% This should be change to params...
@@ -404,7 +440,6 @@ process_cmd({[<<"views">>], ReqBody}, Sess, UserId, From, Priv, SessPid) ->
 
 %  system views
 process_cmd({[<<"system_views">>], ReqBody}, Sess, _UserId, From, Priv, SessPid) ->
-    ?TR(i),
     [{<<"system_views">>,BodyJson}] = ReqBody,
     ConnId = proplists:get_value(<<"conn_id">>, BodyJson, <<>>), %% This should be change to params...
     case dderl_dal:get_view(Sess, <<"All ddViews">>, odpi, system) of
@@ -428,7 +463,6 @@ process_cmd({[<<"system_views">>], ReqBody}, Sess, _UserId, From, Priv, SessPid)
 
 % open view by id
 process_cmd({[<<"open_view">>], ReqBody}, Sess, _UserId, From, #priv{connections = Connections} = Priv, SessPid) ->
-    ?TR(j),
     [{<<"open_view">>, BodyJson}] = ReqBody,
     ConnId = proplists:get_value(<<"conn_id">>, BodyJson, <<>>),
     ViewId = proplists:get_value(<<"view_id">>, BodyJson),
@@ -448,7 +482,6 @@ process_cmd({[<<"open_view">>], ReqBody}, Sess, _UserId, From, #priv{connections
 
 % open view by name from inside a d3 graph
 process_cmd({[<<"open_graph_view">>], ReqBody}, Sess, UserId, From, #priv{connections = Connections} = Priv, SessPid) ->
-    ?TR(k),
     [{<<"open_graph_view">>, BodyJson}] = ReqBody,
     ConnId = proplists:get_value(<<"conn_id">>, BodyJson, <<>>),
     ViewName = proplists:get_value(<<"view_name">>, BodyJson),
@@ -471,7 +504,6 @@ process_cmd({[<<"open_graph_view">>], ReqBody}, Sess, UserId, From, #priv{connec
 
 % events
 process_cmd({[<<"sort">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
-    ?TR(l),
     [{<<"sort">>,BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     SrtSpc = proplists:get_value(<<"spec">>, BodyJson, []),
@@ -480,7 +512,6 @@ process_cmd({[<<"sort">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     dderl_fsm:gui_req(Statement, sort, SortSpec, gui_resp_cb_fun(<<"sort">>, Statement, From)),
     Priv;
 process_cmd({[<<"filter">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
-    ?TR(m),
     [{<<"filter">>,BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     FltrSpec = proplists:get_value(<<"spec">>, BodyJson, []),
@@ -488,35 +519,30 @@ process_cmd({[<<"filter">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
     dderl_fsm:gui_req(Statement, filter, FilterSpec, gui_resp_cb_fun(<<"filter">>, Statement, From)),
     Priv;
 process_cmd({[<<"reorder">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
-    ?TR(n),
     [{<<"reorder">>,BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     ColumnOrder = proplists:get_value(<<"column_order">>, BodyJson, []),
     dderl_fsm:gui_req(Statement, reorder, ColumnOrder, gui_resp_cb_fun(<<"reorder">>, Statement, From)),
     Priv;
 process_cmd({[<<"drop_table">>], ReqBody}, _Sess, _UserId, From, #priv{connections = Connections} = Priv, _SessPid) ->
-    ?TR(o),
     [{<<"drop_table">>, BodyJson}] = ReqBody,
     TableNames = proplists:get_value(<<"table_names">>, BodyJson, []),
     Results = [process_table_cmd(drop_table, TableName, BodyJson, Connections) || TableName <- TableNames],
     send_result_table_cmd(From, <<"drop_table">>, Results),
     Priv;
 process_cmd({[<<"truncate_table">>], ReqBody}, _Sess, _UserId, From, #priv{connections = Connections} = Priv, _SessPid) ->
-    ?TR(p),
     [{<<"truncate_table">>, BodyJson}] = ReqBody,
     TableNames = proplists:get_value(<<"table_names">>, BodyJson, []),
     Results = [process_table_cmd(truncate_table, TableName, BodyJson, Connections) || TableName <- TableNames],
     send_result_table_cmd(From, <<"truncate_table">>, Results),
     Priv;
 process_cmd({[<<"snapshot_table">>], ReqBody}, _Sess, _UserId, From, #priv{connections = Connections} = Priv, _SessPid) ->
-    ?TR(q),
     [{<<"snapshot_table">>, BodyJson}] = ReqBody,
     TableNames = proplists:get_value(<<"table_names">>, BodyJson, []),
     Results = [process_table_cmd(snapshot_table, TableName, BodyJson, Connections) || TableName <- TableNames],
     send_result_table_cmd(From, <<"snapshot_table">>, Results),
     Priv;
 process_cmd({[<<"restore_table">>], ReqBody}, _Sess, _UserId, From, #priv{connections = Connections} = Priv, _SessPid) ->
-    ?TR(r),
     [{<<"restore_table">>, BodyJson}] = ReqBody,
     TableNames = proplists:get_value(<<"table_names">>, BodyJson, []),
     Results = [process_table_cmd(restore_table, TableName, BodyJson, Connections) || TableName <- TableNames],
@@ -525,15 +551,14 @@ process_cmd({[<<"restore_table">>], ReqBody}, _Sess, _UserId, From, #priv{connec
 
 % gui button events
 process_cmd({[<<"button">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
-    ?TR(s),
     [{<<"button">>,BodyJson}] = ReqBody,
     FsmStmt = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     case proplists:get_value(<<"btn">>, BodyJson, <<">">>) of
         <<"restart">> ->
-            Query = FsmStmt:get_query(),
+            Query = dderl_fsm:get_query(FsmStmt),
             case dderl_dal:is_local_query(Query) of
                 true ->
-                    FsmStmt:gui_req(button, <<"restart">>, gui_resp_cb_fun(<<"button">>, FsmStmt, From));
+                    dderl_fsm:gui_req(FsmStmt, button, <<"restart">>, gui_resp_cb_fun(<<"button">>, FsmStmt, From));
                 _ ->
                     Connection = ?D2T(proplists:get_value(<<"connection">>, BodyJson, <<>>)),
                     %% TODO: Fix restart if there is a need to link again.
@@ -545,24 +570,23 @@ process_cmd({[<<"button">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
                         {ok, #stmtResults{} = StmtRslt, TableName} ->
                             dderlodpi:add_fsm(StmtRslt#stmtResults.stmtRefs, FsmStmt),
                             FsmCtx = generate_fsmctx(StmtRslt, Query, BindVals, Connection, TableName),
-                            FsmStmt:gui_req(button, <<"restart">>, gui_resp_cb_fun(<<"button">>, FsmStmt, From)),
-                            FsmStmt:refresh_session_ctx(FsmCtx);
+                            dderl_fsm:gui_req(FsmStmt, button, <<"restart">>, gui_resp_cb_fun(<<"button">>, FsmStmt, From)),
+                            dderl_fsm:refresh_session_ctx(FsmStmt, FsmCtx);
                         _ ->
                             From ! {reply, jsx:encode([{<<"button">>, [{<<"error">>, <<"unable to refresh the table">>}]}])}
                     end
             end;
         ButtonInt when is_integer(ButtonInt) ->
-            FsmStmt:gui_req(button, ButtonInt, gui_resp_cb_fun(<<"button">>, FsmStmt, From));
+            dderl_fsm:gui_req(FsmStmt, button, ButtonInt, gui_resp_cb_fun(<<"button">>, FsmStmt, From));
         ButtonBin when is_binary(ButtonBin) ->
             case string:to_integer(binary_to_list(ButtonBin)) of
                 {error, _} -> Button = ButtonBin;
                 {Target, []} -> Button = Target
             end,
-            FsmStmt:gui_req(button, Button, gui_resp_cb_fun(<<"button">>, FsmStmt, From))
+            dderl_fsm:gui_req(FsmStmt, button, Button, gui_resp_cb_fun(<<"button">>, FsmStmt, From))
     end,
     Priv;
 process_cmd({[<<"update_data">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
-    ?TR(t),
     [{<<"update_data">>,BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     RowId = proplists:get_value(<<"rowid">>, BodyJson, <<>>),
@@ -571,7 +595,6 @@ process_cmd({[<<"update_data">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid
     dderl_fsm:gui_req(Statement, update, [{RowId,upd,[{CellId,Value}]}], gui_resp_cb_fun(<<"update_data">>, Statement, From)),
     Priv;
 process_cmd({[<<"delete_row">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
-    ?TR(u),
     [{<<"delete_row">>,BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     RowIds = proplists:get_value(<<"rowids">>, BodyJson, []),
@@ -580,7 +603,6 @@ process_cmd({[<<"delete_row">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid)
     dderl_fsm:gui_req(Statement, update, DelSpec, gui_resp_cb_fun(<<"delete_row">>, Statement, From)),
     Priv;
 process_cmd({[<<"insert_data">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
-    ?TR(v),
     [{<<"insert_data">>,BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     ClmIdx = proplists:get_value(<<"col">>, BodyJson, <<>>),
@@ -588,7 +610,6 @@ process_cmd({[<<"insert_data">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid
     dderl_fsm:gui_req(Statement, update, [{undefined,ins,[{ClmIdx,Value}]}], gui_resp_cb_fun(<<"insert_data">>, Statement, From)),
     Priv;
 process_cmd({[<<"paste_data">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid) ->
-    ?TR(w),
     [{<<"paste_data">>, BodyJson}] = ReqBody,
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     ReceivedRows = proplists:get_value(<<"rows">>, BodyJson, []),
@@ -596,7 +617,6 @@ process_cmd({[<<"paste_data">>], ReqBody}, _Sess, _UserId, From, Priv, _SessPid)
     dderl_fsm:gui_req(Statement, update, Rows, gui_resp_cb_fun(<<"paste_data">>, Statement, From)),
     Priv;
 process_cmd({[<<"download_query">>], ReqBody}, _Sess, UserId, From, Priv, SessPid) ->
-    ?TR(x),
     [{<<"download_query">>, BodyJson}] = ReqBody,
     FileName = proplists:get_value(<<"fileToDownload">>, BodyJson, <<>>),
     Query = proplists:get_value(<<"queryToDownload">>, BodyJson, <<>>),
@@ -627,7 +647,6 @@ process_cmd({[<<"download_query">>], ReqBody}, _Sess, UserId, From, Priv, SessPi
     Priv;
 
 process_cmd({[<<"term_diff">>], ReqBody}, Sess, _UserId, From, Priv, SessPid) ->
-    ?TR(y),
     [{<<"term_diff">>, BodyJson}] = ReqBody,
     % Can't be handled directly as SessPid is not given to gen_adapter.
     gen_adapter:term_diff(BodyJson, Sess, SessPid, From),
@@ -635,17 +654,15 @@ process_cmd({[<<"term_diff">>], ReqBody}, Sess, _UserId, From, Priv, SessPid) ->
 
 % unsupported gui actions
 process_cmd({Cmd, BodyJson}, _Sess, _UserId, From, Priv, _SessPid) ->
-    ?TR(z),
     ?Error("unsupported command ~p content ~p and priv ~p", [Cmd, BodyJson, Priv]),
     CmdBin = lists:last(Cmd),
     From ! {reply, jsx:encode([{CmdBin,[{<<"error">>, <<"command '", CmdBin/binary, "' is unsupported">>}]}])},
     Priv.
 
 % dderl_fsm like row receive interface for compatibility
-rows(Rows, {?MODULE, Pid}) -> ?TR, Pid ! Rows.
-rows_limit(_NRows, Rows, {?MODULE, Pid}) -> ?TR, Pid ! {Rows, true}. %% Fake a completed to send the last cvs part.
+rows(Rows, {?MODULE, Pid}) ->  Pid ! Rows.
+rows_limit(_NRows, Rows, {?MODULE, Pid}) ->  Pid ! {Rows, true}. %% Fake a completed to send the last cvs part.
 produce_csv_rows(UserId, From, StmtRef, RowFun) when is_function(RowFun) andalso is_pid(From) ->
-    ?TR,
     receive
         Data ->
             case erlang:process_info(From) of
@@ -658,23 +675,19 @@ produce_csv_rows(UserId, From, StmtRef, RowFun) when is_function(RowFun) andalso
     end.
 
 produce_csv_rows_result({error, Error}, _UserId, From, StmtRef, _RowFun) ->
-    ?TR,
     From ! {reply_csv, <<>>, list_to_binary(io_lib:format("Error: ~p", [Error])), last},
     dderlodpi:close(StmtRef);
 produce_csv_rows_result({Rows, false}, UserId, From, StmtRef, RowFun) when is_list(Rows), is_function(RowFun) ->
-    ?TR,
     CsvRows = gen_adapter:make_csv_rows(UserId, Rows, RowFun, odpi),
     From ! {reply_csv, <<>>, CsvRows, continue},
     produce_csv_rows(UserId, From, StmtRef, RowFun);
 produce_csv_rows_result({Rows, true}, UserId, From, StmtRef, RowFun) when is_list(Rows), is_function(RowFun) ->
-    ?TR,
     CsvRows = gen_adapter:make_csv_rows(UserId, Rows, RowFun, odpi),
     From ! {reply_csv, <<>>, CsvRows, last},
     dderlodpi:close(StmtRef).
 
 -spec disconnect(#priv{}) -> #priv{}.
 disconnect(#priv{connections = Connections} = Priv) ->
-    ?TR,
     ?Debug("closing the connections ~p", [Connections]),
     [conn_close_and_destroy(ConnRef) || ConnRef <- Connections],
     Priv#priv{connections = []}.
@@ -682,14 +695,12 @@ disconnect(#priv{connections = Connections} = Priv) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 -spec gui_resp_cb_fun(binary(), {atom(), pid()}, pid()) -> fun().
 gui_resp_cb_fun(Cmd, Statement, From) ->
-    ?TR,
     Clms = dderl_fsm:get_columns(Statement),
     gen_adapter:build_resp_fun(Cmd, Clms, From).
 
 -spec sort_json_to_term(list()) -> [tuple()].
 sort_json_to_term([]) -> [];
 sort_json_to_term([[{C,T}|_]|Sorts]) ->
-    ?TR,
     case string:to_integer(binary_to_list(C)) of
         {Index, []} -> Index;
         {error, _R} -> Index = C
@@ -697,19 +708,17 @@ sort_json_to_term([[{C,T}|_]|Sorts]) ->
     [{Index, if T -> <<"asc">>; true -> <<"desc">> end}|sort_json_to_term(Sorts)].
 
 -spec filter_json_to_term([{binary(), term()} | [{binary(), term()}]]) -> [{atom() | integer(), term()}].
-filter_json_to_term([{<<"undefined">>,[]}]) -> ?TR, {'undefined', []};
-filter_json_to_term([{<<"and">>,Filters}]) -> ?TR, {'and', filter_json_to_term(Filters)};
-filter_json_to_term([{<<"or">>,Filters}]) -> ?TR, {'or', filter_json_to_term(Filters)};
-filter_json_to_term([]) -> ?TR, [];
+filter_json_to_term([{<<"undefined">>,[]}]) ->  {'undefined', []};
+filter_json_to_term([{<<"and">>,Filters}]) ->  {'and', filter_json_to_term(Filters)};
+filter_json_to_term([{<<"or">>,Filters}]) ->  {'or', filter_json_to_term(Filters)};
+filter_json_to_term([]) ->  [];
 filter_json_to_term([[{C,Vs}]|Filters]) ->
-    ?TR,
     [{binary_to_integer(C), Vs} | filter_json_to_term(Filters)].
 
 -spec open_view({atom(), pid()}, {atom(), pid()}, pid(), binary(), [tuple()], undefined | {error, binary()}) -> list().
-open_view(_Sess, _Connection, _SessPid, _ConnId, _Binds, undefined) -> ?TR, [{<<"error">>, <<"view not found">>}];
-open_view(_Sess, _Connection, _SessPid, _ConnId, _Binds, {error, Reason}) -> ?TR, [{<<"error">>, Reason}];
+open_view(_Sess, _Connection, _SessPid, _ConnId, _Binds, undefined) ->  [{<<"error">>, <<"view not found">>}];
+open_view(_Sess, _Connection, _SessPid, _ConnId, _Binds, {error, Reason}) ->  [{<<"error">>, Reason}];
 open_view(Sess, Connection, SessPid, ConnId, Binds, #ddView{id = Id, name = Name, cmd = CmdId, state = ViewState}) ->
-    ?TR, 
     C = dderl_dal:get_command(Sess, CmdId),
     Resp =
     case C#ddCmd.conns of
@@ -730,24 +739,20 @@ open_view(Sess, Connection, SessPid, ConnId, Binds, #ddView{id = Id, name = Name
 
 -spec process_query(tuple()|binary(), tuple(), pid()) -> list().
 process_query({Query, BindVals}, Connection, SessPid) ->
-    ?TR,
     Result = dderlodpi:exec(Connection, Query, BindVals, imem_sql_expr:rownum_limit()),
     CheckFuns = check_funs(Result),
     process_query(CheckFuns, Query, BindVals, Connection, SessPid);
 process_query(Query, Connection, SessPid) ->
-    ?TR,
     process_query(check_funs(dderlodpi:exec(Connection, Query, imem_sql_expr:rownum_limit())),
                   Query, [], Connection, SessPid).
 
 -spec process_query(term(), binary(), list(), tuple(), pid()) -> list().
 process_query(ok, Query, BindVals, Connection, SessPid) ->
-    ?TR,
     ?Debug([{session, Connection}], "query ~p -> ok", [Query]),
     SessPid ! {log_query, Query, process_log_binds(BindVals)},
     [{<<"result">>, <<"ok">>}];
 process_query({ok, #stmtResults{sortSpec = SortSpec, rowCols = Clms} = StmtRslt, TableName},
               Query, BindVals, #odpi_conn{} = Connection, SessPid) ->
-                  ?TR,
     SessPid ! {log_query, Query, process_log_binds(BindVals)},
     FsmCtx = generate_fsmctx(StmtRslt, Query, BindVals, Connection, TableName),
     StmtFsm = dderl_fsm:start(FsmCtx, SessPid),
@@ -762,16 +767,13 @@ process_query({ok, #stmtResults{sortSpec = SortSpec, rowCols = Clms} = StmtRslt,
      {<<"statement">>, base64:encode(term_to_binary(StmtFsm))},
      {<<"connection">>, ?E2B(Connection)}];
 process_query({ok, Values}, Query, BindVals, #odpi_conn{} = Connection, SessPid) ->
-    ?TR,
     SessPid ! {log_query, Query, process_log_binds(BindVals)},
     [{<<"data">>, Values},
      {<<"connection">>, ?E2B(Connection)}];
 process_query({error, Msg}, Query, BindVals, _Connection, _SessPid) when is_binary(Msg) ->
-    ?TR,
     ?Error("query error ~p for ~p whith bind values ~p", [Msg, Query, BindVals]),
     [{<<"error">>, Msg}];
 process_query(Error, Query, BindVals, _Connection, _SessPid) ->
-    ?TR,
     ?Error("query error ~p for ~p whith bind values ~p", [Error, Query, BindVals]),
     if
         is_binary(Error) ->
@@ -783,7 +785,6 @@ process_query(Error, Query, BindVals, _Connection, _SessPid) ->
 
 -spec send_result_table_cmd(pid(), binary(), list()) -> ok.
 send_result_table_cmd(From, BinCmd, Results) ->
-    ?TR,
     TableErrors = [TableName || {error, TableName} <- Results],
     case TableErrors of
         [] ->
@@ -801,7 +802,6 @@ send_result_table_cmd(From, BinCmd, Results) ->
     ok.
 
 process_table_cmd(Cmd, TableName, BodyJson, Connections) ->
-    ?TR,
     Connection = ?D2T(proplists:get_value(<<"connection">>, BodyJson, <<>>)),
     case lists:member(Connection, Connections) of
         true ->
@@ -816,38 +816,28 @@ process_table_cmd(Cmd, TableName, BodyJson, Connections) ->
     end.
 
 -spec process_log_binds({list(), list()} | [] | undefined) -> list().
-process_log_binds(undefined) -> ?TR, [];
-process_log_binds([]) -> ?TR, [];
-process_log_binds({[], _}) -> ?TR, [];
-process_log_binds({[{Name, out,'SQLT_RSET'} | Vars], [_ | Values]}) ->
-    ?TR,
-    % Replaced the long binary for a placeholder text for log.
-    [{Name, out, 'SQLT_RSET', <<"placeholder">>} | process_log_binds({Vars, Values})];
+process_log_binds(undefined) ->  [];
+process_log_binds([]) ->  [];
+process_log_binds({[], _}) ->  [];
 process_log_binds({[{Name, Dir, Type} | Vars], [Val | Values]}) ->
     [{Name, Dir, Type, Val} | process_log_binds({Vars, Values})].
 
 -spec error_invalid_conn() -> term().
 error_invalid_conn() ->
-    ?TR,
     Err = <<"Trying to process a query with an unowned connection">>,
     jsx:encode([{<<"error">>, Err}]).
 
 -spec build_srtspec_json([{integer()| binary(), boolean()}]) -> list().
 build_srtspec_json(SortSpecs) ->
-    ?TR,
     [build_srtspec_json(SP, AscDesc) || {SP, AscDesc} <- SortSpecs].
 
 build_srtspec_json(SP, <<"asc">>) ->
-    ?TR,
     build_srtspec_json(SP, true);
 build_srtspec_json(SP, <<"desc">>) ->
-    ?TR,
     build_srtspec_json(SP, false);
 build_srtspec_json(SP, IsAsc) when is_integer(SP) ->
-    ?TR,
     {integer_to_binary(SP), [{<<"id">>, SP}, {<<"asc">>, IsAsc}]};
 build_srtspec_json(SP, IsAsc) when is_binary(SP) ->
-    ?TR,
     case string:to_integer(binary_to_list(SP)) of
         {SPInt, []} ->
             {SP, [{<<"id">>, SPInt}, {<<"asc">>, IsAsc}]};
@@ -857,14 +847,12 @@ build_srtspec_json(SP, IsAsc) when is_binary(SP) ->
 
 -spec error_invalid_conn({atom(), pid()}, [{atom(), pid()}]) -> term().
 error_invalid_conn(Connection, Connections) ->
-    ?TR,
     Err = <<"Trying to process a query with an unowned connection">>,
     ?Error("~s: ~p~n connections list: ~p", [Err, Connection, Connections]),
     jsx:encode([{<<"error">>, Err}]).
 
 -spec check_fun_vsn(fun()) -> boolean().
 check_fun_vsn(Fun) when is_function(Fun)->
-    ?TR,
     {module, Mod} = erlang:fun_info(Fun, module),
     ?Debug("The module: ~p", [Mod]),
     [ModVsn] = proplists:get_value(vsn, Mod:module_info(attributes)),
@@ -873,13 +861,11 @@ check_fun_vsn(Fun) when is_function(Fun)->
     ?Debug("The function version: ~p~n", [FunVsn]),
     ModVsn =:= FunVsn;
 check_fun_vsn(Something) ->
-    ?TR,
     ?Error("Not a function ~p", [Something]),
     false.
 
 -spec check_funs(term()) -> term().
 check_funs({ok, #stmtResults{rowFun = RowFun, sortFun = SortFun} = StmtRslt, TableName}) ->
-    ?TR,
     ValidFuns = check_fun_vsn(RowFun) andalso check_fun_vsn(SortFun),
     if
         ValidFuns -> {ok, StmtRslt, TableName};
@@ -895,7 +881,6 @@ generate_fsmctx(#stmtResults{
                 , stmtRefs = StmtRef
                 , sortFun  = SortFun
                 , sortSpec = SortSpec}, Query, BindVals, #odpi_conn{} = Connection, TableName) ->
-                    ?TR,
     #fsmctxs{rowCols      = Clms
            ,stmtRefs      = [StmtRef]
            ,rowFun        = RowFun
@@ -922,13 +907,11 @@ generate_fsmctx(#stmtResults{
                 end]
            }.
 
-build_slave_name(system) -> ?TR, odpi_node_system;
+build_slave_name(system) ->  odpi_node_system;
 build_slave_name(UserId) when is_integer(UserId) -> 
-    ?TR,
     list_to_atom("odpi_node_" ++ integer_to_list(UserId)).
 
 dpi_load(SlaveName) ->
-    ?TR,
     Master = self(),
     spawn_link(
         fun() ->
@@ -939,22 +922,20 @@ dpi_load(SlaveName) ->
     receive {oranif_result, Result} -> Result end.
 
 -spec get_deps() -> [atom()].
-get_deps() -> ?TR, [oranif].
+get_deps() ->  [oranif].
 
-make_binds(Binds) -> ?TR, make_binds(Binds, []).
+make_binds(Binds) ->  make_binds(Binds, []).
 
-make_binds(null, []) -> ?TR, undefined;
-make_binds(null, [{<<"binds">>, ParamsProp}]) ->
-    ?TR,
-    case proplists:get_value(<<"pars">>, ParamsProp, []) of
-        [] -> undefined;
-        ParameterList ->
-            % Convert parameter properties to map to make it easier to extract
-            extract_rset_out([{Name, maps:from_list(Value)} || {Name, Value} <- ParameterList])
-    end;
-make_binds(null, _CmdBinds) -> ?TR, undefined;
+make_binds(null, []) ->  undefined;
+%make_binds(null, [{<<"binds">>, ParamsProp}]) ->
+%    case proplists:get_value(<<"pars">>, ParamsProp, []) of
+%        [] -> undefined;
+%        ParameterList ->
+%            % Convert parameter properties to map to make it easier to extract
+%            extract_rset_out([{Name, maps:from_list(Value)} || {Name, Value} <- ParameterList])
+%    end;
+make_binds(null, _CmdBinds) ->  undefined;
 make_binds(Binds, _CmdBinds) ->
-    ?TR,
     try
         {Vars, Values} = lists:foldr(
             fun({B, TV}, {NewBinds, NewVals}) ->
@@ -967,23 +948,13 @@ make_binds(Binds, _CmdBinds) ->
                 Val = case proplists:get_value(<<"val">>, TV, <<>>) of
                           V when byte_size(V) == 0 ->
                               if Dir == out orelse Dir == inout ->
-                                     case Typ of
-                                         'SQLT_INT' -> 0;
-                                         'SQLT_DAT' -> list_to_binary(lists:duplicate(7,0));
-                                         'SQLT_VNU' -> list_to_binary(lists:duplicate(22,0));
-                                         'SQLT_TIMESTAMP' -> list_to_binary(lists:duplicate(11,0));
-                                         'SQLT_TIMESTAMP_TZ' -> list_to_binary(lists:duplicate(13,0));
-                                         _ -> list_to_binary(lists:duplicate(4400, 0))
-                                     end;
+                                 list_to_binary(lists:duplicate(4400, 0));
                                  true -> V
                               end;
                           V -> V
                       end,
                 {[{B, Dir, Typ} | NewBinds],
-                 [if Dir == in ->
-                         dderloci_utils:to_ora(Typ, Val);
-                    true -> Val
-                  end | NewVals]}
+                 [Val | NewVals]}
             end,
             {[], []}, Binds),
         {Vars, Values}
@@ -993,21 +964,8 @@ make_binds(Binds, _CmdBinds) ->
             {error, list_to_binary(io_lib:format("bind process error : ~p", [Exception]))}
     end.
 
-extract_rset_out(Parameters) -> ?TR, extract_rset_out(Parameters, {[], []}).
-
-extract_rset_out([], Acc) -> ?TR, Acc;
-extract_rset_out([{Name, #{<<"typ">> := <<"SQLT_RSET">>, <<"dir">> := <<"out">>}} | Rest], {Binds, Vals}) ->
-    ?TR,
-    NewAcc = {
-        [{Name, out, 'SQLT_RSET'} | Binds],
-        [list_to_binary(lists:duplicate(4400, 0)) | Vals]
-    },
-    extract_rset_out(Rest, NewAcc);
-extract_rset_out(_Bids, _Acc) -> ?TR, undefined.
-
 conn_close_and_destroy(#odpi_conn{context = Ctx, connection = Conn, node = Node}) ->
     dpi:safe(Node, fun() ->
-        ?TR,
         ok = dpi:conn_close(Conn, [], <<>>),
         ok = dpi:context_destroy(Ctx)
     end),
