@@ -204,29 +204,46 @@ fetch_metrics([Type | Types], State) ->
             case fetch_metric(Type, Day, State) of
                 {error, Error} ->
                     {error, Error};
-                State1 ->
+                none ->
+                    fetch_metrics(Types, State);
+                {ok, MDay, Metric} ->
+                    State1 = set_metric_day(Type, MDay, State#state{infos = [Metric | State#state.infos]}),
                     fetch_metrics(Types, State1)
             end
     end.
 
 fetch_metric(Type, Day, #state{api_url = ApiUrl, access_token = AccessToken} = State) ->
     ?JInfo("Fetching metric for ~s on ~p", [Type, Day]),
-    Url = ApiUrl ++ "/v1/" ++ Type ++ day_query(Day),
-    TypeBin = list_to_binary(Type),
-    case exec_req(Url, AccessToken) of
-        #{TypeBin := []} ->
-            NextDay = next_day(Day),
+    NextDay = next_day(Day),
+    case fetch_metric(Type, day_query(Day), ApiUrl, AccessToken) of
+        none ->
             case NextDay =< edate:yesterday() of
                 true ->
                     fetch_metric(Type, NextDay, State);
                 false ->
                     State
             end;
-        Metric when is_map(Metric) ->
-            Info = {["ouraring", Type], Metric#{<<"_day">> => list_to_binary(edate:date_to_string(Day))}},
-            set_metric_day(Type, Day, State#state{infos = [Info | State#state.infos]});
+        {ok, Metric} ->
+            case fetch_metric(Type, start_day_query(NextDay), ApiUrl, AccessToken) of
+                {ok, _} ->
+                    {ok, Day, {["ouraring", Type], Metric#{<<"_day">> => list_to_binary(edate:date_to_string(Day))}}};
+                Other ->
+                    Other
+            end;
         {error, Error} ->
             ?JError("Error fetching ~s for ~p : ~p", [Type, Day, Error]),
+            {error, Error}
+    end.
+
+fetch_metric(Type, DayQuery, ApiUrl, AccessToken) ->
+    Url = ApiUrl ++ "/v1/" ++ Type ++ DayQuery,
+    TypeBin = list_to_binary(Type),
+    case exec_req(Url, AccessToken) of
+        #{TypeBin := []} ->
+            none;
+        Metric when is_map(Metric) ->
+            {ok, Metric};
+        {error, Error} ->
             {error, Error}
     end.
 
@@ -282,6 +299,11 @@ day_query(Day) when is_tuple(Day) ->
     day_query(edate:date_to_string(Day));
 day_query(Day) when is_list(Day) ->
     "?start=" ++ Day ++ "&end=" ++ Day.
+
+start_day_query(Day) when is_tuple(Day) ->
+    start_day_query(edate:date_to_string(Day));
+start_day_query(Day) when is_list(Day) ->
+    "?start=" ++ Day.
 
 get_last_day("sleep", #state{last_sleep_day = LastSleepDay}) -> LastSleepDay;
 get_last_day("activity", #state{last_activity_day = LastActivityDay}) -> LastActivityDay;
