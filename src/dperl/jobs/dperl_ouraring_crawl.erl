@@ -17,7 +17,7 @@
 -record(state, {name, channel, client_id, client_secret, password, email,
                 cb_uri, is_connected = false, access_token, api_url, oauth_url,
                 last_sleep_day, last_activity_day, last_readiness_day,
-                infos = [], auth_time, auth_expiry}).
+                infos = [], auth_time, auth_expiry, avatar_id}).
 
 % dperl_strategy_scr export
 -export([connect_check_src/1, get_source_events/2, connect_check_dst/1,
@@ -158,7 +158,7 @@ init({#dperlJob{name=Name, dstArgs = #{channel := Channel},
                 srcArgs = #{client_id := ClientId, user_password := Password,
                             client_secret := ClientSecret, user_email := Email,
                             cb_uri := CallbackUri, api_url := ApiUrl,
-                            oauth_url := OauthUrl}}, State}) ->
+                            oauth_url := OauthUrl, avatar_id := AvatarId}}, State}) ->
     ?JInfo("Starting ..."),
     ChannelBin = dperl_dal:to_binary(Channel),
     dperl_dal:create_check_channel(ChannelBin),
@@ -167,7 +167,8 @@ init({#dperlJob{name=Name, dstArgs = #{channel := Channel},
     {ok, State#state{channel = ChannelBin, client_id = ClientId,
                      client_secret = ClientSecret, password = Password,
                      email = Email, cb_uri = CallbackUri, name = Name,
-                     api_url = ApiUrl, oauth_url = OauthUrl}};
+                     api_url = ApiUrl, oauth_url = OauthUrl,
+                     avatar_id = AvatarId}};
 init(Args) ->
     ?JError("bad start parameters ~p", [Args]),
     {stop, badarg}.
@@ -187,6 +188,8 @@ handle_info(Request, State) ->
 terminate(Reason, _State) ->
     httpc:reset_cookies(?MODULE),
     ?JInfo("terminate ~p", [Reason]).
+
+%% private functions
 
 fetch_metrics([], State) -> {ok, State};
 fetch_metrics(["userinfo" | Types], State) ->
@@ -224,7 +227,8 @@ fetch_metric(Type, Day, #state{api_url = ApiUrl, access_token = AccessToken} = S
                     State
             end;
         {ok, Metric} ->
-            Info = {["ouraring", Type], Metric#{<<"_day">> => list_to_binary(edate:date_to_string(Day))}},
+            Key = build_key(Type, State#state.avatar_id),
+            Info = {Key, Metric#{<<"_day">> => list_to_binary(edate:date_to_string(Day))}},
             case Type of
                 Type when Type == "sleep"; Type == "readiness" ->
                     {ok, Day, Info};
@@ -257,7 +261,7 @@ fetch_metric(Type, DayQuery, ApiUrl, AccessToken) ->
 fetch_userinfo(#state{api_url = ApiUrl, access_token = AccessToken} = State) ->
     case exec_req(ApiUrl ++ "/v1/userinfo", AccessToken) of
         UserInfo when is_map(UserInfo) ->
-            Info = {["ouraring", "userinfo"], UserInfo},
+            Info = {build_key("userinfo", State#state.avatar_id), UserInfo},
             State#state{infos = [Info | State#state.infos]};
         {error, Error} ->
             ?JError("Error fetching userinfo : ~p", [Error]),
@@ -266,7 +270,7 @@ fetch_userinfo(#state{api_url = ApiUrl, access_token = AccessToken} = State) ->
 
 get_day(Type, State) ->
     LastDay = get_last_day(Type, State),
-    Key = ["ouraring", Type],
+    Key = build_key(Type, State#state.avatar_id),
     Yesterday = edate:yesterday(),
     case dperl_dal:read_channel(State#state.channel, Key) of
         ?NOT_FOUND ->
@@ -320,3 +324,5 @@ set_metric_day("sleep", Day, State) -> State#state{last_sleep_day = Day};
 set_metric_day("activity", Day, State) -> State#state{last_activity_day = Day};
 set_metric_day("readiness", Day, State) -> State#state{last_readiness_day = Day}.
 
+build_key(Type, AvatarId) when is_list(Type), is_list(AvatarId)->
+    [AvatarId, "ouraring", Type].
