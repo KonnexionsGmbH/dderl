@@ -36,58 +36,65 @@ connect_check_src(#state{is_connected = true, auth_expiry = ExpiresIn, auth_time
 connect_check_src(#state{is_connected = false, client_id = ClientId, cb_uri = CallbackUri,
                          client_secret = ClientSecret, password = Password,
                          email = Email, oauth_url = OauthUrl} = State) ->
+    ?Info("Generating new access token"),
     httpc:reset_cookies(?MODULE),
-    Url = OauthUrl ++ "/oauth/authorize"
-    ++ "?response_type=code"
-    ++ "&client_id=" ++ ClientId
-    ++ "&redirect_uri=" ++ edoc_lib:escape_uri(CallbackUri)
-    ++ "&scope=email+personal+daily"
-    ++ "&state=" ++ "test",
-    case httpc:request(get, {Url, []}, [{autoredirect, false}], [], ?MODULE) of
-        {ok, {{"HTTP/1.1",302,"Found"}, RespHeader302, []}} ->
-            RedirectUri = OauthUrl ++ proplists:get_value("location", RespHeader302),
-            {ok, {{"HTTP/1.1",200,"OK"}, RespHeader, _Body}} = httpc:request(get, {RedirectUri, []}, [{autoredirect, false}], [], ?MODULE),
-            SetCookieHeader = proplists:get_value("set-cookie", RespHeader),
-            {match, [XRefCookie]} = re:run(SetCookieHeader, ".*_xsrf=(.*);.*", [{capture, [1], list}]),
-            {ok,{{"HTTP/1.1",302,"Found"}, RespHeader302_1, []}} = httpc:request(
-            post, {
-                RedirectUri, [], "application/x-www-form-urlencoded",
-                "_xsrf="++edoc_lib:escape_uri(XRefCookie)
-                ++ "&email=" ++ edoc_lib:escape_uri(Email)
-                ++ "&password=" ++ edoc_lib:escape_uri(Password)
-            }, [{autoredirect, false}], [], ?MODULE
-            ),
-            RedirectUri_1 = OauthUrl ++ proplists:get_value("location", RespHeader302_1),
-            {ok, {{"HTTP/1.1",200,"OK"}, _, _}} = httpc:request(get, {RedirectUri_1, []}, [{autoredirect, false}], [], ?MODULE),
-            {ok, {{"HTTP/1.1",302,"Found"}, RespHeader302_2, []}} = httpc:request(
-            post, {
-                RedirectUri_1, [], "application/x-www-form-urlencoded",
-                "_xsrf="++edoc_lib:escape_uri(XRefCookie)
-                ++ "&scope_email=on"
-                ++ "&scope_personal=on"
-                ++ "&scope_daily=on"
-                ++ "&allow=Accept"
-            }, [{autoredirect, false}], [], ?MODULE
-            ),
-            RedirectUri_2 = proplists:get_value("location", RespHeader302_2),
-            #{query := QueryString} = uri_string:parse(RedirectUri_2),
-            #{"code" := Code} = maps:from_list(uri_string:dissect_query(QueryString)),
-            {ok, {{"HTTP/1.1",200,"OK"}, _, BodyJson}} = httpc:request(
-            post, {
-                OauthUrl ++ "/oauth/token", [], "application/x-www-form-urlencoded",
-                "grant_type=authorization_code"
-                ++ "&code=" ++ Code
-                ++ "&redirect_uri=" ++ edoc_lib:escape_uri(CallbackUri)
-                ++ "&client_id=" ++ ClientId
-                ++ "&client_secret=" ++ ClientSecret
-            }, [{autoredirect, false}], [], ?MODULE
-            ),
-            #{<<"access_token">> := AccessToken, <<"expires_in">> := ExpiresIn} = Auth = jsx:decode(list_to_binary(BodyJson), [return_maps]),
-            ?JInfo("Authentication successful : ~p", [Auth]),
-            {ok, State#state{is_connected = true, access_token = AccessToken,
-                             auth_expiry = ExpiresIn, auth_time = imem_meta:time()}};
-        Error ->
-            ?JError("Unexpected response : ~p", [Error]),
+    Params = #{
+        "response_type" => "code",
+        "client_id" => ClientId,
+        "redirect_uri" => edoc_lib:escape_uri(CallbackUri),
+        "scope" => "email+personal+daily",
+        "state" => "test"
+    },
+    Url = OauthUrl ++ "/oauth/authorize?" ++ binary_to_list(url_enc_params(Params)),
+    try
+        {ok, {{"HTTP/1.1",302,"Found"}, RespHeader302, []}} = httpc:request(
+            get, {Url, []}, [{autoredirect, false}], [], ?MODULE),
+        RedirectUri = OauthUrl ++ proplists:get_value("location", RespHeader302),
+        {ok, {{"HTTP/1.1",200,"OK"}, RespHeader, _Body}} = httpc:request(get, {RedirectUri, []}, [{autoredirect, false}], [], ?MODULE),
+        SetCookieHeader = proplists:get_value("set-cookie", RespHeader),
+        {match, [XRefCookie]} = re:run(SetCookieHeader, ".*_xsrf=(.*);.*", [{capture, [1], list}]),
+        Params2 = #{
+            "_xsrf" => edoc_lib:escape_uri(XRefCookie),
+            "email" => edoc_lib:escape_uri(Email),
+            "password" => edoc_lib:escape_uri(Password)
+        },
+        {ok,{{"HTTP/1.1",302,"Found"}, RespHeader302_1, []}} = httpc:request(
+        post, {
+            RedirectUri, [], "application/x-www-form-urlencoded",
+            url_enc_params(Params2)}, [{autoredirect, false}], [], ?MODULE),
+        RedirectUri_1 = OauthUrl ++ proplists:get_value("location", RespHeader302_1),
+        {ok, {{"HTTP/1.1",200,"OK"}, _, _}} = httpc:request(get, {RedirectUri_1, []}, [{autoredirect, false}], [], ?MODULE),
+        Params3 = #{
+            "_xsrf" => edoc_lib:escape_uri(XRefCookie),
+            "cope_email" => "on",
+            "scope_personal" => "on",
+            "scope_daily" => "on",
+            "allow" => "Accept"
+        },
+        {ok, {{"HTTP/1.1",302,"Found"}, RespHeader302_2, []}} = httpc:request(
+        post, {
+            RedirectUri_1, [], "application/x-www-form-urlencoded",
+            url_enc_params(Params3)}, [{autoredirect, false}], [], ?MODULE),
+        RedirectUri_2 = proplists:get_value("location", RespHeader302_2),
+        #{query := QueryString} = uri_string:parse(RedirectUri_2),
+        #{"code" := Code} = maps:from_list(uri_string:dissect_query(QueryString)),
+        Params4 = #{
+            "grant_type" => "authorization_code",
+            "code" => Code, "client_id" => ClientId,
+            "redirect_uri" => edoc_lib:escape_uri(CallbackUri),
+            "client_secret" => ClientSecret
+        },
+        {ok, {{"HTTP/1.1",200,"OK"}, _, BodyJson}} = httpc:request(
+        post, {
+            OauthUrl ++ "/oauth/token", [], "application/x-www-form-urlencoded",
+            url_enc_params(Params4)}, [{autoredirect, false}], [], ?MODULE),
+        #{<<"access_token">> := AccessToken, <<"expires_in">> := ExpiresIn} = Auth = jsx:decode(list_to_binary(BodyJson), [return_maps]),
+        ?JInfo("Authentication successful : ~p", [Auth]),
+        {ok, State#state{is_connected = true, access_token = AccessToken,
+                            auth_expiry = ExpiresIn, auth_time = imem_meta:time()}}
+    catch
+        Class:Error:Stacktrace ->
+            ?JError("Unexpected response : ~p:~p:~p", [Class, Error, Stacktrace]),
             {error, invalid_return, State}
     end;
 connect_check_src(State) -> {ok, State}.
@@ -326,3 +333,10 @@ set_metric_day("readiness", Day, State) -> State#state{last_readiness_day = Day}
 
 build_key(Type, AvatarId) when is_list(Type), is_list(AvatarId)->
     [AvatarId, "ouraring", Type].
+
+url_enc_params(Params) ->
+    EParams = maps:fold(
+        fun(K, V, Acc) ->
+            ["&", K, "=", V | Acc]
+        end, [], Params),
+    erlang:iolist_to_binary(tl(EParams)).
