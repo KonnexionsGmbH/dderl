@@ -217,18 +217,25 @@ fetch_metric(Type, Day, #state{api_url = ApiUrl, access_token = AccessToken} = S
     NextDay = next_day(Day),
     case fetch_metric(Type, day_query(Day), ApiUrl, AccessToken) of
         none ->
-            case NextDay =< edate:yesterday() of
-                true ->
+            case fetch_metric(Type, start_day_query(NextDay), ApiUrl, AccessToken) of
+                {ok, _} ->
                     fetch_metric(Type, NextDay, State);
-                false ->
+                _Other ->
                     State
             end;
         {ok, Metric} ->
-            case fetch_metric(Type, start_day_query(NextDay), ApiUrl, AccessToken) of
-                {ok, _} ->
-                    {ok, Day, {["ouraring", Type], Metric#{<<"_day">> => list_to_binary(edate:date_to_string(Day))}}};
-                Other ->
-                    Other
+            Info = {["ouraring", Type], Metric#{<<"_day">> => list_to_binary(edate:date_to_string(Day))}},
+            case Type of
+                Type when Type == "sleep"; Type == "readiness" ->
+                    {ok, Day, Info};
+                "activity" ->
+                    % fetching activity only if next days data exists
+                    case fetch_metric(Type, start_day_query(NextDay), ApiUrl, AccessToken) of
+                        {ok, _} ->
+                            {ok, Day, Info};
+                        Other ->
+                            Other
+                    end
             end;
         {error, Error} ->
             ?JError("Error fetching ~s for ~p : ~p", [Type, Day, Error]),
