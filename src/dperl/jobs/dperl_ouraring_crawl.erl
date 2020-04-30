@@ -313,14 +313,3 @@ set_metric_day("sleep", Day, State) -> State#state{last_sleep_day = Day};
 set_metric_day("activity", Day, State) -> State#state{last_activity_day = Day};
 set_metric_day("readiness", Day, State) -> State#state{last_readiness_day = Day}.
 
-% format_links(Links) ->
-%     lists:map(
-%         fun(#{url := Url} = Link) ->
-%             NewUrl = 
-%             case lists:last(Url) of
-%                 $/ -> Url;
-%                 _ -> Url ++ "/"
-%             end,
-%             Link#{url := NewUrl};
-%           (Link) -> Link
-%         end, Links).
