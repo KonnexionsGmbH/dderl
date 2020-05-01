@@ -265,8 +265,8 @@ process_call({[<<"register_key_attest">>], ReqData}, _Adapter, From, {SrcIp,_},
     Attestation = base64:decode(Attestation64),
     Resp =
     case 'Elixir.Wax':register(Attestation, ClientData, Challenge) of
-        {ok, {CoseKey, _AttestationResult}} ->
-            erlimem_session:run_cmd(State#state.sess, auth_add_fido2, [{RawId64, CoseKey}]),
+        {ok, {#{attested_credential_data := #{credential_public_key := CPKey}}, Result}} ->
+            erlimem_session:run_cmd(State#state.sess, auth_add_fido2, [{RawId64, CPKey}]),
             #{result => <<"attestation object validated">>};
         {error, _} = Error ->
             ?Info("Wax: attestation object validation failed with error ~p", [Error]),
