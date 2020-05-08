@@ -166,17 +166,24 @@ init({#dperlJob{name=Name, dstArgs = #{channel := Channel},
                             client_secret := ClientSecret, user_email := Email,
                             cb_uri := CallbackUri, api_url := ApiUrl,
                             oauth_url := OauthUrl} = SrcArgs}, State}) ->
-    ?JInfo("Starting ..."),
-    ChannelBin = dperl_dal:to_binary(Channel),
-    KeyPrefix = maps:get(key_prefix, SrcArgs, []),
-    dperl_dal:create_check_channel(ChannelBin),
-    inets:start(httpc, [{profile, ?MODULE}]),
-    ok = httpc:set_options([{cookies, enabled}], ?MODULE),
-    {ok, State#state{channel = ChannelBin, client_id = ClientId,
-                     client_secret = ClientSecret, password = Password,
-                     email = Email, cb_uri = CallbackUri, name = Name,
-                     api_url = ApiUrl, oauth_url = OauthUrl,
-                     key_prefix = KeyPrefix}};
+    case dperl_auth_cache:get_enc_hash(Name) of
+        undefined ->
+            ?JError("Encryption hash is not avaialable"),
+            {stop, badarg};
+        {User, EncHash} ->
+            ?JInfo("Starting with ~p's enchash...", [User]),
+            put(pwdHash, EncHash),
+            ChannelBin = dperl_dal:to_binary(Channel),
+            KeyPrefix = maps:get(key_prefix, SrcArgs, []),
+            dperl_dal:create_check_channel(ChannelBin),
+            inets:start(httpc, [{profile, ?MODULE}]),
+            ok = httpc:set_options([{cookies, enabled}], ?MODULE),
+            {ok, State#state{channel = ChannelBin, client_id = ClientId,
+                             client_secret = ClientSecret, password = Password,
+                             email = Email, cb_uri = CallbackUri, name = Name,
+                             api_url = ApiUrl, oauth_url = OauthUrl,
+                             key_prefix = KeyPrefix}}
+    end;
 init(Args) ->
     ?JError("bad start parameters ~p", [Args]),
     {stop, badarg}.

@@ -83,7 +83,11 @@ init([]) ->
        #{id => dperl_service_cp,
          start => {dperl_cp, start_link, [service]},
          restart => permanent, shutdown => 5000, type => worker,
-         modules => [dperl_cp]}
+         modules => [dperl_cp]},
+       #{id => dperl_auth_cache,
+         start => {dperl_auth_cache, start_link, []},
+         restart => permanent, shutdown => 5000, type => worker,
+         modules => [dperl_auth_cache]}
       ]}}.
 
 priv_dir() ->
