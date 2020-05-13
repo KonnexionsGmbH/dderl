@@ -381,6 +381,11 @@ run_query(Connection, Sql, Binds, NewSql, RowIdAdded, SelectSections) ->
     case dpi_conn_prepareStmt(Connection, NewSql) of
         Statement when is_reference(Statement) ->
             StmtExecResult = bind_exec_stmt(Connection, Statement, Binds),
+            case StmtExecResult of
+                {error, _DpiNifFile, _Line, #{message := Msg}} ->
+                    error(list_to_binary(Msg));
+                    _Else -> nop
+            end,
             case dpi_stmt_getInfo(Connection, Statement) of
                 #{isQuery := true} ->
                     result_exec_query(
