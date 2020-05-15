@@ -23,6 +23,21 @@ export function loginAjax(data = {}) {
 
 window.loginCb = loginCb;
 
+const url = new URL(window.location.href);
+const code = url.searchParams.get('code');
+const state = url.searchParams.get('state');
+if(code) {
+    // alert("code is : " + code + ' state is : ' + state);
+    dderlState.xsrfToken = state;
+    const body = { 'office_365_code': { 'code': code, 'state': state } };
+    ajaxCall(null, 'office_365_code', body, 'office_365_code', function () { window.close(); },
+        function () { alert('error!!!!'); });
+} else {
+    const error = url.searchParams.get('error');
+    const errorDesc = url.searchParams.get('error_description');
+    alert_jq('Login error : ' + error + ' : ' + errorDesc);
+}
+
 function loginCb(resp) {
     try {
         if (window.opener && window.opener.isScreensaver && window.opener.loginCb && $.isFunction(window.opener.loginCb)) {
@@ -399,4 +414,11 @@ export function change_login_password(loggedInUser, shouldConnect) {
         }
         else alert_jq("Confirm password missmatch!");
     });
+}
+
+export function authorize_office() {
+    const windowUrl = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=353d2e74-ac01-4f48-8b84-d3017e7f91f4&response_type=code&redirect_uri=https%3A%2F%2Flocalhost:8443%2Fdderl%2F&response_mode=query&scope=openid%20offline_access%20https%3A%2F%2Fgraph.microsoft.com%2Fpeople.read&state=' + encodeURIComponent(dderlState.xsrfToken);
+    const params = 'scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no,width=500,height=700,left=100,top=100';
+    const windowRef = window.open(windowUrl, 'Office 365 login', params);
+    console.log(windowRef);
 }

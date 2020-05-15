@@ -380,6 +380,40 @@ process_call({[<<"about">>], _ReqData}, _Adapter, From, {SrcIp,_}, State) ->
     reply(From, [{<<"about">>, Versions}], self()),
     State;
 
+process_call({[<<"office_365_code">>], ReqData}, _Adapter, From, {SrcIp, _}, State) ->
+    act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "format_json_to_save", args => ReqData}, State),
+    #{<<"office_365_code">> := BodyJson} = jsx:decode(ReqData, [return_maps]),
+    #{<<"code">> := Code, <<"state">> := UrlState} = BodyJson,
+    ?Info("!!!! office 365 code is : ~p, state : ~p", [Code, UrlState]),
+    Url = "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+    Head = "",
+    ContentType = "application/x-www-form-urlencoded",
+    ClientSecret = "Ltzu6fr1f2Jeps4~0VI41zzY1GOf~drv_~",
+
+    Body = "client_id=353d2e74-ac01-4f48-8b84-d3017e7f91f4
+            &scope=https%3A%2F%2Fgraph.microsoft.com%2Fpeople.read
+            &code=" ++ binary_to_list(Code) ++ "
+            &redirect_uri=https%3A%2F%2Flocalhost%3A8443%2Fdderl%2F
+            &grant_type=authorization_code
+            &client_secret=" ++ http_uri:encode(ClientSecret),
+
+    case httpc:request(post, {Url, Head, ContentType, Body}, [], []) of
+        {ok, {_, _, TokenBody}} ->
+            #{<<"access_token">> := AccessToken, <<"refresh_token">> := RefreshToken} = imem_json:decode(list_to_binary(TokenBody), [return_maps]),
+            reply(From, #{<<"office_365_code">> => #{<<"status">> => <<"ok">>}}, self()),
+            ?Info("Fetched access token and refresh token ~p, ~p", [AccessToken, size(RefreshToken)]),
+            ?Info("Fetching email"),
+            MailUrl = "https://graph.microsoft.com/v1.0/me/people/?$top=1000&$Select=displayName&$orderby=displayName",  
+            AuthHeader = {"Authorization", "Bearer " ++ binary_to_list(AccessToken)},
+            OtherHeader = {"X-PeopleQuery-QuerySources", "Mailbox,Directory"},
+            {ok, {_, _, Mails}} = httpc:request(get, {MailUrl, [AuthHeader, OtherHeader]}, [], []),
+            ?Info("Emails : ~p", [imem_json:decode(list_to_binary(Mails), [return_maps])]);
+        {error, Error} ->
+            ?Error("Fetching access token : ~p", [Error]),
+            reply(From, #{<<"office_365_code">> => #{<<"error">> => <<"Fetching token failed, Try again">>}}, self())
+    end,
+    State;
+
 process_call({[<<"connect_info">>], _ReqData}, _Adapter, From, {SrcIp,_},
              #state{sess=Sess, user_id=UserId, user = User} = State) ->
     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "connect_info"}, State),
