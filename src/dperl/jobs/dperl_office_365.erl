@@ -109,12 +109,9 @@ report_status(_Key, _Status, _State) -> no_op.
 do_cleanup(State, BlkCount) ->
     case fetch_contacts(State, BlkCount) of
         {ok, State1} ->
-            case State1#state.infos of
-                Infos when length(Infos) < BlkCount ->
-                    {ok, finish, State1};
-                _ ->
-                    {ok, State1}
-            end;
+            {ok, State1};
+        {ok, finish, State1} ->
+            {ok, finish, State1};
         {error, unauthorized} ->
             ?Info("Access token has been expired"),
             {ok, State#state{is_connected = false}};
@@ -191,15 +188,15 @@ fetch_contacts(#state{fetch_url = FetchUrl, key_prefix = KeyPrefix} = State, _Bl
         #{<<"@odata.nextLink">> := NextLink, <<"value">> := Contacts} ->
             {ok, State#state{fetch_url = NextLink, infos = format_contacts(Contacts, KeyPrefix)}};
         #{<<"value">> := Contacts} ->
-            {ok, State#state{fetch_url = undefined, infos = format_contacts(Contacts, KeyPrefix)}};
+            {ok, finish, State#state{fetch_url = undefined, infos = format_contacts(Contacts, KeyPrefix)}};
         Error ->
             Error
 end.
 
 format_contacts([], _) -> [];
-format_contacts([#{<<"displayName">> := NameBin} = Contact | Contacts], KeyPrefix) ->
-    Name = binary_to_list(NameBin),
-    Key = KeyPrefix ++ [Name],
+format_contacts([#{<<"id">> := IdBin} = Contact | Contacts], KeyPrefix) ->
+    Id = binary_to_list(IdBin),
+    Key = KeyPrefix ++ [Id],
     [{Key, Contact} | format_contacts(Contacts, KeyPrefix)].
 
 exec_req(Url, AccessToken) when is_binary(Url) ->
