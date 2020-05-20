@@ -36,6 +36,8 @@ get_token_info() ->
 
 set_token_info(TokenInfo) when is_map(TokenInfo) ->
     set_token_info(imem_json:encode(TokenInfo));
+set_token_info(TokenInfo) when is_list(TokenInfo) ->
+    set_token_info(list_to_binary(TokenInfo));
 set_token_info(TokenInfo) when is_binary(TokenInfo) ->
     dperl_dal:create_check_channel(<<"avatar">>),
     dperl_dal:write_channel(<<"avatar">>, ["office365","token"], TokenInfo).
@@ -58,7 +60,7 @@ get_access_token(Code) ->
     ContentType = "application/x-www-form-urlencoded",
     case httpc:request(post, {TUrl, "", ContentType, Body}, [], []) of
         {ok, {_, _, TokenInfo}} ->
-            set_token_info(list_to_binary(TokenInfo)),
+            set_token_info(TokenInfo),
             ok;
         {error, Error} ->
             ?Error("Fetching access token : ~p", [Error]),
