@@ -250,8 +250,8 @@ execute(cleanup, Mod, Job, State, #{cleanup := true} = Args) ->
                 true ->
                     #{minKey := MinKey, maxKey := MaxKey,
                       lastKey := LastKey} = CleanupState,
-                    #{deletes := Deletes, inserts := Inserts, 
-                      differences := Diffs, lastKey := NextLastKey} =
+                    {#{deletes := Deletes, inserts := Inserts, 
+                       differences := Diffs, lastKey := NextLastKey}, State2} =
                     cleanup_refresh_collect(
                       Mod,
                       #cleanup_ctx{minKey = MinKey, maxKey = MaxKey,
@@ -279,8 +279,8 @@ execute(cleanup, Mod, Job, State, #{cleanup := true} = Args) ->
                     cleanup_log("Missing", Inserts),
                     cleanup_log("Difference", Diffs),
                     case erlang:function_exported(Mod, do_cleanup, 5) of
-                        true ->  [Deletes, Inserts, Diffs, NextLastKey == MinKey, State1];
-                        false -> [Deletes, Inserts, NextLastKey == MinKey, State1]
+                        true ->  [Deletes, Inserts, Diffs, NextLastKey == MinKey, State2];
+                        false -> [Deletes, Inserts, NextLastKey == MinKey, State2]
                     end
             end,
             case apply(Mod, do_cleanup, DoCleanupArgs) of
@@ -635,11 +635,27 @@ cleanup_refresh_collect(Mod,
                  LastKey >= MaxKey -> MinKey;  % out of key bounds by re-config
                  true -> LastKey
              end,
-    SrcKeys = Mod:load_src_after_key(CurKey, BulkCnt, State),
-    DstKeys = Mod:load_dst_after_key(CurKey, BulkCnt, State),
-    cleanup_refresh_compare(CleanupCtx#cleanup_ctx{
+    {SrcKeys, State2} = 
+    case Mod:load_src_after_key(CurKey, BulkCnt, State) of
+        {ok, SKeys, State1} -> {SKeys, State1};
+        {error, Error, State1} ->
+            ?JError("cleanup failed at load_src_after_key : ~p", [Error]),
+            dperl_dal:job_error(<<"cleanup">>, <<"load_src_after_key">>, Error),
+            error({step_failed, State1});
+        SKeys -> {SKeys, State}
+    end,
+    {DstKeys, State4} =
+    case Mod:load_dst_after_key(CurKey, BulkCnt, State2) of
+        {ok, DKeys, State3} -> {DKeys, State3};
+        {error, Error1, State3} ->
+            ?JError("cleanup failed at load_dst_after_key : ~p", [Error1]),
+            dperl_dal:job_error(<<"cleanup">>, <<"load_dst_after_key">>, Error1),
+            error({step_failed, State3});
+        DKeys -> {DKeys, State2}
+    end,
+    {cleanup_refresh_compare(CleanupCtx#cleanup_ctx{
         srcKeys = SrcKeys, srcCount = length(SrcKeys),
-        dstKeys = DstKeys, dstCount = length(DstKeys), lastKey = CurKey}).
+        dstKeys = DstKeys, dstCount = length(DstKeys), lastKey = CurKey}), State4}.
 
 -spec cleanup_refresh_compare(#cleanup_ctx{}) -> #{deletes => list(), differences => list(), inserts => list(), lastKey => any()}.
 cleanup_refresh_compare(#cleanup_ctx{
@@ -734,7 +750,7 @@ cleanup_refresh_compare_test() ->
     SrcKeys = lists:usort([rand:uniform(3000) || _ <- lists:seq(1, SrcCount)]),
     DstCount = rand:uniform(1000),
     DstKeys = lists:usort([rand:uniform(3000) || _ <- lists:seq(1, DstCount)]),
-    #{deletes := Dels, inserts := Ins} =
+    {#{deletes := Dels, inserts := Ins}, _} =
     cleanup_refresh_collect(?MODULE,
                 #cleanup_ctx{minKey = -1, maxKey = <<255>>,
                              lastKey = 0, bulkCount = BulkCnt},
@@ -781,7 +797,7 @@ complete_cleanup_refresh(AllSrcKeys, AllDstKeys, BulkCnt) ->
 
 cleanup_refresh_loop(_, -1, _, Acc) -> Acc;
 cleanup_refresh_loop(Ctx, CurKey, AllKeys, Acc) ->
-    #{deletes := Dels, differences := Diffs, inserts := Ins, lastKey := LastKey} = 
+    {#{deletes := Dels, differences := Diffs, inserts := Ins, lastKey := LastKey}, _} = 
     cleanup_refresh_collect(?MODULE, Ctx#cleanup_ctx{lastKey = CurKey}, AllKeys),
     NewAcc = Acc#{deletes => Dels ++ maps:get(deletes, Acc, []), 
                   differences => Diffs ++ maps:get(differences, Acc, []),
@@ -846,7 +862,7 @@ cleanup_refresh_boundary_test() ->
 cleanup_refresh_only_dels_test() ->
     AllKeys = lists:sort(maps:to_list(maps:from_list([{rand:uniform(5000), rand:uniform(5000)} || _ <- lists:seq(1, 2000)]))),
     DeleteKeys = [{6000, 6}, {7000, 7}, {8000, 8}],
-    #{inserts := Ins, deletes := Dels, differences := Diffs} = complete_cleanup_refresh(AllKeys, AllKeys ++ DeleteKeys, 2000),
+    {#{inserts := Ins, deletes := Dels, differences := Diffs}, _} = complete_cleanup_refresh(AllKeys, AllKeys ++ DeleteKeys, 2000),
     ?assertEqual([], Diffs),
     ?assertEqual([], Ins),
     ?assertEqual([6000, 7000, 8000], Dels).    
@@ -854,14 +870,14 @@ cleanup_refresh_only_dels_test() ->
 cleanup_refresh_only_ins_test() ->
     AllKeys = lists:sort(maps:to_list(maps:from_list([{rand:uniform(5000), rand:uniform(5000)} || _ <- lists:seq(1, 2000)]))),
     InsertKeys = [{6000, 6}, {7000, 7}, {8000, 8}],
-    #{inserts := Ins, deletes := Dels, differences := Diffs} = complete_cleanup_refresh(AllKeys ++ InsertKeys, AllKeys, 2000),
+    {#{inserts := Ins, deletes := Dels, differences := Diffs}, _} = complete_cleanup_refresh(AllKeys ++ InsertKeys, AllKeys, 2000),
     ?assertEqual([], Diffs),
     ?assertEqual([6000, 7000, 8000], Ins),
     ?assertEqual([], Dels). 
 
 cleanup_refresh_no_op_test() ->
     AllKeys = lists:sort(maps:to_list(maps:from_list([{rand:uniform(5000), rand:uniform(5000)} || _ <- lists:seq(1, 2000)]))),
-    #{inserts := Ins, deletes := Dels, differences := Diffs} = complete_cleanup_refresh(AllKeys, AllKeys, 2000),
+    {#{inserts := Ins, deletes := Dels, differences := Diffs}, _} = complete_cleanup_refresh(AllKeys, AllKeys, 2000),
     ?assertEqual([], Diffs),
     ?assertEqual([], Ins),
     ?assertEqual([], Dels).
@@ -869,7 +885,7 @@ cleanup_refresh_no_op_test() ->
 cleanup_refresh_no_diff_test() ->
     AllSrcKeys = lists:sort(maps:to_list(maps:from_list([{rand:uniform(5000), 1} || _ <- lists:seq(1, 2000)]))),
     AllDstKeys = lists:sort(maps:to_list(maps:from_list([{rand:uniform(5000), 1} || _ <- lists:seq(1, 2000)]))),
-    #{differences := Diffs} = complete_cleanup_refresh(AllSrcKeys, AllDstKeys, 2000),
+    {#{differences := Diffs}, _} = complete_cleanup_refresh(AllSrcKeys, AllDstKeys, 2000),
     ?assertEqual([], Diffs).
 
 -endif.

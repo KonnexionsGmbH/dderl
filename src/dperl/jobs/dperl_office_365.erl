@@ -24,7 +24,7 @@
 
 % dperl_strategy_scr export
 -export([connect_check_src/1, get_source_events/2, connect_check_dst/1,
-         do_cleanup/2, do_refresh/2, 
+         do_cleanup/5, do_refresh/2, load_src_after_key/3, load_dst_after_key/3,
          fetch_src/2, fetch_dst/2, delete_dst/2, insert_dst/3,
          update_dst/3, report_status/3]).
 
@@ -36,6 +36,8 @@ get_token_info() ->
 
 set_token_info(TokenInfo) when is_map(TokenInfo) ->
     set_token_info(imem_json:encode(TokenInfo));
+set_token_info(TokenInfo) when is_list(TokenInfo) ->
+    set_token_info(list_to_binary(TokenInfo));
 set_token_info(TokenInfo) when is_binary(TokenInfo) ->
     dperl_dal:create_check_channel(<<"avatar">>),
     dperl_dal:write_channel(<<"avatar">>, ["office365","token"], TokenInfo).
@@ -58,7 +60,7 @@ get_access_token(Code) ->
     ContentType = "application/x-www-form-urlencoded",
     case httpc:request(post, {TUrl, "", ContentType, Body}, [], []) of
         {ok, {_, _, TokenInfo}} ->
-            set_token_info(list_to_binary(TokenInfo)),
+            set_token_info(TokenInfo),
             ok;
         {error, Error} ->
             ?Error("Fetching access token : ~p", [Error]),
@@ -96,9 +98,15 @@ connect_check_dst(State) -> {ok, State}.
 
 do_refresh(_State, _BulkSize) -> {error, cleanup_only}.
 
-fetch_src({_Key, Value}, _State) -> Value.
+fetch_src(Key, #state{api_url = ApiUrl} = State) ->
+    Id = Key -- State#state.key_prefix,
+    FetchUrl = erlang:iolist_to_binary([ApiUrl, Id]),
+    case exec_req(FetchUrl, State#state.access_token) of
+        Value when is_map(Value) -> Value;
+        {error, Error} -> {error, Error, State}
+    end.
 
-fetch_dst({Key, _}, State) ->
+fetch_dst(Key, State) ->
     dperl_dal:read_channel(State#state.channel, Key).
 
 insert_dst(Key, Val, State) ->
@@ -106,18 +114,45 @@ insert_dst(Key, Val, State) ->
 
 report_status(_Key, _Status, _State) -> no_op.
 
-do_cleanup(State, BlkCount) ->
-    case fetch_contacts(State, BlkCount) of
-        {ok, State1} ->
-            {ok, State1};
-        {ok, finish, State1} ->
-            {ok, finish, State1};
+load_dst_after_key(CurKey, BlkCount, #state{channel = Channel}) ->
+    dperl_dal:read_gt(Channel, CurKey, BlkCount).
+
+load_src_after_key(CurKey, BlkCount, #state{fetch_url = undefined} = State) ->
+    % https://graph.microsoft.com/v1.0/me/contacts/?$top=100&$select=displayName&orderby=displayName
+    UrlParams = url_enc_params(#{"$top" => integer_to_list(BlkCount), "$orderby" => "id"}),
+    ContactsUrl = erlang:iolist_to_binary([State#state.api_url, "?", UrlParams]),
+    load_src_after_key(CurKey, BlkCount, State#state{fetch_url = ContactsUrl});
+load_src_after_key(_CurKey, _BlkCount, #state{fetch_url = FetchUrl, key_prefix = KeyPrefix} = State) ->
+    case exec_req(FetchUrl, State#state.access_token) of
+        #{<<"@odata.nextLink">> := NextLink, <<"value">> := Contacts} ->
+            {ok, format_contacts(Contacts, KeyPrefix), State#state{fetch_url = NextLink}};
+        #{<<"value">> := Contacts} ->
+            {ok, format_contacts(Contacts, KeyPrefix), State#state{fetch_url = undefined}};
         {error, unauthorized} ->
-            ?Info("Access token has been expired"),
-            {ok, State#state{is_connected = false}};
+            {error, unauthorized, State#state{is_connected = false}};
         {error, Error} ->
-            {error, Error, State#state{is_connected = false}}
+            {error, Error, State}
     end.
+
+do_cleanup(Deletes, Inserts, Diffs, IsFinished, State) ->
+    NewState = State#state{infos = Inserts ++ Diffs ++ Deletes},
+    if IsFinished -> {ok, finish, NewState};
+       true -> {ok, NewState}
+    end.
+
+
+% do_cleanup(State, BlkCount) ->
+%     case fetch_contacts(State, BlkCount) of
+%         {ok, State1} ->
+%             {ok, State1};
+%         {ok, finish, State1} ->
+%             {ok, finish, State1};
+%         {error, unauthorized} ->
+%             ?Info("Access token has been expired"),
+%             {ok, State#state{is_connected = false}};
+%         {error, Error} ->
+%             {error, Error, State#state{is_connected = false}}
+%     end.
 
 delete_dst(Key, #state{channel = Channel} = State) ->
     ?JInfo("Deleting : ~p", [Key]),
@@ -178,20 +213,20 @@ terminate(Reason, _State) ->
 
 %% private functions
 
-fetch_contacts(#state{fetch_url = undefined} = State, BlkCount) ->
-    % https://graph.microsoft.com/v1.0/me/contacts/?$top=100&$select=displayName&orderby=displayName
-    UrlParams = url_enc_params(#{"$top" => integer_to_list(BlkCount), "$orderby" => "displayName"}),
-    ContactsUrl = erlang:iolist_to_binary([State#state.api_url, "?", UrlParams]),
-    fetch_contacts(State#state{fetch_url = ContactsUrl}, BlkCount);
-fetch_contacts(#state{fetch_url = FetchUrl, key_prefix = KeyPrefix} = State, _BlkCount) ->
-    case exec_req(FetchUrl, State#state.access_token) of
-        #{<<"@odata.nextLink">> := NextLink, <<"value">> := Contacts} ->
-            {ok, State#state{fetch_url = NextLink, infos = format_contacts(Contacts, KeyPrefix)}};
-        #{<<"value">> := Contacts} ->
-            {ok, finish, State#state{fetch_url = undefined, infos = format_contacts(Contacts, KeyPrefix)}};
-        Error ->
-            Error
-end.
+% fetch_contacts(#state{fetch_url = undefined} = State, BlkCount) ->
+%     % https://graph.microsoft.com/v1.0/me/contacts/?$top=100&$select=displayName&orderby=displayName
+%     UrlParams = url_enc_params(#{"$top" => integer_to_list(BlkCount), "$orderby" => "displayName"}),
+%     ContactsUrl = erlang:iolist_to_binary([State#state.api_url, "?", UrlParams]),
+%     fetch_contacts(State#state{fetch_url = ContactsUrl}, BlkCount);
+% fetch_contacts(#state{fetch_url = FetchUrl, key_prefix = KeyPrefix} = State, _BlkCount) ->
+%     case exec_req(FetchUrl, State#state.access_token) of
+%         #{<<"@odata.nextLink">> := NextLink, <<"value">> := Contacts} ->
+%             {ok, State#state{fetch_url = NextLink, infos = format_contacts(Contacts, KeyPrefix)}};
+%         #{<<"value">> := Contacts} ->
+%             {ok, finish, State#state{fetch_url = undefined, infos = format_contacts(Contacts, KeyPrefix)}};
+%         Error ->
+%             Error
+% end.
 
 format_contacts([], _) -> [];
 format_contacts([#{<<"id">> := IdBin} = Contact | Contacts], KeyPrefix) ->
