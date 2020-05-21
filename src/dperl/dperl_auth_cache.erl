@@ -2,6 +2,8 @@
 
 -behaviour(gen_server).
 
+-include("dperl.hrl").
+
 -export([start_link/0,
          set_enc_hash/3,
          get_enc_hash/1,
@@ -21,8 +23,10 @@ start_link() ->
 init([]) ->
     {ok, #{}}.
 
-handle_call({setEncHash, JobOrServiceName, User, EncHash}, _From, State) ->
-    {reply, ok, State#{JobOrServiceName => {User, EncHash}}};
+handle_call({setEncHash, #dperlJob{name = JobName}, User, EncHash}, _From, State) ->
+    {reply, ok, State#{JobName => {User, EncHash}}};
+handle_call({setEncHash, #dperlService{name = ServiceName}, User, EncHash}, _From, State) ->
+    {reply, ok, State#{ServiceName => {User, EncHash}}};
 handle_call({getEncHash, JobOrServiceName}, _From, State) ->
     case State of
         #{JobOrServiceName := {User, EncHash}} ->
