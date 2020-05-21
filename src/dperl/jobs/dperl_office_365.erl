@@ -20,7 +20,7 @@
 -export([get_authorize_url/1, get_access_token/1]).
 
 -record(state, {name, channel, is_connected = true, access_token, api_url,
-                infos = [], key_prefix, fetch_url}).
+                contacts = [], key_prefix, fetch_url, cl_contacts = []}).
 
 % dperl_strategy_scr export
 -export([connect_check_src/1, get_source_events/2, connect_check_dst/1,
@@ -89,21 +89,19 @@ connect_check_src(#state{is_connected = false} = State) ->
             {ok, State}
     end.
 
-get_source_events(#state{infos = []} = State, _BulkSize) ->
+get_source_events(#state{contacts = []} = State, _BulkSize) ->
     {ok, sync_complete, State};
-get_source_events(#state{infos = Infos} = State, _BulkSize) ->
-    {ok, Infos, State#state{infos = []}}.
+get_source_events(#state{contacts = Contacts} = State, _BulkSize) ->
+    {ok, Contacts, State#state{contacts = []}}.
 
 connect_check_dst(State) -> {ok, State}.
 
 do_refresh(_State, _BulkSize) -> {error, cleanup_only}.
 
-fetch_src(Key, #state{api_url = ApiUrl} = State) ->
-    Id = Key -- State#state.key_prefix,
-    FetchUrl = erlang:iolist_to_binary([ApiUrl, Id]),
-    case exec_req(FetchUrl, State#state.access_token) of
-        Value when is_map(Value) -> Value;
-        {error, Error} -> {error, Error, State}
+fetch_src(Key, #state{cl_contacts = Contacts}) ->
+    case lists:keyfind(Key, 1, Contacts) of
+        {Key, Contact} -> Contact;
+        false -> ?NOT_FOUND
     end.
 
 fetch_dst(Key, State) ->
@@ -119,43 +117,30 @@ load_dst_after_key(CurKey, BlkCount, #state{channel = Channel}) ->
 
 load_src_after_key(CurKey, BlkCount, #state{fetch_url = undefined} = State) ->
     % https://graph.microsoft.com/v1.0/me/contacts/?$top=100&$select=displayName&orderby=displayName
-    UrlParams = url_enc_params(#{"$top" => integer_to_list(BlkCount), "$orderby" => "id"}),
+    UrlParams = url_enc_params(#{"$top" => integer_to_list(BlkCount)}),
     ContactsUrl = erlang:iolist_to_binary([State#state.api_url, "?", UrlParams]),
     load_src_after_key(CurKey, BlkCount, State#state{fetch_url = ContactsUrl});
-load_src_after_key(_CurKey, _BlkCount, #state{fetch_url = FetchUrl, key_prefix = KeyPrefix} = State) ->
-    case exec_req(FetchUrl, State#state.access_token) of
-        #{<<"@odata.nextLink">> := NextLink, <<"value">> := Contacts} ->
-            {ok, format_contacts(Contacts, KeyPrefix), State#state{fetch_url = NextLink}};
-        #{<<"value">> := Contacts} ->
-            {ok, format_contacts(Contacts, KeyPrefix), State#state{fetch_url = undefined}};
+load_src_after_key(CurKey, BlkCount, #state{cl_contacts = [], key_prefix = KeyPrefix,
+                                            access_token = AccessToken, fetch_url = FetchUrl} = State) ->
+    % fetch all contacts
+    case fetch_all_contacts(FetchUrl, AccessToken, KeyPrefix) of
+        {ok, Contacts} ->
+            load_src_after_key(CurKey, BlkCount, State#state{cl_contacts = Contacts});
         {error, unauthorized} ->
             {error, unauthorized, State#state{is_connected = false}};
         {error, Error} ->
             {error, Error, State}
-    end.
+    end;
+load_src_after_key(CurKey, BlkCount, #state{cl_contacts = Contacts} = State) ->
+    {ok, get_contacts_gt(CurKey, BlkCount, Contacts), State}.
 
 do_cleanup(Deletes, Inserts, Diffs, IsFinished, State) ->
-    NewState = State#state{infos = Inserts ++ Diffs ++ Deletes},
-    if IsFinished -> {ok, finish, NewState};
+    NewState = State#state{contacts = Inserts ++ Diffs ++ Deletes},
+    if IsFinished -> {ok, finish, NewState#state{cl_contacts = []}};
        true -> {ok, NewState}
     end.
 
-
-% do_cleanup(State, BlkCount) ->
-%     case fetch_contacts(State, BlkCount) of
-%         {ok, State1} ->
-%             {ok, State1};
-%         {ok, finish, State1} ->
-%             {ok, finish, State1};
-%         {error, unauthorized} ->
-%             ?Info("Access token has been expired"),
-%             {ok, State#state{is_connected = false}};
-%         {error, Error} ->
-%             {error, Error, State#state{is_connected = false}}
-%     end.
-
 delete_dst(Key, #state{channel = Channel} = State) ->
-    ?JInfo("Deleting : ~p", [Key]),
     dperl_dal:remove_from_channel(Channel, Key),
     {false, State}.
 
@@ -213,26 +198,39 @@ terminate(Reason, _State) ->
 
 %% private functions
 
-% fetch_contacts(#state{fetch_url = undefined} = State, BlkCount) ->
-%     % https://graph.microsoft.com/v1.0/me/contacts/?$top=100&$select=displayName&orderby=displayName
-%     UrlParams = url_enc_params(#{"$top" => integer_to_list(BlkCount), "$orderby" => "displayName"}),
-%     ContactsUrl = erlang:iolist_to_binary([State#state.api_url, "?", UrlParams]),
-%     fetch_contacts(State#state{fetch_url = ContactsUrl}, BlkCount);
-% fetch_contacts(#state{fetch_url = FetchUrl, key_prefix = KeyPrefix} = State, _BlkCount) ->
-%     case exec_req(FetchUrl, State#state.access_token) of
-%         #{<<"@odata.nextLink">> := NextLink, <<"value">> := Contacts} ->
-%             {ok, State#state{fetch_url = NextLink, infos = format_contacts(Contacts, KeyPrefix)}};
-%         #{<<"value">> := Contacts} ->
-%             {ok, finish, State#state{fetch_url = undefined, infos = format_contacts(Contacts, KeyPrefix)}};
-%         Error ->
-%             Error
-% end.
-
 format_contacts([], _) -> [];
 format_contacts([#{<<"id">> := IdBin} = Contact | Contacts], KeyPrefix) ->
     Id = binary_to_list(IdBin),
     Key = KeyPrefix ++ [Id],
     [{Key, Contact} | format_contacts(Contacts, KeyPrefix)].
+
+fetch_all_contacts(Url, AccessToken, KeyPrefix) ->
+    fetch_all_contacts(Url, AccessToken, KeyPrefix, []).
+
+fetch_all_contacts(Url, AccessToken, KeyPrefix, AccContacts) ->
+    ?JTrace("Fetching contacts with url : ~s", [Url]),
+    ?JTrace("Fetched contacts : ~p", [length(AccContacts)]),
+    case exec_req(Url, AccessToken) of
+        #{<<"@odata.nextLink">> := NextUrl, <<"value">> := Contacts} ->
+            FContacts = format_contacts(Contacts, KeyPrefix),
+            fetch_all_contacts(NextUrl, AccessToken, KeyPrefix, lists:append(FContacts, AccContacts));
+        #{<<"value">> := Contacts} ->
+            FContacts = format_contacts(Contacts, KeyPrefix),
+            {ok, lists:keysort(1, lists:append(FContacts, AccContacts))};
+        {error, Error} ->
+            {error, Error}
+    end.
+
+get_contacts_gt(CurKey, BlkCount, Contacts) ->
+    get_contacts_gt(CurKey, BlkCount, Contacts, []).
+    
+get_contacts_gt(_CurKey, _BlkCount, [], Acc) -> lists:reverse(Acc);
+get_contacts_gt(_CurKey, BlkCount, _Contacts, Acc) when length(Acc) == BlkCount ->
+    lists:reverse(Acc);
+get_contacts_gt(CurKey, BlkCount, [{Key, _} | Contacts], Acc) when Key =< CurKey ->
+    get_contacts_gt(CurKey, BlkCount, Contacts, Acc);
+get_contacts_gt(CurKey, BlkCount, [Contact | Contacts], Acc) ->
+    get_contacts_gt(CurKey, BlkCount, Contacts, [Contact | Acc]).
 
 exec_req(Url, AccessToken) when is_binary(Url) ->
     exec_req(binary_to_list(Url), AccessToken);
