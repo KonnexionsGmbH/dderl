@@ -20,7 +20,8 @@
 -export([get_authorize_url/1, get_access_token/1]).
 
 -record(state, {name, channel, is_connected = true, access_token, api_url,
-                contacts = [], key_prefix, fetch_url, cl_contacts = []}).
+                contacts = [], key_prefix, fetch_url, cl_contacts = [],
+                is_cleanup_finished = true}).
 
 % dperl_strategy_scr export
 -export([connect_check_src/1, get_source_events/2, connect_check_dst/1,
@@ -120,12 +121,12 @@ load_src_after_key(CurKey, BlkCount, #state{fetch_url = undefined} = State) ->
     UrlParams = url_enc_params(#{"$top" => integer_to_list(BlkCount)}),
     ContactsUrl = erlang:iolist_to_binary([State#state.api_url, "?", UrlParams]),
     load_src_after_key(CurKey, BlkCount, State#state{fetch_url = ContactsUrl});
-load_src_after_key(CurKey, BlkCount, #state{cl_contacts = [], key_prefix = KeyPrefix,
+load_src_after_key(CurKey, BlkCount, #state{is_cleanup_finished = true, key_prefix = KeyPrefix,
                                             access_token = AccessToken, fetch_url = FetchUrl} = State) ->
     % fetch all contacts
     case fetch_all_contacts(FetchUrl, AccessToken, KeyPrefix) of
         {ok, Contacts} ->
-            load_src_after_key(CurKey, BlkCount, State#state{cl_contacts = Contacts});
+            load_src_after_key(CurKey, BlkCount, State#state{cl_contacts = Contacts, is_cleanup_finished = false});
         {error, unauthorized} ->
             {error, unauthorized, State#state{is_connected = false}};
         {error, Error} ->
@@ -136,7 +137,7 @@ load_src_after_key(CurKey, BlkCount, #state{cl_contacts = Contacts} = State) ->
 
 do_cleanup(Deletes, Inserts, Diffs, IsFinished, State) ->
     NewState = State#state{contacts = Inserts ++ Diffs ++ Deletes},
-    if IsFinished -> {ok, finish, NewState#state{cl_contacts = []}};
+    if IsFinished -> {ok, finish, NewState#state{is_cleanup_finished = true}};
        true -> {ok, NewState}
     end.
 
