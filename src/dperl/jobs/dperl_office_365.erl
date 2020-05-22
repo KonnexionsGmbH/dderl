@@ -71,7 +71,7 @@ get_access_token(Code) ->
 connect_check_src(#state{is_connected = true} = State) ->
     {ok, State};
 connect_check_src(#state{is_connected = false} = State) ->
-    ?Info("Refreshing access token"),
+    ?JTrace("Refreshing access token"),
     #{token_url := TUrl, client_id := ClientId, client_secret := Secret,
       scope := Scope} = get_office_365_auth_config(),
     #{<<"refresh_token">> := RefreshToken} = get_token_info(),
@@ -84,10 +84,11 @@ connect_check_src(#state{is_connected = false} = State) ->
             TokenInfo = imem_json:decode(list_to_binary(TokenBody), [return_maps]),
             set_token_info(TokenBody),
             #{<<"access_token">> := AccessToken} = TokenInfo,
+            ?JInfo("new access token fetched"),
             {ok, State#state{access_token = AccessToken, is_connected = true}};
         Error ->
             ?JError("Unexpected response : ~p", [Error]),
-            {ok, State}
+            {error, Error, State}
     end.
 
 get_source_events(#state{contacts = []} = State, _BulkSize) ->
@@ -128,7 +129,12 @@ load_src_after_key(CurKey, BlkCount, #state{is_cleanup_finished = true, key_pref
         {ok, Contacts} ->
             load_src_after_key(CurKey, BlkCount, State#state{cl_contacts = Contacts, is_cleanup_finished = false});
         {error, unauthorized} ->
-            {error, unauthorized, State#state{is_connected = false}};
+            case connect_check_src(State#state{is_connected = false}) of
+                {ok, State1} ->
+                    load_src_after_key(CurKey, BlkCount, State1);
+                {error, Error, State1} ->
+                    {error, Error, State1}
+            end;
         {error, Error} ->
             {error, Error, State}
     end;
