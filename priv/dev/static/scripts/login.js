@@ -30,8 +30,15 @@ const state = url.searchParams.get('state');
 if(code) {
     dderlState.xsrfToken = state;
     const body = { 'office_365_code': { 'code': code, 'state': state } };
-    ajaxCall(null, 'office_365_code', body, 'office_365_code', function () { window.close(); },
-        function () { alert('error!!!!'); });
+    ajaxCall(null, 'office_365_code', body, 'office_365_code',
+        function () {
+            window.close();
+        },
+        function (error) {
+            alert('Error fetching access token : ' + error);
+            console.log('Error fetching access token', error);
+            window.close();
+        });
 } else {
     const error = url.searchParams.get('error');
     const errorDesc = url.searchParams.get('error_description');
@@ -419,7 +426,7 @@ export function change_login_password(loggedInUser, shouldConnect) {
 }
 
 export function authorize_office() {
-    ajaxCall(null, 'office_365_auth_config', {}, 'office_365_auth_config', function(auth_config) {
+    ajaxCall(null, 'office_365_auth_config', {}, 'office_365_auth_config', function (auth_config) {
         const params = 'scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no,width=500,height=600,left=100,top=100';
         window.open(auth_config.url, 'Office 365 login', params);
     });
