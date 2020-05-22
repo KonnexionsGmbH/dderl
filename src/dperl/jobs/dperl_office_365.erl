@@ -21,7 +21,8 @@
 
 -record(state, {name, channel, is_connected = true, access_token, api_url,
                 contacts = [], key_prefix, fetch_url, cl_contacts = [],
-                is_cleanup_finished = true, push_channel, type = pull}).
+                is_cleanup_finished = true, push_channel, type = pull,
+                audit_start_time = {0,0}, first_sync = true}).
 
 % dperl_strategy_scr export
 -export([connect_check_src/1, get_source_events/2, connect_check_dst/1,
@@ -91,6 +92,21 @@ connect_check_src(#state{is_connected = false} = State) ->
             {error, Error, State}
     end.
 
+get_source_events(#state{audit_start_time = LastStartTime, type = push,
+                         push_channel = PChannel} = State, BulkSize) ->
+    case dperl_dal:read_audit_keys(PChannel, LastStartTime, BulkSize) of
+        {LastStartTime, LastStartTime, []} ->
+            if State#state.first_sync == true -> 
+                    ?JInfo("Audit rollup is complete"),
+                    {ok, sync_complete, State#state{first_sync = false}};
+                true -> {ok, sync_complete, State}
+            end;
+        {_StartTime, NextStartTime, []} ->
+            {ok, [], State#state{audit_start_time = NextStartTime}};
+        {_StartTime, NextStartTime, Keys} ->
+            UniqueKeys = lists:delete(undefined, lists:usort(Keys)),
+            {ok, UniqueKeys, State#state{audit_start_time = NextStartTime}}
+    end;
 get_source_events(#state{contacts = []} = State, _BulkSize) ->
     {ok, sync_complete, State};
 get_source_events(#state{contacts = Contacts} = State, _BulkSize) ->
@@ -100,25 +116,72 @@ connect_check_dst(State) -> {ok, State}.
 
 do_refresh(_State, _BulkSize) -> {error, cleanup_only}.
 
-fetch_src(Key, #state{cl_contacts = Contacts}) ->
+fetch_src(Key, #state{type = push} = State) ->
+    dperl_dal:read_channel(State#state.push_channel, Key);
+fetch_src(Key, #state{cl_contacts = Contacts, type = pull}) ->
     case lists:keyfind(Key, 1, Contacts) of
         {Key, Contact} -> Contact;
         false -> ?NOT_FOUND
     end.
 
+fetch_dst(Key, #state{type = push, api_url = ApiUrl} = State) ->
+    Id = Key -- State#state.key_prefix,
+    ContactUrl = erlang:iolist_to_binary([ApiUrl, Id]),
+    case exec_req(ContactUrl, State#state.access_token) of
+        #{<<"id">> := _} = Contact -> Contact;
+        _ -> ?NOT_FOUND
+    end; 
 fetch_dst(Key, State) ->
     dperl_dal:read_channel(State#state.channel, Key).
 
+insert_dst(Key, Val, #state{type = push, api_url = ApiUrl} = State) ->
+    case exec_req(ApiUrl, State#state.access_token, Val, post) of
+        #{<<"id">> := Id} = Contact ->
+            NewKey = State#state.key_prefix ++ [binary_to_list(Id)],
+            ContactBin = imem_json:encode(Contact),
+            dperl_dal:remove_from_channel(State#state.push_channel, Key),
+            dperl_dal:write_channel(State#state.channel, NewKey, ContactBin),
+            dperl_dal:write_channel(State#state.push_channel, NewKey, ContactBin),
+            {false, State};
+        {error, unauthorized} ->
+            reconnect_exec(State, insert_dst, [Key, Val]);
+        {error, Error} ->
+            {error, Error}
+    end;
 insert_dst(Key, Val, State) ->
     update_dst(Key, Val, State).
 
+delete_dst(Key, #state{type = push, api_url = ApiUrl} = State) ->
+    Id = Key -- State#state.key_prefix,
+    ContactUrl = erlang:iolist_to_binary([ApiUrl, Id]),
+    case exec_req(ContactUrl, State#state.access_token, #{}, delete) of
+        ok ->
+            dperl_dal:remove_from_channel(State#state.channel, Key),
+            {false, State};
+        {error, unauthorized} ->
+            reconnect_exec(State, delete_dst, [Key]);
+        Error ->
+            Error
+    end;
 delete_dst(Key, #state{channel = Channel} = State) ->
     dperl_dal:remove_from_channel(Channel, Key),
     dperl_dal:remove_from_channel(State#state.push_channel, Key),
     {false, State}.
 
-update_dst({Key, _}, Val, State) ->
-    update_dst(Key, Val, State);
+update_dst(Key, Val, #state{type = push, api_url = ApiUrl} = State) ->
+    Id = Key -- State#state.key_prefix,
+    ContactUrl = erlang:iolist_to_binary([ApiUrl, Id]),
+    case exec_req(ContactUrl, State#state.access_token, Val, patch) of
+        #{<<"id">> := _} = Contact ->
+            ContactBin = imem_json:encode(Contact),
+            dperl_dal:write_channel(State#state.channel, Key, ContactBin),
+            dperl_dal:write_channel(State#state.push_channel, Key, ContactBin),
+            {false, State};
+        {error, unauthorized} ->
+            reconnect_exec(State, update_dst, [Key, Val]);
+        {error, Error} ->
+            {error, Error}
+    end;
 update_dst(Key, Val, #state{channel = Channel} = State) when is_binary(Val) ->
     dperl_dal:write_channel(Channel, Key, Val),
     dperl_dal:write_channel(State#state.push_channel, Key, Val),
@@ -143,17 +206,20 @@ load_src_after_key(CurKey, BlkCount, #state{is_cleanup_finished = true, key_pref
         {ok, Contacts} ->
             load_src_after_key(CurKey, BlkCount, State#state{cl_contacts = Contacts, is_cleanup_finished = false});
         {error, unauthorized} ->
-            case connect_check_src(State#state{is_connected = false}) of
-                {ok, State1} ->
-                    load_src_after_key(CurKey, BlkCount, State1);
-                {error, Error, State1} ->
-                    {error, Error, State1}
-            end;
+            reconnect_exec(State, load_src_after_key, [CurKey, BlkCount]);
         {error, Error} ->
             {error, Error, State}
     end;
 load_src_after_key(CurKey, BlkCount, #state{cl_contacts = Contacts} = State) ->
     {ok, get_contacts_gt(CurKey, BlkCount, Contacts), State}.
+
+reconnect_exec(State, Fun, Args) ->
+    case connect_check_src(State#state{is_connected = false}) of
+        {ok, State1} ->
+            erlang:apply(?MODULE, Fun, Args ++ [State1]);
+        {error, Error, State1} ->
+            {error, Error, State1}
+    end.
 
 do_cleanup(Deletes, Inserts, Diffs, IsFinished, State) ->
     NewState = State#state{contacts = Inserts ++ Diffs ++ Deletes},
@@ -166,7 +232,7 @@ get_status(#state{}) -> #{}.
 init_state(_) -> #state{}.
 
 init({#dperlJob{name=Name, dstArgs = #{channel := Channel, push_channel := PChannel},
-                srcArgs = #{api_url := ApiUrl} = SrcArgs}, State}) ->
+                srcArgs = #{api_url := ApiUrl} = SrcArgs, args = Args}, State}) ->
     % case dperl_auth_cache:get_enc_hash(Name) of
     %     undefined ->
     %         ?JError("Encryption hash is not avaialable"),
@@ -179,11 +245,12 @@ init({#dperlJob{name=Name, dstArgs = #{channel := Channel, push_channel := PChan
             ChannelBin = dperl_dal:to_binary(Channel),
             PChannelBin = dperl_dal:to_binary(PChannel),
             KeyPrefix = maps:get(key_prefix, SrcArgs, []),
+            Type = maps:get(type, Args, pull),
             dperl_dal:create_check_channel(ChannelBin),
             dperl_dal:create_check_channel(PChannelBin),
             {ok, State#state{channel = ChannelBin, name = Name, api_url = ApiUrl,
                              key_prefix = KeyPrefix, access_token = AccessToken,
-                             push_channel = PChannelBin}};
+                             push_channel = PChannelBin, type = Type}};
         _ ->
             ?JError("Access token not found"),
             {stop, badarg}                    
@@ -256,6 +323,29 @@ exec_req(Url, AccessToken) ->
         Error ->
             {error, Error}
     end.
+
+exec_req(Url, AccessToken, Body, Method) when is_binary(Url) ->
+    exec_req(binary_to_list(Url), AccessToken, Body, Method);
+exec_req(Url, AccessToken, Body, Method) ->
+    AuthHeader = [{"Authorization", "Bearer " ++ binary_to_list(AccessToken)}],
+    % Headers = [AuthHeader, {"Contnet-type", "application/json"}],
+    case httpc:request(Method, {Url, AuthHeader, "application/json", imem_json:encode(Body)}, [], []) of
+        {ok, {{_, 201, _}, _, Result}} ->
+            % create/post result
+            imem_json:decode(list_to_binary(Result), [return_maps]);
+        {ok, {{_, 200, _}, _, Result}} ->
+            % update/patch result
+            imem_json:decode(list_to_binary(Result), [return_maps]);
+        {ok,{{_, 204, _}, _, _}} ->
+            % delete result
+            ok;
+        {ok, {{_, 401, _}, _, Error}} ->
+            ?JError("Unauthorized body : ~s", [Error]),
+            {error, unauthorized};
+        Error ->
+            {error, Error}
+    end.
+    
 
 url_enc_params(Params) ->
     EParams = maps:fold(
