@@ -21,7 +21,7 @@
 
 -record(state, {name, channel, is_connected = true, access_token, api_url,
                 contacts = [], key_prefix, fetch_url, cl_contacts = [],
-                is_cleanup_finished = true}).
+                is_cleanup_finished = true, push_channel, type = pull}).
 
 % dperl_strategy_scr export
 -export([connect_check_src/1, get_source_events/2, connect_check_dst/1,
@@ -112,6 +112,20 @@ fetch_dst(Key, State) ->
 insert_dst(Key, Val, State) ->
     update_dst(Key, Val, State).
 
+delete_dst(Key, #state{channel = Channel} = State) ->
+    dperl_dal:remove_from_channel(Channel, Key),
+    dperl_dal:remove_from_channel(State#state.push_channel, Key),
+    {false, State}.
+
+update_dst({Key, _}, Val, State) ->
+    update_dst(Key, Val, State);
+update_dst(Key, Val, #state{channel = Channel} = State) when is_binary(Val) ->
+    dperl_dal:write_channel(Channel, Key, Val),
+    dperl_dal:write_channel(State#state.push_channel, Key, Val),
+    {false, State};
+update_dst(Key, Val, State) ->
+    update_dst(Key, imem_json:encode(Val), State).
+
 report_status(_Key, _Status, _State) -> no_op.
 
 load_dst_after_key(CurKey, BlkCount, #state{channel = Channel}) ->
@@ -147,23 +161,11 @@ do_cleanup(Deletes, Inserts, Diffs, IsFinished, State) ->
        true -> {ok, NewState}
     end.
 
-delete_dst(Key, #state{channel = Channel} = State) ->
-    dperl_dal:remove_from_channel(Channel, Key),
-    {false, State}.
-
-update_dst({Key, _}, Val, State) ->
-    update_dst(Key, Val, State);
-update_dst(Key, Val, #state{channel = Channel} = State) when is_binary(Val) ->
-    dperl_dal:write_channel(Channel, Key, Val),
-    {false, State};
-update_dst(Key, Val, State) ->
-    update_dst(Key, imem_json:encode(Val), State).
-
 get_status(#state{}) -> #{}.
 
 init_state(_) -> #state{}.
 
-init({#dperlJob{name=Name, dstArgs = #{channel := Channel},
+init({#dperlJob{name=Name, dstArgs = #{channel := Channel, push_channel := PChannel},
                 srcArgs = #{api_url := ApiUrl} = SrcArgs}, State}) ->
     % case dperl_auth_cache:get_enc_hash(Name) of
     %     undefined ->
@@ -175,10 +177,13 @@ init({#dperlJob{name=Name, dstArgs = #{channel := Channel},
     case get_token_info() of
         #{<<"access_token">> := AccessToken} ->
             ChannelBin = dperl_dal:to_binary(Channel),
+            PChannelBin = dperl_dal:to_binary(PChannel),
             KeyPrefix = maps:get(key_prefix, SrcArgs, []),
             dperl_dal:create_check_channel(ChannelBin),
+            dperl_dal:create_check_channel(PChannelBin),
             {ok, State#state{channel = ChannelBin, name = Name, api_url = ApiUrl,
-                             key_prefix = KeyPrefix, access_token = AccessToken}};
+                             key_prefix = KeyPrefix, access_token = AccessToken,
+                             push_channel = PChannelBin}};
         _ ->
             ?JError("Access token not found"),
             {stop, badarg}                    
