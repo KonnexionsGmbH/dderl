@@ -128,7 +128,8 @@ fetch_dst(Key, #state{type = push, api_url = ApiUrl} = State) ->
     Id = Key -- State#state.key_prefix,
     ContactUrl = erlang:iolist_to_binary([ApiUrl, Id]),
     case exec_req(ContactUrl, State#state.access_token) of
-        #{<<"id">> := _} = Contact -> Contact;
+        #{<<"id">> := _} = Contact ->
+            format_contact(Contact);
         _ -> ?NOT_FOUND
     end; 
 fetch_dst(Key, State) ->
@@ -138,7 +139,7 @@ insert_dst(Key, Val, #state{type = push, api_url = ApiUrl} = State) ->
     case exec_req(ApiUrl, State#state.access_token, Val, post) of
         #{<<"id">> := Id} = Contact ->
             NewKey = State#state.key_prefix ++ [binary_to_list(Id)],
-            ContactBin = imem_json:encode(Contact),
+            ContactBin = imem_json:encode(format_contact(Contact)),
             dperl_dal:remove_from_channel(State#state.push_channel, Key),
             dperl_dal:write_channel(State#state.channel, NewKey, ContactBin),
             dperl_dal:write_channel(State#state.push_channel, NewKey, ContactBin),
@@ -173,7 +174,7 @@ update_dst(Key, Val, #state{type = push, api_url = ApiUrl} = State) ->
     ContactUrl = erlang:iolist_to_binary([ApiUrl, Id]),
     case exec_req(ContactUrl, State#state.access_token, Val, patch) of
         #{<<"id">> := _} = Contact ->
-            ContactBin = imem_json:encode(Contact),
+            ContactBin = imem_json:encode(format_contact(Contact)),
             dperl_dal:write_channel(State#state.channel, Key, ContactBin),
             dperl_dal:write_channel(State#state.push_channel, Key, ContactBin),
             {false, State};
@@ -281,7 +282,10 @@ format_contacts([], _) -> [];
 format_contacts([#{<<"id">> := IdBin} = Contact | Contacts], KeyPrefix) ->
     Id = binary_to_list(IdBin),
     Key = KeyPrefix ++ [Id],
-    [{Key, Contact} | format_contacts(Contacts, KeyPrefix)].
+    [{Key, format_contact(Contact)} | format_contacts(Contacts, KeyPrefix)].
+
+format_contact(Contact) ->
+    maps:without([<<"@odata.etag">>, <<"@odata.context">>], Contact).
 
 fetch_all_contacts(Url, AccessToken, KeyPrefix) ->
     fetch_all_contacts(Url, AccessToken, KeyPrefix, []).
