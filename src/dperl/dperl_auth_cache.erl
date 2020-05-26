@@ -7,7 +7,8 @@
 -export([start_link/0,
          set_enc_hash/3,
          get_enc_hash/1,
-         set_enc_hash_locally/3]).
+         set_enc_hash_locally/3,
+         auth_cache_trigger_fun/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -52,3 +53,8 @@ set_enc_hash_locally(JobOrServiceName, User, EncHash) ->
 
 get_enc_hash(JobOrServiceName) ->
     gen_server:call(?MODULE, {getEncHash, JobOrServiceName}).
+
+auth_cache_trigger_fun() ->
+    "fun(OldRec,NewRec,Table,User,TrOpts) ->
+        dperl_auth_cache:set_enc_hash(NewRec, User, proplists:get_value(encHash, TrOpts, undefined))
+    end.".
