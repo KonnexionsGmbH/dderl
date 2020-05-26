@@ -26,16 +26,22 @@ window.loginCb = loginCb;
 // office 365 callback handler
 const url = new URL(window.location.href);
 const code = url.searchParams.get('code');
-const state = url.searchParams.get('state');
-if(code) {
-    dderlState.xsrfToken = state;
-    const body = { 'office_365_code': { 'code': code, 'state': state } };
-    ajaxCall(null, 'office_365_code', body, 'office_365_code', function () { window.close(); },
-        function () { alert('error!!!!'); });
-} else {
-    const error = url.searchParams.get('error');
+const error = url.searchParams.get('error');
+const state = JSON.parse(url.searchParams.get('state'));
+if (code) {
+    dderlState.xsrfToken = state.xsrfToken;
+    if (state.type == 'ouraRing') {
+        const body = { 'oura_ring_code': { 'code': code, 'state': state } };
+        ajaxCall(null, 'oura_ring_code', body, 'oura_ring_code', function () { window.close(); },
+            function () { alert('error!!!!'); });
+    } else {
+        const body = { 'office_365_code': { 'code': code, 'state': state } };
+        ajaxCall(null, 'office_365_code', body, 'office_365_code', function () { window.close(); },
+            function () { alert('error!!!!'); });
+    }
+} else if (error) {
     const errorDesc = url.searchParams.get('error_description');
-    alert_jq('Login error : ' + error + ' : ' + errorDesc);
+    alert('Login error : ' + error + ' : ' + errorDesc);
     window.close();
 }
 // office 365 callback handler end
@@ -422,5 +428,12 @@ export function authorize_office() {
     ajaxCall(null, 'office_365_auth_config', {}, 'office_365_auth_config', function(auth_config) {
         const params = 'scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no,width=500,height=600,left=100,top=100';
         window.open(auth_config.url, 'Office 365 login', params);
+    });
+}
+
+export function authorize_oura() {
+    ajaxCall(null, 'oura_ring_auth_config', {}, 'oura_ring_auth_config', function(auth_config) {
+        const params = 'scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no,width=500,height=600,left=100,top=100';
+        window.open(auth_config.url, 'Oura Ring login', params);
     });
 }

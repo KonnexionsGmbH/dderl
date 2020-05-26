@@ -10,94 +10,89 @@
           "Days to be shifted backwards for starting the job")
        ).
 
+-define(OURA_RING_AUTH_CONFIG,
+        ?GET_CONFIG(ouraRingAuthConfig,[],
+            #{auth_url =>"https://cloud.ouraring.com/oauth/authorize?response_type=code",
+              client_id => "12345", redirect_uri => "https://localhost:8443/dderl/",
+              client_secret => "12345", grant_type => "authorization_code",
+              token_url => "https://cloud.ouraring.com/oauth/token",
+              scope => "email personal daily"},
+            "Oura Ring auth config")).
+
 % dperl_worker exports
 -export([init/1, terminate/2, handle_call/3, handle_cast/2, handle_info/2,
          get_status/1, init_state/1]).
 
--record(state, {name, channel, client_id, client_secret, password, email,
-                cb_uri, is_connected = false, access_token, api_url, oauth_url,
+-export([get_authorize_url/1, get_access_token/1]).
+
+-record(state, {name, channel, is_connected = true, access_token, api_url,
                 last_sleep_day, last_activity_day, last_readiness_day,
-                infos = [], auth_time, auth_expiry, key_prefix}).
+                infos = [], key_prefix}).
 
 % dperl_strategy_scr export
 -export([connect_check_src/1, get_source_events/2, connect_check_dst/1,
-         do_cleanup/2, do_refresh/2, 
-         fetch_src/2, fetch_dst/2, delete_dst/2, insert_dst/3,
-         update_dst/3, report_status/3]).
+         do_cleanup/2, do_refresh/2, fetch_src/2, fetch_dst/2, delete_dst/2,
+         insert_dst/3, update_dst/3, report_status/3]).
 
-connect_check_src(#state{is_connected = true, auth_expiry = ExpiresIn, auth_time = AuthTime} = State) ->
-    case imem_datatype:sec_diff(AuthTime) of
-        Diff when Diff >= (ExpiresIn - 100) ->
-            % access token will expire in 100 seconds or less
-            connect_check_src(State#state{is_connected = false});
-        _ ->
-            {ok, State}
-    end;
-connect_check_src(#state{is_connected = false, client_id = ClientId, cb_uri = CallbackUri,
-                         client_secret = ClientSecret, password = Password,
-                         email = Email, oauth_url = OauthUrl} = State) ->
-    ?Info("Generating new access token"),
-    httpc:reset_cookies(?MODULE),
-    Params = #{
-        "response_type" => "code",
-        "client_id" => ClientId,
-        "redirect_uri" => edoc_lib:escape_uri(CallbackUri),
-        "scope" => "email+personal+daily",
-        "state" => "test"
-    },
-    Url = OauthUrl ++ "/oauth/authorize?" ++ binary_to_list(url_enc_params(Params)),
-    try
-        {ok, {{"HTTP/1.1",302,"Found"}, RespHeader302, []}} = httpc:request(
-            get, {Url, []}, [{autoredirect, false}], [], ?MODULE),
-        RedirectUri = OauthUrl ++ proplists:get_value("location", RespHeader302),
-        {ok, {{"HTTP/1.1",200,"OK"}, RespHeader, _Body}} = httpc:request(get, {RedirectUri, []}, [{autoredirect, false}], [], ?MODULE),
-        SetCookieHeader = proplists:get_value("set-cookie", RespHeader),
-        {match, [XRefCookie]} = re:run(SetCookieHeader, ".*_xsrf=(.*);.*", [{capture, [1], list}]),
-        Params2 = #{
-            "_xsrf" => edoc_lib:escape_uri(XRefCookie),
-            "email" => edoc_lib:escape_uri(Email),
-            "password" => edoc_lib:escape_uri(Password)
-        },
-        {ok,{{"HTTP/1.1",302,"Found"}, RespHeader302_1, []}} = httpc:request(
-        post, {
-            RedirectUri, [], "application/x-www-form-urlencoded",
-            url_enc_params(Params2)}, [{autoredirect, false}], [], ?MODULE),
-        RedirectUri_1 = OauthUrl ++ proplists:get_value("location", RespHeader302_1),
-        {ok, {{"HTTP/1.1",200,"OK"}, _, _}} = httpc:request(get, {RedirectUri_1, []}, [{autoredirect, false}], [], ?MODULE),
-        Params3 = #{
-            "_xsrf" => edoc_lib:escape_uri(XRefCookie),
-            "cope_email" => "on",
-            "scope_personal" => "on",
-            "scope_daily" => "on",
-            "allow" => "Accept"
-        },
-        {ok, {{"HTTP/1.1",302,"Found"}, RespHeader302_2, []}} = httpc:request(
-        post, {
-            RedirectUri_1, [], "application/x-www-form-urlencoded",
-            url_enc_params(Params3)}, [{autoredirect, false}], [], ?MODULE),
-        RedirectUri_2 = proplists:get_value("location", RespHeader302_2),
-        #{query := QueryString} = uri_string:parse(RedirectUri_2),
-        #{"code" := Code} = maps:from_list(uri_string:dissect_query(QueryString)),
-        Params4 = #{
-            "grant_type" => "authorization_code",
-            "code" => Code, "client_id" => ClientId,
-            "redirect_uri" => edoc_lib:escape_uri(CallbackUri),
-            "client_secret" => ClientSecret
-        },
-        {ok, {{"HTTP/1.1",200,"OK"}, _, BodyJson}} = httpc:request(
-        post, {
-            OauthUrl ++ "/oauth/token", [], "application/x-www-form-urlencoded",
-            url_enc_params(Params4)}, [{autoredirect, false}], [], ?MODULE),
-        #{<<"access_token">> := AccessToken, <<"expires_in">> := ExpiresIn} = Auth = jsx:decode(list_to_binary(BodyJson), [return_maps]),
-        ?JInfo("Authentication successful : ~p", [Auth]),
-        {ok, State#state{is_connected = true, access_token = AccessToken,
-                            auth_expiry = ExpiresIn, auth_time = imem_meta:time()}}
-    catch
-        Class:Error:Stacktrace ->
-            ?JError("Unexpected response : ~p:~p:~p", [Class, Error, Stacktrace]),
-            {error, invalid_return, State}
-    end;
-connect_check_src(State) -> {ok, State}.
+get_oura_ring_auth_config() ->
+    ?OURA_RING_AUTH_CONFIG.
+
+get_token_info() ->
+    dperl_dal:read_channel(<<"avatar">>, ["ouraRing","token"]).
+
+set_token_info(TokenInfo) when is_map(TokenInfo) ->
+    set_token_info(imem_json:encode(TokenInfo));
+set_token_info(TokenInfo) when is_list(TokenInfo) ->
+    set_token_info(list_to_binary(TokenInfo));
+set_token_info(TokenInfo) when is_binary(TokenInfo) ->
+    dperl_dal:create_check_channel(<<"avatar">>),
+    dperl_dal:write_channel(<<"avatar">>, ["ouraRing","token"], TokenInfo).
+
+get_authorize_url(XSRFToken) ->
+    State = #{xsrfToken => XSRFToken, type => <<"ouraRing">>},
+    #{auth_url := Url, client_id := ClientId, redirect_uri := RedirectURI,
+      scope := Scope} = get_oura_ring_auth_config(),
+    UrlParams = url_enc_params(#{"client_id" => ClientId, "state" => {enc, imem_json:encode(State)},
+                                 "scope" => {enc, Scope},"redirect_uri" => {enc, RedirectURI}}),
+    erlang:iolist_to_binary([Url, "&", UrlParams]).
+
+get_access_token(Code) ->
+    #{token_url := TUrl, client_id := ClientId, redirect_uri := RedirectURI,
+      client_secret := Secret, grant_type := GrantType} = get_oura_ring_auth_config(),
+    Body = url_enc_params(#{"client_id" => ClientId, "code" => Code, "redirect_uri" => {enc, RedirectURI},
+                            "client_secret" => {enc, Secret}, "grant_type" => GrantType}),
+    ContentType = "application/x-www-form-urlencoded",
+    case httpc:request(post, {TUrl, "", ContentType, Body}, [], []) of
+        {ok, {_, _, TokenInfo}} ->
+            set_token_info(TokenInfo),
+            ok;
+        {error, Error} ->
+            ?Error("Fetching access token : ~p", [Error]),
+            {error, Error}
+    end.
+
+
+connect_check_src(#state{is_connected = true} = State) ->
+    {ok, State};
+connect_check_src(#state{is_connected = false} = State) ->
+    ?JTrace("Refreshing access token"),
+    #{token_url := TUrl, client_id := ClientId,
+      client_secret := Secret} = get_oura_ring_auth_config(),
+    #{<<"refresh_token">> := RefreshToken} = get_token_info(),
+    Body = url_enc_params(#{"client_id" => ClientId, "client_secret" => {enc, Secret},
+                            "refresh_token" => RefreshToken, "grant_type" => "refresh_token"}),
+    ContentType = "application/x-www-form-urlencoded",
+    case httpc:request(post, {TUrl, "", ContentType, Body}, [], []) of
+        {ok, {{_, 200, "OK"}, _, TokenBody}} ->
+            TokenInfo = imem_json:decode(list_to_binary(TokenBody), [return_maps]),
+            set_token_info(TokenBody),
+            #{<<"access_token">> := AccessToken} = TokenInfo,
+            ?JInfo("new access token fetched"),
+            {ok, State#state{access_token = AccessToken, is_connected = true}};
+        Error ->
+            ?JError("Unexpected response : ~p", [Error]),
+            {error, Error, State}
+    end.
 
 get_source_events(#state{infos = []} = State, _BulkSize) ->
     {ok, sync_complete, State};
@@ -161,11 +156,8 @@ init_state([#dperlNodeJobDyn{state = State} | _]) ->
 init_state([_ | Others]) ->
     init_state(Others).
 
-init({#dperlJob{name=Name, dstArgs = #{channel := Channel},
-                srcArgs = #{client_id := ClientId, user_password := Password,
-                            client_secret := ClientSecret, user_email := Email,
-                            cb_uri := CallbackUri, api_url := ApiUrl,
-                            oauth_url := OauthUrl} = SrcArgs}, State}) ->
+init({#dperlJob{name=Name, dstArgs = #{channel := Channel} = DstArgs,
+                srcArgs = #{api_url := ApiUrl}}, State}) ->
     case dperl_auth_cache:get_enc_hash(Name) of
         undefined ->
             ?JError("Encryption hash is not avaialable"),
@@ -173,16 +165,17 @@ init({#dperlJob{name=Name, dstArgs = #{channel := Channel},
         {User, EncHash} ->
             ?JInfo("Starting with ~p's enchash...", [User]),
             imem_sec_mnesia:put_enc_hash(EncHash),
-            ChannelBin = dperl_dal:to_binary(Channel),
-            KeyPrefix = maps:get(key_prefix, SrcArgs, []),
-            dperl_dal:create_check_channel(ChannelBin),
-            inets:start(httpc, [{profile, ?MODULE}]),
-            ok = httpc:set_options([{cookies, enabled}], ?MODULE),
-            {ok, State#state{channel = ChannelBin, client_id = ClientId,
-                             client_secret = ClientSecret, password = Password,
-                             email = Email, cb_uri = CallbackUri, name = Name,
-                             api_url = ApiUrl, oauth_url = OauthUrl,
-                             key_prefix = KeyPrefix}}
+            case get_token_info() of
+                #{<<"access_token">> := AccessToken} ->
+                    ChannelBin = dperl_dal:to_binary(Channel),
+                    KeyPrefix = maps:get(key_prefix, DstArgs, []),
+                    dperl_dal:create_check_channel(ChannelBin),
+                    {ok, State#state{channel = ChannelBin, api_url = ApiUrl,
+                                    key_prefix = KeyPrefix, access_token = AccessToken}};
+                _ ->
+                    ?JError("Access token not found"),
+                    {stop, badarg}
+            end
     end;
 init(Args) ->
     ?JError("bad start parameters ~p", [Args]),
@@ -262,7 +255,7 @@ fetch_metric(Type, Day, #state{api_url = ApiUrl, access_token = AccessToken} = S
     end.
 
 fetch_metric(Type, DayQuery, ApiUrl, AccessToken) ->
-    Url = ApiUrl ++ "/v1/" ++ Type ++ DayQuery,
+    Url = ApiUrl ++ Type ++ DayQuery,
     TypeBin = list_to_binary(Type),
     case exec_req(Url, AccessToken) of
         #{TypeBin := []} ->
@@ -274,7 +267,7 @@ fetch_metric(Type, DayQuery, ApiUrl, AccessToken) ->
     end.
 
 fetch_userinfo(#state{api_url = ApiUrl, access_token = AccessToken} = State) ->
-    case exec_req(ApiUrl ++ "/v1/userinfo", AccessToken) of
+    case exec_req(ApiUrl ++ "userinfo", AccessToken) of
         UserInfo when is_map(UserInfo) ->
             Info = {build_key("userinfo", State#state.key_prefix), UserInfo},
             State#state{infos = [Info | State#state.infos]};
@@ -309,7 +302,7 @@ get_day(Type, State) ->
 
 exec_req(Url, AccessToken) ->
     AuthHeader = [{"Authorization", "Bearer " ++ binary_to_list(AccessToken)}],
-    case httpc:request(get, {Url, AuthHeader}, [{autoredirect, false}], [], ?MODULE) of
+    case httpc:request(get, {Url, AuthHeader}, [], []) of
         {ok, {{_, 200, "OK"}, _, Result}} ->
             imem_json:decode(list_to_binary(Result), [return_maps]);
         Error ->
@@ -344,7 +337,9 @@ build_key(Type, KeyPrefix) when is_list(Type), is_list(KeyPrefix)->
 
 url_enc_params(Params) ->
     EParams = maps:fold(
-        fun(K, V, Acc) ->
+        fun(K, {enc, V}, Acc) ->
+            ["&", K, "=", http_uri:encode(V) | Acc];
+           (K, V, Acc) ->
             ["&", K, "=", V | Acc]
         end, [], Params),
-    erlang:iolist_to_binary(tl(EParams)).
+    erlang:iolist_to_binary([tl(EParams)]).

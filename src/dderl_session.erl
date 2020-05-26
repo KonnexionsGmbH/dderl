@@ -397,6 +397,23 @@ process_call({[<<"office_365_code">>], ReqData}, _Adapter, From, {SrcIp, _}, Sta
     end,
     State;
 
+process_call({[<<"oura_ring_auth_config">>], _ReqData}, _Adapter, From, {SrcIp, _}, State) ->
+    act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "about"}, State),
+    Url = dperl_ouraring_crawl:get_authorize_url(State#state.xsrf_token),
+    reply(From, #{<<"oura_ring_auth_config">> => #{<<"url">> => Url}}, self()),
+    State;
+
+process_call({[<<"oura_ring_code">>], ReqData}, _Adapter, From, {SrcIp, _}, State) ->
+    act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "format_json_to_save", args => ReqData}, State),
+    #{<<"oura_ring_code">> := #{<<"code">> := Code}} = jsx:decode(ReqData, [return_maps]),
+    case dperl_ouraring_crawl:get_access_token(Code) of
+        ok ->
+            reply(From, #{<<"oura_ring_code">> => #{<<"status">> => <<"ok">>}}, self());
+        {error, _Error} ->
+            reply(From, #{<<"oura_ring_code">> => #{<<"error">> => <<"Fetching token failed, Try again">>}}, self())
+    end,
+    State;
+
 process_call({[<<"connect_info">>], _ReqData}, _Adapter, From, {SrcIp,_},
              #state{sess=Sess, user_id=UserId, user = User} = State) ->
     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "connect_info"}, State),
