@@ -386,16 +386,16 @@ process_call({[<<"office_365_auth_config">>], _ReqData}, _Adapter, From, {SrcIp,
     reply(From, #{<<"office_365_auth_config">> => #{<<"url">> => Url}}, self()),
     State;
 
-process_call({[<<"office_365_code">>], ReqData}, _Adapter, From, {SrcIp, _}, State) ->
-    act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "format_json_to_save", args => ReqData}, State),
-    #{<<"office_365_code">> := #{<<"code">> := Code}} = jsx:decode(ReqData, [return_maps]),
-    case dperl_office_365:get_access_token(Code) of
-        ok ->
-            reply(From, #{<<"office_365_code">> => #{<<"status">> => <<"ok">>}}, self());
-        {error, _Error} ->
-            reply(From, #{<<"office_365_code">> => #{<<"error">> => <<"Fetching token failed, Try again">>}}, self())
-    end,
-    State;
+% process_call({[<<"office_365_code">>], ReqData}, _Adapter, From, {SrcIp, _}, State) ->
+%     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "format_json_to_save", args => ReqData}, State),
+%     #{<<"office_365_code">> := #{<<"code">> := Code}} = jsx:decode(ReqData, [return_maps]),
+%     case dperl_office_365:get_access_token(Code) of
+%         ok ->
+%             reply(From, #{<<"office_365_code">> => #{<<"status">> => <<"ok">>}}, self());
+%         {error, _Error} ->
+%             reply(From, #{<<"office_365_code">> => #{<<"error">> => <<"Fetching token failed, Try again">>}}, self())
+%     end,
+%     State;
 
 process_call({[<<"oura_ring_auth_config">>], _ReqData}, _Adapter, From, {SrcIp, _}, State) ->
     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "about"}, State),
@@ -403,14 +403,28 @@ process_call({[<<"oura_ring_auth_config">>], _ReqData}, _Adapter, From, {SrcIp, 
     reply(From, #{<<"oura_ring_auth_config">> => #{<<"url">> => Url}}, self()),
     State;
 
-process_call({[<<"oura_ring_code">>], ReqData}, _Adapter, From, {SrcIp, _}, State) ->
+% process_call({[<<"oura_ring_code">>], ReqData}, _Adapter, From, {SrcIp, _}, State) ->
+%     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "format_json_to_save", args => ReqData}, State),
+%     #{<<"oura_ring_code">> := #{<<"code">> := Code}} = jsx:decode(ReqData, [return_maps]),
+%     case dperl_ouraring_crawl:get_access_token(Code) of
+%         ok ->
+%             reply(From, #{<<"oura_ring_code">> => #{<<"status">> => <<"ok">>}}, self());
+%         {error, _Error} ->
+%             reply(From, #{<<"oura_ring_code">> => #{<<"error">> => <<"Fetching token failed, Try again">>}}, self())
+%     end,
+%     State;
+
+process_call({[<<"oauth2_callback">>], ReqData}, _Adapter, From, {SrcIp, _}, State) ->
     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "format_json_to_save", args => ReqData}, State),
-    #{<<"oura_ring_code">> := #{<<"code">> := Code}} = jsx:decode(ReqData, [return_maps]),
-    case dperl_ouraring_crawl:get_access_token(Code) of
+    #{<<"oauth2_callback">> := 
+        #{<<"code">> := Code, <<"state">> := #{<<"type">> := Type}}} = jsx:decode(ReqData, [return_maps]),
+    Module = oauth2_callback_module(Type),
+    case Module:get_access_token(Code) of
         ok ->
-            reply(From, #{<<"oura_ring_code">> => #{<<"status">> => <<"ok">>}}, self());
-        {error, _Error} ->
-            reply(From, #{<<"oura_ring_code">> => #{<<"error">> => <<"Fetching token failed, Try again">>}}, self())
+            reply(From, #{<<"oauth2_callback">> => #{<<"status">> => <<"ok">>}}, self());
+        {error, Error} ->
+            ?Error("Fetching token : ~p:get_access_token(~p) : ~p", [Module, Code, Error]),
+            reply(From, #{<<"oauth2_callback">> => #{<<"error">> => <<"Fetching token failed, Try again">>}}, self())
     end,
     State;
 
@@ -895,6 +909,9 @@ cancel_timer(undefined) -> ok;
 cancel_timer(TRef) ->
     erlang:cancel_timer(TRef),
     ok.
+
+oauth2_callback_module(<<"office365">>) -> dperl_office_365;
+oauth2_callback_module(<<"ouraRing">>) -> dperl_office_365.
 
 act_log(ReplyPid, LogLevel, Args, State) ->
     ReplyPid ! {access,
