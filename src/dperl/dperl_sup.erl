@@ -25,7 +25,7 @@ start_link() ->
         )
       end,
       [
-        ?TABLESPEC(dperlJob,[]),
+        ?TABLESPEC(dperlJob,[{trigger, dperl_auth_cache:auth_cache_trigger_fun()}]),
         ?TABLESPEC(
           ?JOBDYN_TABLE, dperlNodeJobDyn,
           [
@@ -45,6 +45,7 @@ start_link() ->
         )
       ]
     ),
+    dperl_dal:create_or_replace_tigger(dperlJob, dperl_auth_cache:auth_cache_trigger_fun()),
     ok = dderl:add_d3_templates_path(
       dderl, filename:join(priv_dir(), "dashboard_scripts")
     ),

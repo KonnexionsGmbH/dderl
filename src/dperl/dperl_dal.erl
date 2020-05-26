@@ -18,7 +18,7 @@
          read_siblings/2, read_channel_raw/2, worker_error/4, sort_links/1,
          get_pool_name/1, remote_dal/3, get_pool_name/2, run_oci_stmt/3,
          activity_logger/3, create_check_index/2, to_atom/1, report_status/7,
-         key_to_json/1, key_to_json_enc/1]).
+         key_to_json/1, key_to_json_enc/1, create_or_replace_tigger/2]).
 
 check_table(Table, ColumnNames, ColumnTypes, DefaultRecord, Opts) ->
     case catch imem_meta:create_check_table(
@@ -51,6 +51,9 @@ create_check_index(Channel, IndexDefinition) ->
         {'ClientError',{"Index already exists", _}} ->  ok;
         Other ->                                        Other
     end.
+
+create_or_replace_tigger(Table, FunStr) ->
+    imem_meta:create_or_replace_trigger(Table, FunStr).
 
 -spec write_channel(binary(), any(), any()) -> ok | {error, any()}.
 write_channel(Channel, Key, Val) when is_map(Val); byte_size(Val) > 0 ->

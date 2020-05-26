@@ -45,11 +45,11 @@ set_token_info(TokenInfo) when is_binary(TokenInfo) ->
     dperl_dal:write_channel(<<"avatar">>, ["office365","token"], TokenInfo).
 
 get_authorize_url(XSRFToken) ->
-    URLState = http_uri:encode(XSRFToken),
+    State = #{xsrf_token => XSRFToken, type => <<"office365">>},
     #{auth_url := Url, client_id := ClientId, redirect_uri := RedirectURI,
       scope := Scope} = get_office_365_auth_config(),
     UrlParams = url_enc_params(#{"client_id" => ClientId, "redirect_uri" => {enc, RedirectURI},
-                                 "scope" => {enc, Scope}, "state" => URLState}),
+                                 "scope" => {enc, Scope}, "state" => {enc, imem_json:encode(State)}}),
     erlang:iolist_to_binary([Url, "&", UrlParams]).
 
 get_access_token(Code) ->
