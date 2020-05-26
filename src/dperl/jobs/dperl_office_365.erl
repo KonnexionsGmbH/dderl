@@ -238,29 +238,30 @@ get_status(#state{}) -> #{}.
 
 init_state(_) -> #state{}.
 
-init({#dperlJob{name=Name, dstArgs = #{channel := Channel, push_channel := PChannel},
-                srcArgs = #{api_url := ApiUrl} = SrcArgs, args = Args}, State}) ->
-    % case dperl_auth_cache:get_enc_hash(Name) of
-    %     undefined ->
-    %         ?JError("Encryption hash is not avaialable"),
-    %         {stop, badarg};
-    %     {User, EncHash} ->
-            % ?JInfo("Starting with ~p's enchash...", [User]),
-            % imem_sec_mnesia:put_enc_hash(EncHash),
-    case get_token_info() of
-        #{<<"access_token">> := AccessToken} ->
-            ChannelBin = dperl_dal:to_binary(Channel),
-            PChannelBin = dperl_dal:to_binary(PChannel),
-            KeyPrefix = maps:get(key_prefix, SrcArgs, []),
-            Type = maps:get(type, Args, pull),
-            dperl_dal:create_check_channel(ChannelBin),
-            dperl_dal:create_check_channel(PChannelBin),
-            {ok, State#state{channel = ChannelBin, name = Name, api_url = ApiUrl,
-                             key_prefix = KeyPrefix, access_token = AccessToken,
-                             push_channel = PChannelBin, type = Type}};
-        _ ->
-            ?JError("Access token not found"),
-            {stop, badarg}                    
+init({#dperlJob{name=Name, srcArgs = #{api_url := ApiUrl}, args = Args,
+                dstArgs = #{channel := Channel, push_channel := PChannel} = DstArgs}, State}) ->
+    case dperl_auth_cache:get_enc_hash(Name) of
+        undefined ->
+            ?JError("Encryption hash is not avaialable"),
+            {stop, badarg};
+        {User, EncHash} ->
+            ?JInfo("Starting with ~p's enchash...", [User]),
+            imem_sec_mnesia:put_enc_hash(EncHash),
+            case get_token_info() of
+                #{<<"access_token">> := AccessToken} ->
+                    ChannelBin = dperl_dal:to_binary(Channel),
+                    PChannelBin = dperl_dal:to_binary(PChannel),
+                    KeyPrefix = maps:get(key_prefix, DstArgs, []),
+                    Type = maps:get(type, Args, pull),
+                    dperl_dal:create_check_channel(ChannelBin),
+                    dperl_dal:create_check_channel(PChannelBin),
+                    {ok, State#state{channel = ChannelBin, name = Name, api_url = ApiUrl,
+                                    key_prefix = KeyPrefix, access_token = AccessToken,
+                                    push_channel = PChannelBin, type = Type}};
+                _ ->
+                    ?JError("Access token not found"),
+                    {stop, badarg}
+            end
     end;
 init(Args) ->
     ?JError("bad start parameters ~p", [Args]),
