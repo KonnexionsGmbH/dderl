@@ -52,15 +52,17 @@ get_authorize_url(XSRFToken) ->
     State = #{xsrfToken => XSRFToken, type => <<"ouraRing">>},
     #{auth_url := Url, client_id := ClientId, redirect_uri := RedirectURI,
       scope := Scope} = get_oura_ring_auth_config(),
-    UrlParams = url_enc_params(#{"client_id" => ClientId, "state" => {enc, imem_json:encode(State)},
-                                 "scope" => {enc, Scope},"redirect_uri" => {enc, RedirectURI}}),
+    UrlParams = dperl_dal:url_enc_params(
+        #{"client_id" => ClientId, "state" => {enc, imem_json:encode(State)},
+          "scope" => {enc, Scope},"redirect_uri" => {enc, RedirectURI}}),
     erlang:iolist_to_binary([Url, "&", UrlParams]).
 
 get_access_token(Code) ->
     #{token_url := TUrl, client_id := ClientId, redirect_uri := RedirectURI,
       client_secret := Secret, grant_type := GrantType} = get_oura_ring_auth_config(),
-    Body = url_enc_params(#{"client_id" => ClientId, "code" => Code, "redirect_uri" => {enc, RedirectURI},
-                            "client_secret" => {enc, Secret}, "grant_type" => GrantType}),
+    Body = dperl_dal:url_enc_params(
+        #{"client_id" => ClientId, "code" => Code, "redirect_uri" => {enc, RedirectURI},
+          "client_secret" => {enc, Secret}, "grant_type" => GrantType}),
     ContentType = "application/x-www-form-urlencoded",
     case httpc:request(post, {TUrl, "", ContentType, Body}, [], []) of
         {ok, {_, _, TokenInfo}} ->
@@ -79,8 +81,9 @@ connect_check_src(#state{is_connected = false} = State) ->
     #{token_url := TUrl, client_id := ClientId,
       client_secret := Secret} = get_oura_ring_auth_config(),
     #{<<"refresh_token">> := RefreshToken} = get_token_info(),
-    Body = url_enc_params(#{"client_id" => ClientId, "client_secret" => {enc, Secret},
-                            "refresh_token" => RefreshToken, "grant_type" => "refresh_token"}),
+    Body = dperl_dal:url_enc_params(
+        #{"client_id" => ClientId, "client_secret" => {enc, Secret},
+          "refresh_token" => RefreshToken, "grant_type" => "refresh_token"}),
     ContentType = "application/x-www-form-urlencoded",
     case httpc:request(post, {TUrl, "", ContentType, Body}, [], []) of
         {ok, {{_, 200, "OK"}, _, TokenBody}} ->
@@ -335,11 +338,3 @@ set_metric_day("readiness", Day, State) -> State#state{last_readiness_day = Day}
 build_key(Type, KeyPrefix) when is_list(Type), is_list(KeyPrefix)->
     KeyPrefix ++ [Type].
 
-url_enc_params(Params) ->
-    EParams = maps:fold(
-        fun(K, {enc, V}, Acc) ->
-            ["&", K, "=", http_uri:encode(V) | Acc];
-           (K, V, Acc) ->
-            ["&", K, "=", V | Acc]
-        end, [], Params),
-    erlang:iolist_to_binary([tl(EParams)]).

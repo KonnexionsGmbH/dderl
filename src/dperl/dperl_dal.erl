@@ -3,7 +3,7 @@
 -include("dperl.hrl").
 
 -export([select/2, subscribe/1, unsubscribe/1, write/2, check_table/5,
-         sql_jp_bind/1, sql_bind_jp_values/2, read_channel/2,
+         sql_jp_bind/1, sql_bind_jp_values/2, read_channel/2, url_enc_params/1,
          io_to_oci_datetime/1, create_check_channel/1, write_channel/3,
          read_check_write/4, read_audit_keys/3, read_audit/3, get_enabled/1,
          update_job_dyn/2, update_job_dyn/3, job_error_close/1, to_binary/1,
@@ -666,6 +666,16 @@ activity_logger(StatusCtx, Name, Extra) ->
         Pid ->
             ?JDebug("activity logger already running ~p", [Pid])
     end.
+
+-spec url_enc_params(map()) -> binary().
+url_enc_params(Params) ->
+    EParams = maps:fold(
+        fun(K, {enc, V}, Acc) ->
+            ["&", K, "=", http_uri:encode(V) | Acc];
+           (K, V, Acc) ->
+            ["&", K, "=", V | Acc]
+        end, [], Params),
+    erlang:iolist_to_binary([tl(EParams)]).
 
 %%------------------------------------------------------------------------------
 %% private

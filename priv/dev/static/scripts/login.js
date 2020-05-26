@@ -23,54 +23,29 @@ export function loginAjax(data = {}) {
 
 window.loginCb = loginCb;
 
-// office 365 callback handler
+// oauth2 callback handler
 const url = new URL(window.location.href);
 const code = url.searchParams.get('code');
 const error = url.searchParams.get('error');
 const state = JSON.parse(url.searchParams.get('state'));
 if (code) {
     dderlState.xsrfToken = state.xsrfToken;
-    setTimeout(() => {
-        const body = { 'oauth2_callback': { 'code': code, 'state': state } };
-        ajaxCall(null, 'oauth2_callback', body, 'oauth2_callback',
-            function () {
-                // window.close();
-            },
-            function (error) {
-                alert('Error fetching access token : ' + error);
-                console.log('Error fetching access token', error);
-                // window.close();
-            });
-    }, 2000);
-    // if (state.type == 'ouraRing') {
-    //     const body = { 'oura_ring_code': { 'code': code, 'state': state } };
-    //     ajaxCall(null, 'oura_ring_code', body, 'oura_ring_code',
-    //         function () {
-    //             window.close();
-    //         },
-    //         function (error) {
-    //             alert('Error fetching access token : ' + error);
-    //             console.log('Error fetching access token', error);
-    //             window.close();
-    //         });
-    // } else {
-    //     const body = { 'office_365_code': { 'code': code, 'state': state } };
-    //     ajaxCall(null, 'office_365_code', body, 'office_365_code',
-    //         function () {
-    //             window.close();
-    //         },
-    //         function (error) {
-    //             alert('Error fetching access token : ' + error);
-    //             console.log('Error fetching access token', error);
-    //             window.close();
-    //         });
-    // }
+    const body = { 'oauth2_callback': { 'code': code, 'state': state } };
+    ajaxCall(null, 'oauth2_callback', body, 'oauth2_callback',
+        function () {
+            window.close();
+        },
+        function (error) {
+            alert('Error fetching access token : ' + error);
+            console.log('Error fetching access token', error);
+            window.close();
+        });
 } else if (error) {
     const errorDesc = url.searchParams.get('error_description');
     alert('Login error : ' + error + ' : ' + errorDesc);
     window.close();
 }
-// office 365 callback handler end
+// oauth2 callback handler end
 
 function loginCb(resp) {
     try {

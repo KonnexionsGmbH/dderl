@@ -19,6 +19,9 @@
 
 -export([get_authorize_url/1, get_access_token/1]).
 
+% contacts graph api
+% https://docs.microsoft.com/en-us/graph/api/resources/contact?view=graph-rest-1.0
+
 -record(state, {name, channel, is_connected = true, access_token, api_url,
                 contacts = [], key_prefix, fetch_url, cl_contacts = [],
                 is_cleanup_finished = true, push_channel, type = pull,
@@ -45,20 +48,22 @@ set_token_info(TokenInfo) when is_binary(TokenInfo) ->
     dperl_dal:write_channel(<<"avatar">>, ["office365","token"], TokenInfo).
 
 get_authorize_url(XSRFToken) ->
-    State = #{xsrf_token => XSRFToken, type => <<"office365">>},
+    State = #{xsrfToken => XSRFToken, type => <<"office365">>},
     #{auth_url := Url, client_id := ClientId, redirect_uri := RedirectURI,
       scope := Scope} = get_office_365_auth_config(),
-    UrlParams = url_enc_params(#{"client_id" => ClientId, "redirect_uri" => {enc, RedirectURI},
-                                 "scope" => {enc, Scope}, "state" => {enc, imem_json:encode(State)}}),
+    UrlParams = dperl_dal:url_enc_params(
+        #{"client_id" => ClientId, "redirect_uri" => {enc, RedirectURI},
+          "scope" => {enc, Scope}, "state" => {enc, imem_json:encode(State)}}),
     erlang:iolist_to_binary([Url, "&", UrlParams]).
 
 get_access_token(Code) ->
     #{token_url := TUrl, client_id := ClientId, redirect_uri := RedirectURI,
       client_secret := Secret, grant_type := GrantType,
       scope := Scope} = get_office_365_auth_config(),
-    Body = url_enc_params(#{"client_id" => ClientId, "scope" => {enc, Scope}, "code" => Code,
-                            "redirect_uri" => {enc, RedirectURI}, "grant_type" => GrantType,
-                            "client_secret" => {enc, Secret}}),
+    Body = dperl_dal:url_enc_params(
+        #{"client_id" => ClientId, "scope" => {enc, Scope}, "code" => Code,
+          "redirect_uri" => {enc, RedirectURI}, "grant_type" => GrantType,
+          "client_secret" => {enc, Secret}}),
     ContentType = "application/x-www-form-urlencoded",
     case httpc:request(post, {TUrl, "", ContentType, Body}, [], []) of
         {ok, {_, _, TokenInfo}} ->
@@ -76,9 +81,10 @@ connect_check_src(#state{is_connected = false} = State) ->
     #{token_url := TUrl, client_id := ClientId, client_secret := Secret,
       scope := Scope} = get_office_365_auth_config(),
     #{<<"refresh_token">> := RefreshToken} = get_token_info(),
-    Body = url_enc_params(#{"client_id" => ClientId, "scope" => {enc, Scope},
-                            "refresh_token" => RefreshToken, "grant_type" => "refresh_token",
-                            "client_secret" => {enc, Secret}}),
+    Body = dperl_dal:url_enc_params(
+        #{"client_id" => ClientId, "scope" => {enc, Scope},
+          "refresh_token" => RefreshToken, "grant_type" => "refresh_token",
+          "client_secret" => {enc, Secret}}),
     ContentType = "application/x-www-form-urlencoded",
     case httpc:request(post, {TUrl, "", ContentType, Body}, [], []) of
         {ok, {{_, 200, "OK"}, _, TokenBody}} ->
@@ -197,7 +203,7 @@ load_dst_after_key(CurKey, BlkCount, #state{channel = Channel}) ->
 
 load_src_after_key(CurKey, BlkCount, #state{fetch_url = undefined} = State) ->
     % https://graph.microsoft.com/v1.0/me/contacts/?$top=100&$select=displayName&orderby=displayName
-    UrlParams = url_enc_params(#{"$top" => integer_to_list(BlkCount)}),
+    UrlParams = dperl_dal:url_enc_params(#{"$top" => integer_to_list(BlkCount)}),
     ContactsUrl = erlang:iolist_to_binary([State#state.api_url, "?", UrlParams]),
     load_src_after_key(CurKey, BlkCount, State#state{fetch_url = ContactsUrl});
 load_src_after_key(CurKey, BlkCount, #state{is_cleanup_finished = true, key_prefix = KeyPrefix,
@@ -349,13 +355,3 @@ exec_req(Url, AccessToken, Body, Method) ->
         Error ->
             {error, Error}
     end.
-    
-
-url_enc_params(Params) ->
-    EParams = maps:fold(
-        fun(K, {enc, V}, Acc) ->
-            ["&", K, "=", http_uri:encode(V) | Acc];
-           (K, V, Acc) ->
-            ["&", K, "=", V | Acc]
-        end, [], Params),
-    erlang:iolist_to_binary([tl(EParams)]).
