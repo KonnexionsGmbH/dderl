@@ -228,6 +228,8 @@ reconnect_exec(State, Fun, Args) ->
             {error, Error, State1}
     end.
 
+do_cleanup(_Deletes, _Inserts, _Diffs, _IsFinished, #state{type = push}) ->
+    {error, <<"cleanup only for pull job">>};
 do_cleanup(Deletes, Inserts, Diffs, IsFinished, State) ->
     NewState = State#state{contacts = Inserts ++ Diffs ++ Deletes},
     if IsFinished -> {ok, finish, NewState#state{is_cleanup_finished = true}};
