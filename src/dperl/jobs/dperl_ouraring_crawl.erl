@@ -235,7 +235,7 @@ fetch_metric(Type, Day, #state{api_url = ApiUrl, access_token = AccessToken} = S
                 {ok, _} ->
                     fetch_metric(Type, NextDay, State);
                 _Other ->
-                    State
+                    none
             end;
         {ok, Metric} ->
             Key = build_key(Type, State#state.key_prefix),
