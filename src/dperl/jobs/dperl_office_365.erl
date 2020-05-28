@@ -35,26 +35,6 @@ connect_check_src(#state{is_connected = false} = State) ->
             ?JError("Unexpected response : ~p", [Error]),
             {error, Error, State}
     end.
-    % ?JTrace("Refreshing access token"),
-    % #{token_url := TUrl, client_id := ClientId, client_secret := Secret,
-    %   scope := Scope} = get_office_365_auth_config(),
-    % #{<<"refresh_token">> := RefreshToken} = get_token_info(),
-    % Body = dperl_dal:url_enc_params(
-    %     #{"client_id" => ClientId, "scope" => {enc, Scope},
-    %       "refresh_token" => RefreshToken, "grant_type" => "refresh_token",
-    %       "client_secret" => {enc, Secret}}),
-    % ContentType = "application/x-www-form-urlencoded",
-    % case httpc:request(post, {TUrl, "", ContentType, Body}, [], []) of
-    %     {ok, {{_, 200, "OK"}, _, TokenBody}} ->
-    %         TokenInfo = imem_json:decode(list_to_binary(TokenBody), [return_maps]),
-    %         set_token_info(TokenBody),
-    %         #{<<"access_token">> := AccessToken} = TokenInfo,
-    %         ?JInfo("new access token fetched"),
-    %         {ok, State#state{access_token = AccessToken, is_connected = true}};
-    %     Error ->
-    %         ?JError("Unexpected response : ~p", [Error]),
-    %         {error, Error, State}
-    % end.
 
 get_source_events(#state{audit_start_time = LastStartTime, type = push,
                          push_channel = PChannel} = State, BulkSize) ->
