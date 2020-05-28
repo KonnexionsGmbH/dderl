@@ -189,7 +189,7 @@ handle_cast({fetch_recs_async, false, _}, #qry{fsm_ref = FsmRef, stmt_result = S
             end
     end,
     {noreply, State};
-handle_cast({fetch_push, NRows, Target}, #qry{fsm_ref = FsmRef, stmt_result = StmtResult} = State) ->
+handle_cast({fetch_push, NRows, Target}, #qry{fsm_ref = FsmRef, stmt_result = StmtResult, connection = Connection} = State) ->
     #qry{contain_rowid = ContainRowId, contain_rownum = ContainRowNum} = State,
     #stmtResults{stmtRefs = StmtRef, rowCols = Clms} = StmtResult,
     MissingRows = Target - NRows,
@@ -199,19 +199,19 @@ handle_cast({fetch_push, NRows, Target}, #qry{fsm_ref = FsmRef, stmt_result = St
         true ->
             RowsToFetch = MissingRows
     end,
-    case StmtRef:fetch_rows(RowsToFetch) of
-        {{rows, Rows}, Completed} ->
+    case dpi_fetch_rows(Connection, StmtRef, RowsToFetch) of
+        { Rows, Completed} ->
             RowsFixed = fix_row_format(StmtRef, Rows, Clms, ContainRowId),
             NewNRows = NRows + length(RowsFixed),
             if
-                Completed -> FsmRef:rows({RowsFixed, Completed});
+                Completed -> dderl_fsm:rows(FsmRef, {RowsFixed, Completed});
                 (NewNRows >= Target) andalso (not ContainRowNum) -> FsmRef:rows_limit(NewNRows, RowsFixed);
                 true ->
-                    FsmRef:rows({RowsFixed, false}),
+                    dderl_fsm:rows(FsmRef, {RowsFixed, false}),
                     gen_server:cast(self(), {fetch_push, NewNRows, Target})
             end;
         {error, Error} ->
-            FsmRef:rows({error, Error})
+            dderl_fsm:rows(FsmRef, {error, Error})
     end,
     {noreply, State};
 handle_cast(_Ignored, State) ->
