@@ -106,7 +106,7 @@ init({#dperlJob{name=Name, dstArgs = #{channel := Channel} = DstArgs,
             {stop, badarg};
         {User, EncHash} ->
             ?JInfo("Starting with ~p's enchash...", [User]),
-            imem_sec_mnesia:put_enc_hash(EncHash),
+            imem_enc_mnesia:put_enc_hash(EncHash),
             case dderl_oauth:get_token_info(?OURARING) of
                 #{<<"access_token">> := AccessToken} ->
                     ChannelBin = dperl_dal:to_binary(Channel),
