@@ -1743,7 +1743,7 @@ handle_call(cache_data, From, SN, #state{tableId = TableId, ctx=#ctx{rowCols=Row
 handle_call(inspect_status, From, SN, State) ->
     {next_state, SN, State, [{reply, From, SN}]};
 handle_call({put_enc_hash, EncHash}, From, SN, State) ->
-    imem_sec_mnesia:put_enc_hash(EncHash),
+    imem_enc_mnesia:put_enc_hash(EncHash),
     {next_state, SN, State, [{reply, From, ok}]};
 handle_call(inspect_state, From, SN, State) ->
     {next_state, SN, State, [{reply, From, State}]};
