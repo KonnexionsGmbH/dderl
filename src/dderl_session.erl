@@ -381,27 +381,26 @@ process_call({[<<"about">>], _ReqData}, _Adapter, From, {SrcIp,_}, State) ->
     State;
 
 process_call({[<<"office_365_auth_config">>], _ReqData}, _Adapter, From, {SrcIp, _}, State) ->
-    act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "about"}, State),
-    Url = dperl_office_365:get_authorize_url(State#state.xsrf_token),
+    act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "office_365_auth_config"}, State),
+    Url = dderl_oauth:get_authorize_url(State#state.xsrf_token, ?OFFICE365),
     reply(From, #{<<"office_365_auth_config">> => #{<<"url">> => Url}}, self()),
     State;
 
 process_call({[<<"oura_ring_auth_config">>], _ReqData}, _Adapter, From, {SrcIp, _}, State) ->
-    act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "about"}, State),
-    Url = dperl_ouraring_crawl:get_authorize_url(State#state.xsrf_token),
+    act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "oura_ring_auth_config"}, State),
+    Url = dderl_oauth:get_authorize_url(State#state.xsrf_token, ?OURARING),
     reply(From, #{<<"oura_ring_auth_config">> => #{<<"url">> => Url}}, self()),
     State;
 
 process_call({[<<"oauth2_callback">>], ReqData}, _Adapter, From, {SrcIp, _}, State) ->
-    act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "format_json_to_save", args => ReqData}, State),
+    act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "oauth2_callback", args => ReqData}, State),
     #{<<"oauth2_callback">> := 
         #{<<"code">> := Code, <<"state">> := #{<<"type">> := Type}}} = jsx:decode(ReqData, [return_maps]),
-    Module = oauth2_callback_module(Type),
-    case Module:get_access_token(Code) of
+    case dderl_oauth:get_access_token(Code, Type) of
         ok ->
             reply(From, #{<<"oauth2_callback">> => #{<<"status">> => <<"ok">>}}, self());
         {error, Error} ->
-            ?Error("Fetching token : ~p:get_access_token(~p) : ~p", [Module, Code, Error]),
+            ?Error("Fetching token : ~p", [Error]),
             reply(From, #{<<"oauth2_callback">> => #{<<"error">> => <<"Fetching token failed, Try again">>}}, self())
     end,
     State;
@@ -887,9 +886,6 @@ cancel_timer(undefined) -> ok;
 cancel_timer(TRef) ->
     erlang:cancel_timer(TRef),
     ok.
-
-oauth2_callback_module(<<"office365">>) -> dperl_office_365;
-oauth2_callback_module(<<"ouraRing">>) -> dperl_ouraring_crawl.
 
 act_log(ReplyPid, LogLevel, Args, State) ->
     ReplyPid ! {access,

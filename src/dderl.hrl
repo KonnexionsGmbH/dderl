@@ -322,4 +322,10 @@
          end)()
 ).
 
+% OAUTH 
+
+-define(OURARING, <<"ouraRing">>).
+
+-define(OFFICE365, <<"office365">>).
+
 -endif.
