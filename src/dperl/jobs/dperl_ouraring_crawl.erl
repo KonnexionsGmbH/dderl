@@ -10,20 +10,9 @@
           "Days to be shifted backwards for starting the job")
        ).
 
--define(OURA_RING_AUTH_CONFIG,
-        ?GET_CONFIG(ouraRingAuthConfig,[],
-            #{auth_url =>"https://cloud.ouraring.com/oauth/authorize?response_type=code",
-              client_id => "12345", redirect_uri => "https://localhost:8443/dderl/",
-              client_secret => "12345", grant_type => "authorization_code",
-              token_url => "https://cloud.ouraring.com/oauth/token",
-              scope => "email personal daily"},
-            "Oura Ring auth config")).
-
 % dperl_worker exports
 -export([init/1, terminate/2, handle_call/3, handle_cast/2, handle_info/2,
          get_status/1, init_state/1]).
-
--export([get_authorize_url/1, get_access_token/1]).
 
 -record(state, {name, channel, is_connected = true, access_token, api_url,
                 last_sleep_day, last_activity_day, last_readiness_day,
@@ -34,65 +23,15 @@
          do_cleanup/2, do_refresh/2, fetch_src/2, fetch_dst/2, delete_dst/2,
          insert_dst/3, update_dst/3, report_status/3]).
 
-get_oura_ring_auth_config() ->
-    ?OURA_RING_AUTH_CONFIG.
-
-get_token_info() ->
-    dperl_dal:read_channel(<<"avatar">>, ["ouraRing","token"]).
-
-set_token_info(TokenInfo) when is_map(TokenInfo) ->
-    set_token_info(imem_json:encode(TokenInfo));
-set_token_info(TokenInfo) when is_list(TokenInfo) ->
-    set_token_info(list_to_binary(TokenInfo));
-set_token_info(TokenInfo) when is_binary(TokenInfo) ->
-    dperl_dal:create_check_channel(<<"avatar">>),
-    dperl_dal:write_channel(<<"avatar">>, ["ouraRing","token"], TokenInfo).
-
-get_authorize_url(XSRFToken) ->
-    State = #{xsrfToken => XSRFToken, type => <<"ouraRing">>},
-    #{auth_url := Url, client_id := ClientId, redirect_uri := RedirectURI,
-      scope := Scope} = get_oura_ring_auth_config(),
-    UrlParams = dperl_dal:url_enc_params(
-        #{"client_id" => ClientId, "state" => {enc, imem_json:encode(State)},
-          "scope" => {enc, Scope},"redirect_uri" => {enc, RedirectURI}}),
-    erlang:iolist_to_binary([Url, "&", UrlParams]).
-
-get_access_token(Code) ->
-    #{token_url := TUrl, client_id := ClientId, redirect_uri := RedirectURI,
-      client_secret := Secret, grant_type := GrantType} = get_oura_ring_auth_config(),
-    Body = dperl_dal:url_enc_params(
-        #{"client_id" => ClientId, "code" => Code, "redirect_uri" => {enc, RedirectURI},
-          "client_secret" => {enc, Secret}, "grant_type" => GrantType}),
-    ContentType = "application/x-www-form-urlencoded",
-    case httpc:request(post, {TUrl, "", ContentType, Body}, [], []) of
-        {ok, {_, _, TokenInfo}} ->
-            set_token_info(TokenInfo),
-            ok;
-        {error, Error} ->
-            ?Error("Fetching access token : ~p", [Error]),
-            {error, Error}
-    end.
-
-
 connect_check_src(#state{is_connected = true} = State) ->
     {ok, State};
 connect_check_src(#state{is_connected = false} = State) ->
     ?JTrace("Refreshing access token"),
-    #{token_url := TUrl, client_id := ClientId,
-      client_secret := Secret} = get_oura_ring_auth_config(),
-    #{<<"refresh_token">> := RefreshToken} = get_token_info(),
-    Body = dperl_dal:url_enc_params(
-        #{"client_id" => ClientId, "client_secret" => {enc, Secret},
-          "refresh_token" => RefreshToken, "grant_type" => "refresh_token"}),
-    ContentType = "application/x-www-form-urlencoded",
-    case httpc:request(post, {TUrl, "", ContentType, Body}, [], []) of
-        {ok, {{_, 200, "OK"}, _, TokenBody}} ->
-            TokenInfo = imem_json:decode(list_to_binary(TokenBody), [return_maps]),
-            set_token_info(TokenBody),
-            #{<<"access_token">> := AccessToken} = TokenInfo,
-            ?JInfo("new access token fetched"),
+    case dderl_oauth:refresh_access_token(?OURARING) of
+        {ok, AccessToken} ->
+            ?Info("new access token fetched"),
             {ok, State#state{access_token = AccessToken, is_connected = true}};
-        Error ->
+        {error, Error} ->
             ?JError("Unexpected response : ~p", [Error]),
             {error, Error, State}
     end.
@@ -168,7 +107,7 @@ init({#dperlJob{name=Name, dstArgs = #{channel := Channel} = DstArgs,
         {User, EncHash} ->
             ?JInfo("Starting with ~p's enchash...", [User]),
             imem_enc_mnesia:put_enc_hash(EncHash),
-            case get_token_info() of
+            case dderl_oauth:get_token_info(?OURARING) of
                 #{<<"access_token">> := AccessToken} ->
                     ChannelBin = dperl_dal:to_binary(Channel),
                     KeyPrefix = maps:get(key_prefix, DstArgs, []),
@@ -308,6 +247,9 @@ exec_req(Url, AccessToken) ->
     case httpc:request(get, {Url, AuthHeader}, [], []) of
         {ok, {{_, 200, "OK"}, _, Result}} ->
             imem_json:decode(list_to_binary(Result), [return_maps]);
+        {ok, {{_, 401, _}, _, Error}} ->
+            ?JError("Unauthorized body : ~s", [Error]),
+            {error, unauthorized};
         Error ->
             {error, Error}
     end.

@@ -5,19 +5,9 @@
 -behavior(dperl_worker).
 -behavior(dperl_strategy_scr).
 
--define(OFFICE_365_AUTH_CONFIG,
-        ?GET_CONFIG(office365AuthConfig,[],
-            #{auth_url =>"https://login.microsoftonline.com/common/oauth2/v2.0/authorize?response_type=code&response_mode=query",
-              client_id => "12345", redirect_uri => "https://localhost:8443/dderl/", client_secret => "12345", grant_type => "authorization_code",
-              token_url => "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-              scope => "offline_access https://graph.microsoft.com/people.read"},
-            "Office 365 (Graph API) auth config")).
-
 % dperl_worker exports
 -export([init/1, terminate/2, handle_call/3, handle_cast/2, handle_info/2,
          get_status/1, init_state/1]).
-
--export([get_authorize_url/1, get_access_token/1]).
 
 % contacts graph api
 % https://docs.microsoft.com/en-us/graph/api/resources/contact?view=graph-rest-1.0
@@ -33,67 +23,15 @@
          fetch_src/2, fetch_dst/2, delete_dst/2, insert_dst/3,
          update_dst/3, report_status/3]).
 
-get_office_365_auth_config() ->
-    ?OFFICE_365_AUTH_CONFIG.
-
-get_token_info() ->
-    dperl_dal:read_channel(<<"avatar">>, ["office365","token"]).
-
-set_token_info(TokenInfo) when is_map(TokenInfo) ->
-    set_token_info(imem_json:encode(TokenInfo));
-set_token_info(TokenInfo) when is_list(TokenInfo) ->
-    set_token_info(list_to_binary(TokenInfo));
-set_token_info(TokenInfo) when is_binary(TokenInfo) ->
-    dperl_dal:create_check_channel(<<"avatar">>),
-    dperl_dal:write_channel(<<"avatar">>, ["office365","token"], TokenInfo).
-
-get_authorize_url(XSRFToken) ->
-    State = #{xsrfToken => XSRFToken, type => <<"office365">>},
-    #{auth_url := Url, client_id := ClientId, redirect_uri := RedirectURI,
-      scope := Scope} = get_office_365_auth_config(),
-    UrlParams = dperl_dal:url_enc_params(
-        #{"client_id" => ClientId, "redirect_uri" => {enc, RedirectURI},
-          "scope" => {enc, Scope}, "state" => {enc, imem_json:encode(State)}}),
-    erlang:iolist_to_binary([Url, "&", UrlParams]).
-
-get_access_token(Code) ->
-    #{token_url := TUrl, client_id := ClientId, redirect_uri := RedirectURI,
-      client_secret := Secret, grant_type := GrantType,
-      scope := Scope} = get_office_365_auth_config(),
-    Body = dperl_dal:url_enc_params(
-        #{"client_id" => ClientId, "scope" => {enc, Scope}, "code" => Code,
-          "redirect_uri" => {enc, RedirectURI}, "grant_type" => GrantType,
-          "client_secret" => {enc, Secret}}),
-    ContentType = "application/x-www-form-urlencoded",
-    case httpc:request(post, {TUrl, "", ContentType, Body}, [], []) of
-        {ok, {_, _, TokenInfo}} ->
-            set_token_info(TokenInfo),
-            ok;
-        {error, Error} ->
-            ?Error("Fetching access token : ~p", [Error]),
-            {error, Error}
-    end.
-
 connect_check_src(#state{is_connected = true} = State) ->
     {ok, State};
 connect_check_src(#state{is_connected = false} = State) ->
     ?JTrace("Refreshing access token"),
-    #{token_url := TUrl, client_id := ClientId, client_secret := Secret,
-      scope := Scope} = get_office_365_auth_config(),
-    #{<<"refresh_token">> := RefreshToken} = get_token_info(),
-    Body = dperl_dal:url_enc_params(
-        #{"client_id" => ClientId, "scope" => {enc, Scope},
-          "refresh_token" => RefreshToken, "grant_type" => "refresh_token",
-          "client_secret" => {enc, Secret}}),
-    ContentType = "application/x-www-form-urlencoded",
-    case httpc:request(post, {TUrl, "", ContentType, Body}, [], []) of
-        {ok, {{_, 200, "OK"}, _, TokenBody}} ->
-            TokenInfo = imem_json:decode(list_to_binary(TokenBody), [return_maps]),
-            set_token_info(TokenBody),
-            #{<<"access_token">> := AccessToken} = TokenInfo,
-            ?JInfo("new access token fetched"),
+    case dderl_oauth:refresh_access_token(?OFFICE365) of
+        {ok, AccessToken} ->
+            ?Info("new access token fetched"),
             {ok, State#state{access_token = AccessToken, is_connected = true}};
-        Error ->
+        {error, Error} ->
             ?JError("Unexpected response : ~p", [Error]),
             {error, Error, State}
     end.
@@ -249,7 +187,7 @@ init({#dperlJob{name=Name, srcArgs = #{api_url := ApiUrl}, args = Args,
         {User, EncHash} ->
             ?JInfo("Starting with ~p's enchash...", [User]),
             imem_enc_mnesia:put_enc_hash(EncHash),
-            case get_token_info() of
+            case dderl_oauth:get_token_info(?OFFICE365) of
                 #{<<"access_token">> := AccessToken} ->
                     ChannelBin = dperl_dal:to_binary(Channel),
                     PChannelBin = dperl_dal:to_binary(PChannel),
