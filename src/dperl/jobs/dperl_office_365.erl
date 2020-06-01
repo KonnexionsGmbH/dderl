@@ -15,7 +15,7 @@
 -record(state, {name, channel, is_connected = true, access_token, api_url,
                 contacts = [], key_prefix, fetch_url, cl_contacts = [],
                 is_cleanup_finished = true, push_channel, type = pull,
-                audit_start_time = {0,0}, first_sync = true}).
+                audit_start_time = {0,0}, first_sync = true, username}).
 
 % dperl_strategy_scr export
 -export([connect_check_src/1, get_source_events/2, connect_check_dst/1,
@@ -25,9 +25,9 @@
 
 connect_check_src(#state{is_connected = true} = State) ->
     {ok, State};
-connect_check_src(#state{is_connected = false} = State) ->
+connect_check_src(#state{is_connected = false, username = Username} = State) ->
     ?JTrace("Refreshing access token"),
-    case dderl_oauth:refresh_access_token(?OFFICE365) of
+    case dderl_oauth:refresh_access_token(Username, ?OFFICE365) of
         {ok, AccessToken} ->
             ?Info("new access token fetched"),
             {ok, State#state{access_token = AccessToken, is_connected = true}};
@@ -184,10 +184,10 @@ init({#dperlJob{name=Name, srcArgs = #{api_url := ApiUrl}, args = Args,
         undefined ->
             ?JError("Encryption hash is not avaialable"),
             {stop, badarg};
-        {User, EncHash} ->
-            ?JInfo("Starting with ~p's enchash...", [User]),
+        {Username, EncHash} ->
+            ?JInfo("Starting with ~p's enchash...", [Username]),
             imem_enc_mnesia:put_enc_hash(EncHash),
-            case dderl_oauth:get_token_info(?OFFICE365) of
+            case dderl_oauth:get_token_info(Username, ?OFFICE365) of
                 #{<<"access_token">> := AccessToken} ->
                     ChannelBin = dperl_dal:to_binary(Channel),
                     PChannelBin = dperl_dal:to_binary(PChannel),
@@ -197,7 +197,7 @@ init({#dperlJob{name=Name, srcArgs = #{api_url := ApiUrl}, args = Args,
                     dperl_dal:create_check_channel(PChannelBin),
                     {ok, State#state{channel = ChannelBin, name = Name, api_url = ApiUrl,
                                     key_prefix = KeyPrefix, access_token = AccessToken,
-                                    push_channel = PChannelBin, type = Type}};
+                                    push_channel = PChannelBin, type = Type, username = Username}};
                 _ ->
                     ?JError("Access token not found"),
                     {stop, badarg}

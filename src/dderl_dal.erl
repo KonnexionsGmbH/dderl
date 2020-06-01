@@ -45,6 +45,9 @@
         ,get_d3_templates_path/1
         ,get_host_app/0
         ,is_proxy/2
+        ,create_check_avatar_table/1
+        ,write_to_avatar_table/3
+        ,read_from_avatar_table/2
         ]).
 
 -record(state, { schema :: term()
@@ -59,6 +62,10 @@
 -define(USE_SYS_CONNS, {dderl, conn, {owner, system}, use}).
 -define(USE_CONN(__ConnId), {dderl, conn, {conn, __ConnId}, use}).
 -define(USE_LOCAL_CONN, {dderl, conn, local, use}).
+
+-define(GET_AVATAR_TABLE(__USERNAME),
+    ?GET_CONFIG(__USERNAME,[], <<__USERNAME/binary, "_avatar">>,"SAML - flag to verify response signature")).
+
 
 %% Validate this permission.
 -define(USE_ADAPTER, {dderl, adapter, {id, __AdaptId}, use}).
@@ -848,6 +855,26 @@ is_proxy(AppId, NetCtx) ->
         [PF] when is_function(PF, 1) -> exec_is_proxy_fun(PF, NetCtx);
         _ -> false
     end.
+
+get_avatar_table(Username) when is_atom(Username) ->
+    get_avatar_table(atom_to_binary(Username, utf8));
+get_avatar_table(Username) when is_list(Username) ->
+    get_avatar_table(list_to_binary(Username));
+get_avatar_table(Username) when is_binary(Username) ->
+    ?GET_AVATAR_TABLE(Username).
+
+create_check_avatar_table(Username) ->
+    AvatarTable = get_avatar_table(Username),
+    imem_dal_skvh:create_check_channel(AvatarTable, []).
+    % imem_dal_skvh:create_check_channel(AvatarTable, [encrypted]).
+
+write_to_avatar_table(Username, Key, Value) ->
+    AvatarTable = get_avatar_table(Username),
+    imem_dal_skvh:write(Username, AvatarTable, Key, Value).
+
+read_from_avatar_table(Username, Key) ->
+    AvatarTable = get_avatar_table(Username),
+    imem_dal_skvh:read(Username, AvatarTable, Key).
 
 -spec exec_is_proxy_fun(reference(), map()) -> boolean().
 exec_is_proxy_fun(Fun, NetCtx) ->

@@ -16,7 +16,7 @@
 
 -record(state, {name, channel, is_connected = true, access_token, api_url,
                 last_sleep_day, last_activity_day, last_readiness_day,
-                infos = [], key_prefix}).
+                infos = [], key_prefix, username}).
 
 % dperl_strategy_scr export
 -export([connect_check_src/1, get_source_events/2, connect_check_dst/1,
@@ -25,9 +25,9 @@
 
 connect_check_src(#state{is_connected = true} = State) ->
     {ok, State};
-connect_check_src(#state{is_connected = false} = State) ->
+connect_check_src(#state{is_connected = false, username = Username} = State) ->
     ?JTrace("Refreshing access token"),
-    case dderl_oauth:refresh_access_token(?OURARING) of
+    case dderl_oauth:refresh_access_token(Username, ?OURARING) of
         {ok, AccessToken} ->
             ?Info("new access token fetched"),
             {ok, State#state{access_token = AccessToken, is_connected = true}};
@@ -104,15 +104,15 @@ init({#dperlJob{name=Name, dstArgs = #{channel := Channel} = DstArgs,
         undefined ->
             ?JError("Encryption hash is not avaialable"),
             {stop, badarg};
-        {User, EncHash} ->
-            ?JInfo("Starting with ~p's enchash...", [User]),
+        {Username, EncHash} ->
+            ?JInfo("Starting with ~p's enchash...", [Username]),
             imem_enc_mnesia:put_enc_hash(EncHash),
-            case dderl_oauth:get_token_info(?OURARING) of
+            case dderl_oauth:get_token_info(Username, ?OURARING) of
                 #{<<"access_token">> := AccessToken} ->
                     ChannelBin = dperl_dal:to_binary(Channel),
                     KeyPrefix = maps:get(key_prefix, DstArgs, []),
                     dperl_dal:create_check_channel(ChannelBin),
-                    {ok, State#state{channel = ChannelBin, api_url = ApiUrl,
+                    {ok, State#state{channel = ChannelBin, api_url = ApiUrl, username = Username,
                                     key_prefix = KeyPrefix, access_token = AccessToken}};
                 _ ->
                     ?JError("Access token not found"),

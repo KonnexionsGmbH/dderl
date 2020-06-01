@@ -396,7 +396,7 @@ process_call({[<<"oauth2_callback">>], ReqData}, _Adapter, From, {SrcIp, _}, Sta
     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "oauth2_callback", args => ReqData}, State),
     #{<<"oauth2_callback">> := 
         #{<<"code">> := Code, <<"state">> := #{<<"type">> := Type}}} = jsx:decode(ReqData, [return_maps]),
-    case dderl_oauth:get_access_token(Code, Type) of
+    case dderl_oauth:get_access_token(State#state.user, Code, Type) of
         ok ->
             reply(From, #{<<"oauth2_callback">> => #{<<"status">> => <<"ok">>}}, self());
         {error, Error} ->
@@ -853,6 +853,7 @@ login(ReqData, From, SrcIp, State) ->
         _ ->
             {[UserId],true} = imem_meta:select(ddAccount, [{#ddAccount{name=State#state.user,
                                            id='$1',_='_'}, [], ['$1']}]),
+            ok = dderl_dal:create_check_avatar_table(State#state.user),
             act_log(From, ?LOGIN_CONNECT,
                     #{src => SrcIp, userId => UserId, cmd_resp => "login success",
                       cmd => "login"}, State),
