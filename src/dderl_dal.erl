@@ -874,7 +874,14 @@ write_to_avatar_table(Username, Key, Value) ->
 
 read_from_avatar_table(Username, Key) ->
     AvatarTable = get_avatar_table(Username),
-    imem_dal_skvh:read(Username, AvatarTable, Key).
+    case imem_dal_skvh:read(Username, AvatarTable, [Key]) of
+        [#{cvalue := CValue}] when is_binary(CValue) ->
+            imem_json:decode(CValue, [return_maps]);
+        [#{cvalue := CValue}] ->
+            CValue;
+        Other ->
+            Other
+    end.
 
 -spec exec_is_proxy_fun(reference(), map()) -> boolean().
 exec_is_proxy_fun(Fun, NetCtx) ->
