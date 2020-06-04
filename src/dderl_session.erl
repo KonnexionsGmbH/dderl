@@ -35,7 +35,7 @@
           , inactive_tref               :: timer:tref()
           , user        = <<>>          :: binary()
           , user_id                     :: ddEntityId()
-          , sess                        :: {atom, pid()}
+          , sess                        :: {atom(), pid()}
           , active_sender               :: pid()
           , active_receiver             :: pid()
           , downloads   = []            :: integer()
@@ -382,21 +382,35 @@ process_call({[<<"about">>], _ReqData}, _Adapter, From, {SrcIp,_}, State) ->
 
 process_call({[<<"office_365_auth_config">>], _ReqData}, _Adapter, From, {SrcIp, _}, State) ->
     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "office_365_auth_config"}, State),
-    Url = dderl_oauth:get_authorize_url(State#state.xsrf_token, ?OFFICE365),
+    AuthConfig = dperl_office_365:get_auth_config(), % ToDo: may depend on JobName or KeyPrefix
+    Url = dderl_oauth:get_authorize_url(State#state.xsrf_token, AuthConfig, ?SYNC_OFFICE365),
     reply(From, #{<<"office_365_auth_config">> => #{<<"url">> => Url}}, self()),
     State;
 
 process_call({[<<"oura_ring_auth_config">>], _ReqData}, _Adapter, From, {SrcIp, _}, State) ->
     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "oura_ring_auth_config"}, State),
-    Url = dderl_oauth:get_authorize_url(State#state.xsrf_token, ?OURARING),
+    AuthConfig = dperl_ouraring_crawl:get_auth_config(), % ToDo: may depend on JobName or KeyPrefix
+    ?Info("oura_ring_auth_config ~p",[AuthConfig]),
+    Url = dderl_oauth:get_authorize_url(State#state.xsrf_token, AuthConfig, ?SYNC_OURARING),
     reply(From, #{<<"oura_ring_auth_config">> => #{<<"url">> => Url}}, self()),
     State;
 
 process_call({[<<"oauth2_callback">>], ReqData}, _Adapter, From, {SrcIp, _}, State) ->
     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "oauth2_callback", args => ReqData}, State),
     #{<<"oauth2_callback">> := 
-        #{<<"code">> := Code, <<"state">> := #{<<"type">> := Type}}} = jsx:decode(ReqData, [return_maps]),
-    case dderl_oauth:get_access_token(State#state.user, Code, Type) of
+        #{<<"code">> := Code, <<"state">> := #{<<"type">> := SyncType}}} = jsx:decode(ReqData, [return_maps]),
+    ?Info("oauth2_callback SyncType: ~p Code: ~p",[SyncType, Code]),
+    % ToDo: Check if this data can this be trusted
+    {SyncHandler,KeyPrefix} = try
+        SH = binary_to_existing_atom(SyncType,utf8),
+        {SH,SH:get_key_prefix()} % ToDo: may depend on JobName or KeyPrefix
+    catch 
+        _:E:_ ->
+            ?Error("Finding KeyPrefix : ~p", [E]),
+            reply(From, #{<<"oauth2_callback">> => #{<<"error">> => <<"Error finding KeyPrefix">>}}, self())
+    end,
+    ?Info("oauth2_callback KeyPrefix: ~p",[KeyPrefix]),
+    case dderl_oauth:get_access_token(State#state.user, KeyPrefix, Code, SyncHandler) of
         ok ->
             reply(From, #{<<"oauth2_callback">> => #{<<"status">> => <<"ok">>}}, self());
         {error, Error} ->
@@ -787,7 +801,7 @@ login(ReqData, From, SrcIp, State) ->
     Reply0 = #{vsn => list_to_binary(Vsn), app => HostApp,
                node => Node, host => Host,
                rowNumLimit => imem_sql_expr:rownum_limit()},
-    case catch erlimem_session:run_cmd(ErlImemSess, login,[]) of
+    case catch erlimem_session:run_cmd(ErlImemSess, login3,[]) of
         {error,{{'SecurityException',{?PasswordChangeNeeded,_}},ST}} ->
             ?Warn("Password expired ~s~n~p", [State#state.user, ST]),
             {[UserId],true} = imem_meta:select(ddAccount, [{#ddAccount{name=State#state.user,
@@ -850,17 +864,22 @@ login(ReqData, From, SrcIp, State) ->
                     reply(From, #{login => #{error => format_error(ErrMsg)}}, self()),
                     State
             end;
-        _ ->
-            {[UserId],true} = imem_meta:select(ddAccount, [{#ddAccount{name=State#state.user,
-                                           id='$1',_='_'}, [], ['$1']}]),
-            ok = dderl_dal:create_check_avatar_table(State#state.user),
-            act_log(From, ?LOGIN_CONNECT,
-                    #{src => SrcIp, userId => UserId, cmd_resp => "login success",
-                      cmd => "login"}, State),
-            if is_map(ReqData) -> {#{accountName=>State#state.user}, State#state{user_id = UserId}};
-               true ->
-                    reply(From, #{login => maps:merge(Reply0, #{accountName=>State#state.user})}, self()),
-                    State#state{user_id = UserId}
+        {_SKey, AccountId, EncHash} ->
+            ?Info("Login Result SKey:~p AccountId:~p EncHash:~p",[_SKey,AccountId,EncHash]),
+            ok = dderl_dal:create_check_avatar_channel(AccountId),
+            imem_enc_mnesia:put_enc_hash(EncHash),
+            act_log(From, ?LOGIN_CONNECT
+                , #{src=>SrcIp, userId=>AccountId, cmd_resp=>"login success", cmd=>"login"}
+                , State),
+            if 
+                is_map(ReqData) -> 
+                    {#{accountName=>State#state.user}, State#state{user_id = AccountId}};
+                true ->
+                    reply(From
+                        , #{login => maps:merge(Reply0, #{accountName=>State#state.user})}
+                        , self()
+                    ), 
+                    State#state{user_id = AccountId}
             end
     end.
 

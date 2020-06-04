@@ -1,36 +1,92 @@
 -module(dperl_office_365).
 
--include_lib("dperl/dperl.hrl").
+-include_lib("../dperl.hrl").
 
 -behavior(dperl_worker).
 -behavior(dperl_strategy_scr).
 
+-define(AUTH_CONFIG(__JOB_NAME),
+        ?GET_CONFIG(office365AuthConfig,[__JOB_NAME],
+            #{auth_url =>"https://login.microsoftonline.com/common/oauth2/v2.0/authorize?response_type=code&response_mode=query",
+              client_id => "12345", redirect_uri => "https://localhost:8443/dderl/", client_secret => "12345", grant_type => "authorization_code",
+              token_url => "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+              scope => "offline_access https://graph.microsoft.com/people.read"},
+            "Office 365 (Graph API) auth config")).
+
+-define(KEY_PREFIX(__JOB_NAME),
+          ?GET_CONFIG(keyPrefix, [__JOB_NAME], ["people","Office365"],
+          "Default KeyPrefix for Office365 data")
+       ).
+
 % dperl_worker exports
--export([init/1, terminate/2, handle_call/3, handle_cast/2, handle_info/2,
-         get_status/1, init_state/1]).
+-export([ init/1
+        , terminate/2
+        , handle_call/3
+        , handle_cast/2
+        , handle_info/2
+        , get_status/1
+        , init_state/1
+        ]).
 
 % contacts graph api
 % https://docs.microsoft.com/en-us/graph/api/resources/contact?view=graph-rest-1.0
 
--record(state, {name, channel, is_connected = true, access_token, api_url,
-                contacts = [], key_prefix, fetch_url, cl_contacts = [],
-                is_cleanup_finished = true, push_channel, type = pull,
-                audit_start_time = {0,0}, first_sync = true, username}).
+-record(state,  { name
+                , channel
+                , is_connected = true
+                , access_token
+                , api_url
+                , contacts = []
+                , key_prefix
+                , fetch_url
+                , cl_contacts = []
+                , is_cleanup_finished = true
+                , push_channel
+                , type = pull
+                , audit_start_time = {0,0}
+                , first_sync = true
+                , accountId
+            }).
 
 % dperl_strategy_scr export
--export([connect_check_src/1, get_source_events/2, connect_check_dst/1,
-         do_cleanup/5, do_refresh/2, load_src_after_key/3, load_dst_after_key/3,
-         fetch_src/2, fetch_dst/2, delete_dst/2, insert_dst/3,
-         update_dst/3, report_status/3]).
+-export([ connect_check_src/1
+        , get_source_events/2
+        , connect_check_dst/1
+        , do_cleanup/5
+        , do_refresh/2
+        , load_src_after_key/3
+        , load_dst_after_key/3
+        , fetch_src/2
+        , fetch_dst/2
+        , delete_dst/2
+        , insert_dst/3
+        , update_dst/3
+        , report_status/3
+        ]).
+
+% dderl_oauth exports
+-export([ get_auth_config/0
+        , get_auth_config/1
+        , get_key_prefix/0
+        , get_key_prefix/1
+        ]).
+
+get_auth_config() -> ?AUTH_CONFIG(<<>>).
+
+get_auth_config(JobName) -> ?AUTH_CONFIG(JobName).
+
+get_key_prefix() -> ?KEY_PREFIX(<<>>).
+
+get_key_prefix(JobName) -> ?KEY_PREFIX(JobName).
 
 connect_check_src(#state{is_connected = true} = State) ->
     {ok, State};
-connect_check_src(#state{is_connected = false, username = Username} = State) ->
+connect_check_src(#state{is_connected=false, accountId=AccountId, key_prefix=KeyPrefix} = State) ->
     ?JTrace("Refreshing access token"),
-    case dderl_oauth:refresh_access_token(Username, ?OFFICE365) of
+    case dderl_oauth:refresh_access_token(AccountId, KeyPrefix, ?SYNC_OFFICE365) of
         {ok, AccessToken} ->
             ?Info("new access token fetched"),
-            {ok, State#state{access_token = AccessToken, is_connected = true}};
+            {ok, State#state{access_token=AccessToken, is_connected=true}};
         {error, Error} ->
             ?JError("Unexpected response : ~p", [Error]),
             {error, Error, State}
@@ -184,20 +240,20 @@ init({#dperlJob{name=Name, srcArgs = #{api_url := ApiUrl}, args = Args,
         undefined ->
             ?JError("Encryption hash is not avaialable"),
             {stop, badarg};
-        {Username, EncHash} ->
-            ?JInfo("Starting with ~p's enchash...", [Username]),
+        {AccountId, EncHash} ->
+            ?JInfo("Starting with ~p's enchash...", [AccountId]),
             imem_enc_mnesia:put_enc_hash(EncHash),
-            case dderl_oauth:get_token_info(Username, ?OFFICE365) of
+            KeyPrefix = maps:get(key_prefix, DstArgs, get_key_prefix(Name)),
+            case dderl_oauth:get_token_info(AccountId, KeyPrefix, ?SYNC_OFFICE365) of
                 #{<<"access_token">> := AccessToken} ->
                     ChannelBin = dperl_dal:to_binary(Channel),
                     PChannelBin = dperl_dal:to_binary(PChannel),
-                    KeyPrefix = maps:get(key_prefix, DstArgs, []),
                     Type = maps:get(type, Args, pull),
                     dperl_dal:create_check_channel(ChannelBin),
                     dperl_dal:create_check_channel(PChannelBin),
                     {ok, State#state{channel = ChannelBin, name = Name, api_url = ApiUrl,
                                     key_prefix = KeyPrefix, access_token = AccessToken,
-                                    push_channel = PChannelBin, type = Type, username = Username}};
+                                    push_channel = PChannelBin, type = Type, accountId = AccountId}};
                 _ ->
                     ?JError("Access token not found"),
                     {stop, badarg}

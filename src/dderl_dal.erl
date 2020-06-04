@@ -45,9 +45,9 @@
         ,get_d3_templates_path/1
         ,get_host_app/0
         ,is_proxy/2
-        ,create_check_avatar_table/1
-        ,write_to_avatar_table/3
-        ,read_from_avatar_table/2
+        ,create_check_avatar_channel/1
+        ,write_to_avatar_channel/3
+        ,read_from_avatar_channel/2
         ]).
 
 -record(state, { schema :: term()
@@ -63,9 +63,11 @@
 -define(USE_CONN(__ConnId), {dderl, conn, {conn, __ConnId}, use}).
 -define(USE_LOCAL_CONN, {dderl, conn, local, use}).
 
--define(GET_AVATAR_TABLE(__USERNAME),
-    ?GET_CONFIG(__USERNAME,[], <<__USERNAME/binary, "_avatar">>,"SAML - flag to verify response signature")).
+-define(GET_AVATAR_CHANNEL_PREFIX,
+    ?GET_CONFIG(avatarChannelPrefix,[], <<"ph">>,"PRIVACY_HUB - binary string prefix for avatar channel name")).
 
+-define(GET_AVATAR_CHANNEL_OPTIONS,
+    ?GET_CONFIG(avatarChannelOptions,[], [encrypted,audit,history],"PRIVACY_HUB - table options for avatar channel")).
 
 %% Validate this permission.
 -define(USE_ADAPTER, {dderl, adapter, {id, __AdaptId}, use}).
@@ -856,25 +858,26 @@ is_proxy(AppId, NetCtx) ->
         _ -> false
     end.
 
-get_avatar_table(Username) when is_atom(Username) ->
-    get_avatar_table(atom_to_binary(Username, utf8));
-get_avatar_table(Username) when is_list(Username) ->
-    get_avatar_table(list_to_binary(Username));
-get_avatar_table(Username) when is_binary(Username) ->
-    ?GET_AVATAR_TABLE(Username).
+avatar_channel_name(AccountId) when is_atom(AccountId) ->
+    avatar_channel_name(atom_to_binary(AccountId, utf8));
+avatar_channel_name(AccountId) when is_list(AccountId) ->
+    avatar_channel_name(list_to_binary(AccountId));
+avatar_channel_name(AccountId) when is_binary(AccountId) ->
+    Prefix = ?GET_AVATAR_CHANNEL_PREFIX,
+    <<Prefix/binary, AccountId/binary>>.
 
-create_check_avatar_table(Username) ->
-    AvatarTable = get_avatar_table(Username),
-    imem_dal_skvh:create_check_channel(AvatarTable, []).
-    % imem_dal_skvh:create_check_channel(AvatarTable, [encrypted]).
+% -spec create_check_avatar_channel(ddEntityId()) -> binary().
+create_check_avatar_channel(AccountId) ->
+    imem_dal_skvh:create_check_channel(avatar_channel_name(AccountId), ?GET_AVATAR_CHANNEL_OPTIONS).
 
-write_to_avatar_table(Username, Key, Value) ->
-    AvatarTable = get_avatar_table(Username),
-    imem_dal_skvh:write(Username, AvatarTable, Key, Value).
+write_to_avatar_channel(AccountId, Key, Value) ->
+    imem_dal_skvh:write(AccountId, avatar_channel_name(AccountId), Key, Value).
 
-read_from_avatar_table(Username, Key) ->
-    AvatarTable = get_avatar_table(Username),
-    imem_dal_skvh:read(Username, AvatarTable, Key).
+read_from_avatar_channel(AccountId, Key) ->
+    case imem_dal_skvh:read(AccountId, avatar_channel_name(AccountId), [Key]) of
+        [#{cvalue := CValue}] when is_binary(CValue) -> imem_json:decode(CValue, [return_maps]);
+        [#{cvalue := CValue}] when is_map(CValue)->     CValue
+    end.
 
 -spec exec_is_proxy_fun(reference(), map()) -> boolean().
 exec_is_proxy_fun(Fun, NetCtx) ->

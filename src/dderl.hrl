@@ -3,6 +3,8 @@
 
 -include_lib("imem/include/imem_meta.hrl").
 -include_lib("imem/include/imem_exports.hrl").
+% -include("dderl/_checkouts/imem/include/imem_config.hrl").
+
 
 -define(DEFAULT_ROW_SIZE, 100).
 -record(viewstate,
@@ -324,8 +326,8 @@
 
 % OAUTH 
 
--define(OURARING, <<"ouraRing">>).
+-define(SYNC_OURARING, dperl_ouraring_crawl).
 
--define(OFFICE365, <<"office365">>).
+-define(SYNC_OFFICE365, dperl_office_365).
 
 -endif.

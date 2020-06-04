@@ -1,36 +1,89 @@
 -module(dperl_ouraring_crawl).
 
--include_lib("dperl/dperl.hrl").
+-include_lib("../dperl.hrl").
 
 -behavior(dperl_worker).
 -behavior(dperl_strategy_scr).
+
+-define(AUTH_CONFIG(__JOB_NAME),
+        ?GET_CONFIG(ouraRingAuthConfig,[__JOB_NAME],
+            #{auth_url =>"https://cloud.ouraring.com/oauth/authorize?response_type=code",
+              client_id => "12345", redirect_uri => "https://localhost:8443/dderl/",
+              client_secret => "12345", grant_type => "authorization_code",
+              token_url => "https://cloud.ouraring.com/oauth/token",
+              scope => "email personal daily"},
+            "Oura Ring auth config")).
+
+-define(KEY_PREFIX(__JOB_NAME),
+          ?GET_CONFIG(keyPrefix, [__JOB_NAME], ["healthDevice","OuraRing"],
+          "Default KeyPrefix for Oura Ring data")
+       ).
 
 -define(SHIFT_DAYS(__JOB_NAME),
           ?GET_CONFIG(daysToBeShiftedAtStart, [__JOB_NAME], 100,
           "Days to be shifted backwards for starting the job")
        ).
 
-% dperl_worker exports
--export([init/1, terminate/2, handle_call/3, handle_cast/2, handle_info/2,
-         get_status/1, init_state/1]).
+-record(state,  { name
+                , channel
+                , is_connected = true
+                , access_token
+                , api_url
+                , last_sleep_day
+                , last_activity_day
+                , last_readiness_day
+                , infos = []
+                , key_prefix
+                , accountId
+                }).
 
--record(state, {name, channel, is_connected = true, access_token, api_url,
-                last_sleep_day, last_activity_day, last_readiness_day,
-                infos = [], key_prefix, username}).
+% dperl_worker exports
+-export([ init/1
+        , terminate/2
+        , handle_call/3
+        , handle_cast/2
+        , handle_info/2
+        , get_status/1
+        , init_state/1
+        ]).
+
+% dderl_oauth exports
+-export([ get_auth_config/0
+        , get_auth_config/1
+        , get_key_prefix/0
+        , get_key_prefix/1
+        ]).
 
 % dperl_strategy_scr export
--export([connect_check_src/1, get_source_events/2, connect_check_dst/1,
-         do_cleanup/2, do_refresh/2, fetch_src/2, fetch_dst/2, delete_dst/2,
-         insert_dst/3, update_dst/3, report_status/3]).
+-export([ connect_check_src/1
+        , get_source_events/2
+        , connect_check_dst/1
+        , do_cleanup/2
+        , do_refresh/2
+        , fetch_src/2
+        , fetch_dst/2
+        , delete_dst/2
+        , insert_dst/3
+        , update_dst/3
+        , report_status/3
+        ]).
+
+get_auth_config() -> ?AUTH_CONFIG(<<>>).
+
+get_auth_config(JobName) -> ?AUTH_CONFIG(JobName).
+
+get_key_prefix() -> ?KEY_PREFIX(<<>>).
+
+get_key_prefix(JobName) -> ?KEY_PREFIX(JobName).
 
 connect_check_src(#state{is_connected = true} = State) ->
     {ok, State};
-connect_check_src(#state{is_connected = false, username = Username} = State) ->
+connect_check_src(#state{is_connected=false, accountId=AccountId, key_prefix=KeyPrefix} = State) ->
     ?JTrace("Refreshing access token"),
-    case dderl_oauth:refresh_access_token(Username, ?OURARING) of
+    case dderl_oauth:refresh_access_token(AccountId, KeyPrefix, ?SYNC_OURARING) of
         {ok, AccessToken} ->
             ?Info("new access token fetched"),
-            {ok, State#state{access_token = AccessToken, is_connected = true}};
+            {ok, State#state{access_token=AccessToken, is_connected=true}};
         {error, Error} ->
             ?JError("Unexpected response : ~p", [Error]),
             {error, Error, State}
@@ -104,18 +157,18 @@ init({#dperlJob{name=Name, dstArgs = #{channel := Channel} = DstArgs,
         undefined ->
             ?JError("Encryption hash is not avaialable"),
             {stop, badarg};
-        {Username, EncHash} ->
-            ?JInfo("Starting with ~p's enchash...", [Username]),
+        {AccountId, EncHash} ->
+            ?JInfo("Starting with ~p's enchash...", [AccountId]),
             imem_enc_mnesia:put_enc_hash(EncHash),
-            case dderl_oauth:get_token_info(Username, ?OURARING) of
+            KeyPrefix = maps:get(key_prefix, DstArgs, get_key_prefix(Name)),
+            case dderl_oauth:get_token_info(AccountId, KeyPrefix, ?SYNC_OURARING) of
                 #{<<"access_token">> := AccessToken} ->
                     ChannelBin = dperl_dal:to_binary(Channel),
-                    KeyPrefix = maps:get(key_prefix, DstArgs, []),
                     dperl_dal:create_check_channel(ChannelBin),
-                    {ok, State#state{channel = ChannelBin, api_url = ApiUrl, username = Username,
-                                    key_prefix = KeyPrefix, access_token = AccessToken}};
+                    {ok, State#state{channel=ChannelBin, api_url=ApiUrl, accountId=AccountId,
+                                    key_prefix=KeyPrefix, access_token=AccessToken}};
                 _ ->
-                    ?JError("Access token not found"),
+                    ?JError("Access token not found for KeyPrefix ~p",[KeyPrefix]),
                     {stop, badarg}
             end
     end;

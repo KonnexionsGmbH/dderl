@@ -1,60 +1,54 @@
 -module(dderl_oauth).
 
 -include("dderl.hrl").
+% -include("dderl/_checkouts/imem/include/imem_config.hrl").
 
--define(OFFICE_365_AUTH_CONFIG,
-        ?GET_CONFIG(office365AuthConfig,[],
-            #{auth_url =>"https://login.microsoftonline.com/common/oauth2/v2.0/authorize?response_type=code&response_mode=query",
-              client_id => "12345", redirect_uri => "https://localhost:8443/dderl/", client_secret => "12345", grant_type => "authorization_code",
-              token_url => "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-              scope => "offline_access https://graph.microsoft.com/people.read"},
-            "Office 365 (Graph API) auth config")).
+-define(TOKEN_KEYPART, "#token#").
 
--define(OURA_RING_AUTH_CONFIG,
-        ?GET_CONFIG(ouraRingAuthConfig,[],
-            #{auth_url =>"https://cloud.ouraring.com/oauth/authorize?response_type=code",
-              client_id => "12345", redirect_uri => "https://localhost:8443/dderl/",
-              client_secret => "12345", grant_type => "authorization_code",
-              token_url => "https://cloud.ouraring.com/oauth/token",
-              scope => "email personal daily"},
-            "Oura Ring auth config")).
+-export([ get_authorize_url/3
+        , get_access_token/4
+        , get_token_info/3
+        , refresh_access_token/3
+        ]).
 
--export([get_authorize_url/2, get_access_token/3, get_token_info/2, refresh_access_token/2]).
+get_token_info(AccountId, KeyPrefix, _SyncType) ->
+    dderl_dal:read_from_avatar_channel(AccountId, KeyPrefix ++ [?TOKEN_KEYPART]).
 
-get_auth_config(?OFFICE365) -> ?OFFICE_365_AUTH_CONFIG;
-get_auth_config(?OURARING) -> ?OURA_RING_AUTH_CONFIG.
+set_token_info(AccountId, KeyPrefix, TokenInfo, SyncType) when is_map(TokenInfo) ->
+    set_token_info(AccountId, KeyPrefix, imem_json:encode(TokenInfo), SyncType);
+set_token_info(AccountId, KeyPrefix, TokenInfo, SyncType) when is_list(TokenInfo) ->
+    set_token_info(AccountId, KeyPrefix, list_to_binary(TokenInfo), SyncType);
+set_token_info(AccountId, KeyPrefix, TokenInfo, _SyncType) when is_binary(TokenInfo) ->
+    dderl_dal:write_to_avatar_channel(AccountId, KeyPrefix ++ [?TOKEN_KEYPART], TokenInfo).
 
-get_token_info(Username, Type) when Type == ?OFFICE365 orelse Type == ?OURARING ->
-    dderl_dal:read_from_avatar_table(Username, [binary_to_list(Type),"token"]).
-
-set_token_info(Username, TokenInfo, Type) when is_map(TokenInfo) ->
-    set_token_info(Username, imem_json:encode(TokenInfo), Type);
-set_token_info(Username, TokenInfo, Type) when is_list(TokenInfo) ->
-    set_token_info(Username, list_to_binary(TokenInfo), Type);
-set_token_info(Username, TokenInfo, Type) when is_binary(TokenInfo), (Type == ?OFFICE365 orelse Type == ?OURARING) ->
-    dderl_dal:write_to_avatar_table(Username, [binary_to_list(Type), "token"], TokenInfo).
-
-get_authorize_url(XSRFToken, Type) when Type == ?OFFICE365 orelse Type == ?OURARING ->
-    State = #{xsrfToken => XSRFToken, type => Type},
-    #{auth_url := Url, client_id := ClientId, redirect_uri := RedirectURI,
-      scope := Scope} = get_auth_config(Type),
+get_authorize_url(XSRFToken, AuthConfig, SyncType) ->
+    State = #{xsrfToken => XSRFToken, type => SyncType},
+    #{auth_url:=Url, client_id:=ClientId, redirect_uri:=RedirectURI, scope:=Scope} = AuthConfig, 
     UrlParams = dperl_dal:url_enc_params(
         #{"client_id" => ClientId, "redirect_uri" => {enc, RedirectURI},
           "scope" => {enc, Scope}, "state" => {enc, imem_json:encode(State)}}),
     erlang:iolist_to_binary([Url, "&", UrlParams]).
 
-get_access_token(Username, Code, Type) when Type == ?OFFICE365 orelse Type == ?OURARING ->
+get_access_token(AccountId, KeyPrefix, Code, SyncType) ->
+    AuthConfig = try 
+        SyncType:get_auth_config() % ToDo: AuthConfig may depend on JobName or KeyPrefix
+    catch 
+        _:E:S ->
+            ?Error("Finding AuthConfig : ~p ñ~p", [E,S]),
+            {error, E}
+    end,
+    ?Info("get_access_token AuthConfig: ~p",[AuthConfig]),
     #{token_url := TUrl, client_id := ClientId, redirect_uri := RedirectURI,
-      client_secret := Secret, grant_type := GrantType,
-      scope := Scope} = get_auth_config(Type),
+            client_secret := Secret, grant_type := GrantType,
+            scope := Scope} = AuthConfig,
     Body = dperl_dal:url_enc_params(
         #{"client_id" => ClientId, "scope" => {enc, Scope}, "code" => Code,
-          "redirect_uri" => {enc, RedirectURI}, "grant_type" => GrantType,
-          "client_secret" => {enc, Secret}}),
+        "redirect_uri" => {enc, RedirectURI}, "grant_type" => GrantType,
+        "client_secret" => {enc, Secret}}),
     ContentType = "application/x-www-form-urlencoded",
     case httpc:request(post, {TUrl, "", ContentType, Body}, [], []) of
         {ok, {{_, 200, "OK"}, _, TokenInfo}} ->
-            set_token_info(Username, TokenInfo, Type),
+            set_token_info(AccountId, KeyPrefix, TokenInfo, SyncType),
             ok;
         {ok, {{_, Code, _}, _, Error}} ->
             ?Error("Fetching access token : ~p:~p", [Code, Error]),
@@ -64,10 +58,10 @@ get_access_token(Username, Code, Type) when Type == ?OFFICE365 orelse Type == ?O
             {error, Error}
     end.
 
-refresh_access_token(Username, Type) when Type == ?OFFICE365 orelse Type == ?OURARING ->
+refresh_access_token(AccountId, KeyPrefix, SyncType) ->
     #{token_url := TUrl, client_id := ClientId, scope := Scope,
-      client_secret := Secret} = get_auth_config(Type),
-    #{<<"refresh_token">> := RefreshToken} = get_token_info(Username, Type),
+      client_secret := Secret} = SyncType:get_auth_config(),
+    #{<<"refresh_token">> := RefreshToken} = get_token_info(AccountId, KeyPrefix, SyncType),
     Body = dperl_dal:url_enc_params(
         #{"client_id" => ClientId, "client_secret" => {enc, Secret}, "scope" => {enc, Scope},
           "refresh_token" => RefreshToken, "grant_type" => "refresh_token"}),
@@ -75,7 +69,7 @@ refresh_access_token(Username, Type) when Type == ?OFFICE365 orelse Type == ?OUR
     case httpc:request(post, {TUrl, "", ContentType, Body}, [], []) of
         {ok, {{_, 200, "OK"}, _, TokenBody}} ->
             TokenInfo = imem_json:decode(list_to_binary(TokenBody), [return_maps]),
-            set_token_info(Username, TokenBody, Type),
+            set_token_info(AccountId, KeyPrefix, TokenBody, SyncType),
             #{<<"access_token">> := AccessToken} = TokenInfo,
             {ok, AccessToken};
         Error ->
