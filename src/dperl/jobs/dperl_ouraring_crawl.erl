@@ -6,7 +6,7 @@
 -behavior(dperl_strategy_scr).
 
 -define(AUTH_CONFIG(__JOB_NAME),
-        ?GET_CONFIG(ouraRingAuthConfig,[__JOB_NAME],
+        ?GET_CONFIG(oAuth2Config,[__JOB_NAME],
             #{auth_url =>"https://cloud.ouraring.com/oauth/authorize?response_type=code",
               client_id => "12345", redirect_uri => "https://localhost:8443/dderl/",
               client_secret => "12345", grant_type => "authorization_code",
