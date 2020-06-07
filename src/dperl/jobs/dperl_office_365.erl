@@ -61,10 +61,10 @@
                 , isConnected = true
                 , accessToken
                 , apiUrl
-                , contacts = []
+                , contacts = []         % 
                 , keyPrefix
                 , fetchUrl
-                , clContacts = []
+                , clContacts = []       % 
                 , isCleanupFinished = true
                 , pushChannel
                 , type = pull
@@ -130,7 +130,7 @@ connect_check_src(#state{isConnected=true} = State) ->
     {ok, State};
 connect_check_src(#state{isConnected=false, accountId=AccountId, keyPrefix=KeyPrefix} = State) ->
     ?JTrace("Refreshing access token"),
-    case dderl_oauth:refresh_accessToken(AccountId, KeyPrefix, ?SYNC_OFFICE365) of
+    case dderl_oauth:refresh_access_token(AccountId, KeyPrefix, ?SYNC_OFFICE365) of
         {ok, AccessToken} ->
             ?Info("new access token fetched"),
             {ok, State#state{accessToken=AccessToken, isConnected=true}};
@@ -308,8 +308,8 @@ get_status(#state{}) -> #{}.
 
 init_state(_) -> #state{}.
 
-init({#dperlJob{name=Name, srcArgs = #{apiUrl := ApiUrl}, args = Args,
-                dstArgs = #{channel := Channel, pushChannel := PChannel} = DstArgs}, State}) ->
+init({#dperlJob{name=Name, srcArgs=#{apiUrl:=ApiUrl}, args=Args,
+                dstArgs=#{channel:=Channel, pushChannel:=PChannel} = DstArgs}, State}) ->
     case dperl_auth_cache:get_enc_hash(Name) of
         undefined ->
             ?JError("Encryption hash is not avaialable"),
@@ -319,7 +319,7 @@ init({#dperlJob{name=Name, srcArgs = #{apiUrl := ApiUrl}, args = Args,
             imem_enc_mnesia:put_enc_hash(EncHash),
             KeyPrefix = maps:get(keyPrefix, DstArgs, get_key_prefix(Name)),
             case dderl_oauth:get_token_info(AccountId, KeyPrefix, ?SYNC_OFFICE365) of
-                #{<<"accessToken">> := AccessToken} ->
+                #{<<"access_token">> := AccessToken} ->
                     ChannelBin = dperl_dal:to_binary(Channel),
                     PChannelBin = dperl_dal:to_binary(PChannel),
                     Type = maps:get(type, Args, pull),
@@ -329,7 +329,7 @@ init({#dperlJob{name=Name, srcArgs = #{apiUrl := ApiUrl}, args = Args,
                                     keyPrefix = KeyPrefix, accessToken = AccessToken,
                                     pushChannel = PChannelBin, type = Type, accountId = AccountId}};
                 _ ->
-                    ?JError("Access token not found"),
+                    ?JError("Access token not found for ~p at ~p", [AccountId, KeyPrefix]),
                     {stop, badarg}
             end
     end;
@@ -355,6 +355,8 @@ terminate(Reason, _State) ->
 
 %% private functions
 
+%% Fetch all remote contacts, create 3-tuple {Key::list(), RemoteId::binary(), RemoteValue::map())
+%% Sort by Key (needed for sync)
 fetch_all_contacts(Url, AccessToken, KeyPrefix, JobName) ->
     fetch_all_contacts(Url, AccessToken, KeyPrefix, JobName, []).
 
@@ -367,7 +369,7 @@ fetch_all_contacts(Url, AccessToken, KeyPrefix, JobName, AccContacts) ->
             fetch_all_contacts(NextUrl, AccessToken, KeyPrefix, lists:append(Contacts, AccContacts));
         #{<<"value">> := MoreContacts} ->
             Contacts = format_remote_values_to_kv(MoreContacts, KeyPrefix, JobName),
-            {ok, lists:append(Contacts, AccContacts)};
+            {ok, lists:keysort(1, lists:append(Contacts, AccContacts))};
         {error, Error} ->
             {error, Error}
     end.

@@ -876,7 +876,8 @@ write_to_avatar_channel(AccountId, Key, Value) ->
 read_from_avatar_channel(AccountId, Key) ->
     case imem_dal_skvh:read(AccountId, avatar_channel_name(AccountId), [Key]) of
         [#{cvalue := CValue}] when is_binary(CValue) -> imem_json:decode(CValue, [return_maps]);
-        [#{cvalue := CValue}] when is_map(CValue)->     CValue
+        [#{cvalue := CValue}] when is_map(CValue)->     CValue;
+        [] ->                                           []
     end.
 
 -spec exec_is_proxy_fun(reference(), map()) -> boolean().

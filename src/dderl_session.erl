@@ -865,7 +865,7 @@ login(ReqData, From, SrcIp, State) ->
                     State
             end;
         {_SKey, AccountId, EncHash} ->
-            ?Info("Login Result SKey:~p AccountId:~p EncHash:~p",[_SKey,AccountId,EncHash]),
+            %?Info("Login Result SKey:~p AccountId:~p EncHash:~p",[_SKey,AccountId,EncHash]),
             ok = dderl_dal:create_check_avatar_channel(AccountId),
             imem_enc_mnesia:put_enc_hash(EncHash),
             act_log(From, ?LOGIN_CONNECT
