@@ -382,14 +382,14 @@ process_call({[<<"about">>], _ReqData}, _Adapter, From, {SrcIp,_}, State) ->
 
 process_call({[<<"office_365_auth_config">>], _ReqData}, _Adapter, From, {SrcIp, _}, State) ->
     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "office_365_auth_config"}, State),
-    AuthConfig = dperl_office_365:get_auth_config(), % ToDo: may depend on JobName or KeyPrefix
+    AuthConfig = dperl_office_365:get_auth_config(), % ToDo: may depend on JobName or TokenPrefix
     Url = dderl_oauth:get_authorize_url(State#state.xsrf_token, AuthConfig, ?SYNC_OFFICE365),
     reply(From, #{<<"office_365_auth_config">> => #{<<"url">> => Url}}, self()),
     State;
 
 process_call({[<<"oura_ring_auth_config">>], _ReqData}, _Adapter, From, {SrcIp, _}, State) ->
     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "oura_ring_auth_config"}, State),
-    AuthConfig = dperl_ouraring_crawl:get_auth_config(), % ToDo: may depend on JobName or KeyPrefix
+    AuthConfig = dperl_ouraring_crawl:get_auth_config(), % ToDo: may depend on JobName or TokenPrefix
     ?Info("oura_ring_auth_config ~p",[AuthConfig]),
     Url = dderl_oauth:get_authorize_url(State#state.xsrf_token, AuthConfig, ?SYNC_OURARING),
     reply(From, #{<<"oura_ring_auth_config">> => #{<<"url">> => Url}}, self()),
@@ -401,16 +401,16 @@ process_call({[<<"oauth2_callback">>], ReqData}, _Adapter, From, {SrcIp, _}, Sta
         #{<<"code">> := Code, <<"state">> := #{<<"type">> := SyncType}}} = jsx:decode(ReqData, [return_maps]),
     ?Info("oauth2_callback SyncType: ~p Code: ~p",[SyncType, Code]),
     % ToDo: Check if this data can this be trusted
-    {SyncHandler,KeyPrefix} = try
+    {SyncHandler,TokenPrefix} = try
         SH = binary_to_existing_atom(SyncType,utf8),
-        {SH,SH:get_key_prefix()} % ToDo: may depend on JobName or KeyPrefix
+        {SH,SH:get_auth_token_key_prefix()} % ToDo: may depend on JobName or TokenPrefix
     catch 
         _:E:_ ->
-            ?Error("Finding KeyPrefix : ~p", [E]),
-            reply(From, #{<<"oauth2_callback">> => #{<<"error">> => <<"Error finding KeyPrefix">>}}, self())
+            ?Error("Finding TokenPrefix : ~p", [E]),
+            reply(From, #{<<"oauth2_callback">> => #{<<"error">> => <<"Error finding TokenPrefix">>}}, self())
     end,
-    ?Info("oauth2_callback KeyPrefix: ~p",[KeyPrefix]),
-    case dderl_oauth:get_access_token(State#state.user, KeyPrefix, Code, SyncHandler) of
+    ?Info("oauth2_callback TokenPrefix: ~p",[TokenPrefix]),
+    case dderl_oauth:get_access_token(State#state.user, TokenPrefix, Code, SyncHandler) of
         ok ->
             reply(From, #{<<"oauth2_callback">> => #{<<"status">> => <<"ok">>}}, self());
         {error, Error} ->

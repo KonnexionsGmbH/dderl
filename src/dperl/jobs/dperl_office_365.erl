@@ -20,26 +20,53 @@
             )
         ).
 
+-define(OAUTH2_TOKEN_KEY_PREFIX(__JOB_NAME),
+            ?GET_CONFIG(oAuth2TokenKeyPrefix,
+            [__JOB_NAME],
+            ["dperlJob","Office365"],
+            "Default KeyPrefix for Office365 token cache"
+            )
+       ).
+
 -define(KEY_PREFIX(__JOB_NAME),
             ?GET_CONFIG(keyPrefix,
             [__JOB_NAME],
             ["contact","Office365"],
-            "Default KeyPrefix for Office365 data"
+            "Default KeyPrefix for Office365 contact data"
             )
        ).
 
--define(CONTACT_ATTRIBUTES(__JOB_NAME),
+-define(CONTACT_INDEXID,
+            ?GET_CONFIG(contactIndexId,
+            [],
+            1,
+            "Id for index on Office365 contact data"
+            )
+       ).
+
+-define(CONTENT_ATTRIBUTES(__JOB_NAME),
             ?GET_CONFIG(contactAttributes,
             [__JOB_NAME],
-            [<<"businessPhones">>,<<"mobilePhone">>,<<"title">>,<<"personalNotes">>,<<"parentFolderId">>
-            ,<<"companyName">>,<<"emailAddresses">>,<<"middleName">>,<<"businessHomePage">>,<<"id">>
-            ,<<"assistantName">>,<<"department">>,<<"children">>,<<"officeLocation">>,<<"createdDateTime">>
-            ,<<"profession">>,<<"givenName">>,<<"categories">>,<<"nickName">>,<<"jobTitle">>,<<"yomiGivenName">>
-            ,<<"changeKey">>,<<"surname">>,<<"imAddresses">>,<<"spouseName">>,<<"yomiSurname">>,<<"businessAddress">>
-            ,<<"lastModifiedDateTime">>,<<"generation">>,<<"manager">>,<<"initials">>,<<"displayName">>
-            ,<<"homeAddress">>,<<"otherAddress">>,<<"homePhones">>,<<"fileAs">>,<<"yomiCompanyName">>,<<"birthday">>
+            [<<"businessPhones">>,<<"mobilePhone">> %,<<"title">> ,<<"personalNotes">>
+            ,<<"companyName">>,<<"emailAddresses">> % ,<<"middleName">>,<<"businessHomePage">>
+            ,<<"assistantName">>,<<"department">> % ,<<"children">>,<<"officeLocation">>
+            ,<<"profession">>,<<"givenName">>,<<"categories">>,<<"jobTitle">> % ,<<"nickName">>,<<"yomiGivenName">>
+            ,<<"surname">>,<<"imAddresses">>,<<"businessAddress">> % ,<<"spouseName">>,<<"yomiSurname">>
+            ,<<"manager">> % ,<<"generation">>,<<"initials">>,<<"displayName">>
+            % ,<<"homeAddress">>,<<"otherAddress">>,<<"homePhones">>,<<"fileAs">>,<<"yomiCompanyName">>,<<"birthday">>
             ], 
             "Attributes to be synced for Office365 contact data"
+            )
+       ).
+
+-define(META_ATTRIBUTES(__JOB_NAME),
+            ?GET_CONFIG(contactAttributes,
+            [__JOB_NAME],
+            [<<"id">>
+            ,<<"lastModifiedDateTime">>
+            ,<<"changeKey">>            %,<<"parentFolderId">>,<<"createdDateTime">>
+            ], 
+            "Attributes used for Office365 contact change tracking"
             )
        ).
 
@@ -56,21 +83,22 @@
 % contacts graph api
 % https://docs.microsoft.com/en-us/graph/api/resources/contact?view=graph-rest-1.0
 
--record(state,  { name
-                , channel
-                , isConnected = true
-                , accessToken
-                , apiUrl
-                , contacts = []         % 
-                , keyPrefix
-                , fetchUrl
-                , clContacts = []       % 
-                , isCleanupFinished = true
-                , pushChannel
-                , type = pull
-                , auditStartTime = {0,0}
-                , firstSync = true
-                , accountId
+-record(state,  { name                      :: binary()
+                , type = pull               :: pull|push
+                , channel                   :: binary()
+                , keyPrefix                 :: list()
+                , tokenPrefix               :: list()
+                , token                     :: map()
+                , apiUrl                    :: binary()
+                , fetchUrl                  :: binary()
+                , contacts = []             :: list()
+                , clContacts = []           :: list()
+                , isConnected = true        :: boolean()
+                , isFirstSync = true        :: boolean()
+                , isCleanupFinished = true  :: boolean()
+                , auditStartTime = {0,0}    :: tuple()
+                , template  = ?NOT_FOUND    :: ?NOT_FOUND|map()
+                , accountId                 :: system|integer()
             }).
 
 % dperl_strategy_scr export
@@ -92,6 +120,8 @@
 % dderl_oauth exports
 -export([ get_auth_config/0
         , get_auth_config/1
+        , get_auth_token_key_prefix/0
+        , get_auth_token_key_prefix/1
         , get_key_prefix/0
         , get_key_prefix/1
         ]).
@@ -99,6 +129,10 @@
 get_auth_config() -> ?OAUTH2_CONFIG(<<>>).
 
 get_auth_config(JobName) -> ?OAUTH2_CONFIG(JobName).
+
+get_auth_token_key_prefix() -> ?OAUTH2_TOKEN_KEY_PREFIX(<<>>).
+
+get_auth_token_key_prefix(JobName) -> ?OAUTH2_TOKEN_KEY_PREFIX(JobName).
 
 get_key_prefix() -> ?KEY_PREFIX(<<>>).
 
@@ -123,30 +157,31 @@ format_remote_values_to_kv([Value|Values], KeyPrefix, JobName, Acc) ->
     Key = KeyPrefix ++ [local_contact_id(RemoteId)],
     format_remote_values_to_kv(Values, KeyPrefix, JobName, [{Key,RemoteId,format_value(Value, JobName)}|Acc]).
 
-% format remote or local value by projecting it down to configured list of synced attributes
-format_value(Value, JobName) when is_map(Value) -> maps:with(?CONTACT_ATTRIBUTES(JobName), Value).
+% format remote or local value by projecting it down to configured list of synced (meta + content) attributes
+format_value(Value, JobName) when is_map(Value) -> 
+    maps:with(?META_ATTRIBUTES(JobName)++?CONTENT_ATTRIBUTES(JobName), Value).
 
 connect_check_src(#state{isConnected=true} = State) ->
     {ok, State};
-connect_check_src(#state{isConnected=false, accountId=AccountId, keyPrefix=KeyPrefix} = State) ->
+connect_check_src(#state{isConnected=false, accountId=AccountId, tokenPrefix=TokenPrefix} = State) ->
     ?JTrace("Refreshing access token"),
-    case dderl_oauth:refresh_access_token(AccountId, KeyPrefix, ?SYNC_OFFICE365) of
-        {ok, AccessToken} ->
+    case dderl_oauth:refresh_access_token(AccountId, TokenPrefix, ?SYNC_OFFICE365) of
+        {ok, Token} ->
             ?Info("new access token fetched"),
-            {ok, State#state{accessToken=AccessToken, isConnected=true}};
+            {ok, State#state{token=Token, isConnected=true}};
         {error, Error} ->
             ?JError("Unexpected response : ~p", [Error]),
             {error, Error, State}
     end.
 
 get_source_events(#state{auditStartTime=LastStartTime, type=push,
-            pushChannel=PushChannel, firstSync=FirstSync} = State, BulkSize) ->
-    case dperl_dal:read_audit_keys(PushChannel, LastStartTime, BulkSize) of
+            channel=Channel, isFirstSync=IsFirstSync} = State, BulkSize) ->
+    case dperl_dal:read_audit_keys(Channel, LastStartTime, BulkSize) of
         {LastStartTime, LastStartTime, []} ->
             if
-                FirstSync == true -> 
+                IsFirstSync -> 
                     ?JInfo("Audit rollup is complete"),
-                    {ok, sync_complete, State#state{firstSync=false}};
+                    {ok, sync_complete, State#state{isFirstSync=false}};
                 true -> 
                     {ok, sync_complete, State}
             end;
@@ -159,14 +194,15 @@ get_source_events(#state{auditStartTime=LastStartTime, type=push,
 get_source_events(#state{contacts=[]} = State, _BulkSize) ->
     {ok, sync_complete, State};
 get_source_events(#state{contacts=Contacts} = State, _BulkSize) ->
+    ?Info("get_source_events result count ~p~n~p",[length(Contacts), hd(Contacts)]),
     {ok, Contacts, State#state{contacts=[]}}.
 
 connect_check_dst(State) -> {ok, State}.    % Question: Why defaulted for push destination?
 
 do_refresh(_State, _BulkSize) -> {error, cleanup_only}.
 
-fetch_src(Key, #state{pushChannel=PushChannel, type=push}) ->
-    dperl_dal:read_channel(PushChannel, Key);
+fetch_src(Key, #state{channel=Channel, type=push}) ->
+    dperl_dal:read_channel(Channel, Key);
 fetch_src(Key, #state{clContacts=ClContacts, type=pull}) ->
     case lists:keyfind(Key, 1, ClContacts) of
         {Key, _RemoteId, Value} -> Value;
@@ -174,11 +210,11 @@ fetch_src(Key, #state{clContacts=ClContacts, type=pull}) ->
     end.
 
 fetch_dst(Key, #state{name=Name, clContacts=ClContacts, type=push, 
-                apiUrl=ApiUrl, accessToken=AccessToken} = State) ->
+                apiUrl=ApiUrl, token=Token} = State) ->
     case lists:keyfind(Key, 1, ClContacts) of
         {Key, RemoteId, _Value} -> 
             ContactUrl = erlang:iolist_to_binary([ApiUrl, RemoteId]),
-            case exec_req(ContactUrl, AccessToken) of
+            case exec_req(ContactUrl, Token) of
                 #{<<"id">> := _} = RValue ->    format_value(RValue, Name);
                 {error, unauthorized} ->        reconnect_exec(State, fetch_dst, [Key]);
                 {error, Error} ->               {error, Error};
@@ -190,33 +226,44 @@ fetch_dst(Key, #state{name=Name, clContacts=ClContacts, type=push,
 fetch_dst(Key, #state{channel=Channel}) ->
     dperl_dal:read_channel(Channel, Key).
 
-insert_dst(Key, Value, #state{name=Name, channel=Channel, pushChannel=PushChannel, type=push, 
-                        keyPrefix=KeyPrefix, apiUrl=ApiUrl, accessToken=AccessToken} = State) ->
-    case exec_req(ApiUrl, AccessToken, Value, post) of
-        #{<<"id">> := Id} = RemoteValue ->
-            NewKey = KeyPrefix ++ [local_contact_id(Id)],
-            FormRemote = format_value(RemoteValue, Name),
-            PushValue = dperl_dal:read_channel(PushChannel, Key),
-            MergeValue = maps:merge(PushValue, FormRemote),
-            MergedBin = imem_json:encode(MergeValue),
-            dperl_dal:remove_from_channel(PushChannel, Key),
-            dperl_dal:write_channel(Channel, NewKey, MergedBin),
-            dperl_dal:write_channel(PushChannel, NewKey, MergedBin),
-            {false, State};
-        {error, unauthorized} ->
-            reconnect_exec(State, insert_dst, [Key, Value]);
-        {error, Error} ->
-            {error, Error}
+insert_dst(Key, Value, #state{type=push, apiUrl=ApiUrl, token=Token} = State) ->
+    case exec_req(ApiUrl, Token, Value, post) of
+        #{<<"id">> := _} = RemoteValue ->   merge_meta_to_local(Key, RemoteValue, State);
+        {error, unauthorized} ->            reconnect_exec(State, insert_dst, [Key, Value]);
+        {error, Error} ->                   {error, Error}
     end;
 insert_dst(Key, Value, State) ->
-    update_dst(Key, Value, State).
+    Result = update_dst(Key, Value, State),
+    ?Info("insert_dst ~p~n~p~nresult ~p",[Key, Value, Result]),
+    Result.
+
+merge_meta_to_local(Key, RemoteValue, #state{channel=Channel, tokenPrefix=TokenPrefix} = State) ->
+    AccessId = access_id(TokenPrefix),
+    MetaItem = #{<<"id">> => maps:get(<<"id">>, RemoteValue)},
+    case dperl_dal:read_channel(Channel, Key) of
+        #{<<"META">> := Meta} = LocVal ->
+            case maps:merge(Meta, #{AccessId => MetaItem}) of 
+                Meta -> 
+                    ok;     % RemoteMeta already there
+                NewM ->
+                    MergedBin = imem_json:encode(LocVal#{<<"META">> => NewM}), 
+                    dperl_dal:write_channel(Channel, Key, MergedBin)
+            end;
+        LocVal ->
+            MergedBin = imem_json:encode(LocVal#{<<"META">> => MetaItem}),
+            dperl_dal:write_channel(Channel, Key, MergedBin)
+    end,
+    {false, State}.
+
+access_id(TokenPrefix) ->
+    list_to_binary(string:join(TokenPrefix,"/")).
 
 delete_dst(Key, #state{channel=Channel, type=push, clContacts=ClContacts, 
-                apiUrl=ApiUrl, accessToken=AccessToken} = State) ->
+                apiUrl=ApiUrl, token=Token} = State) ->
     case lists:keyfind(Key, 1, ClContacts) of
         {Key, RemoteId, _Value} -> 
             ContactUrl = erlang:iolist_to_binary([ApiUrl, RemoteId]),
-            case exec_req(ContactUrl, AccessToken, #{}, delete) of
+            case exec_req(ContactUrl, Token, #{}, delete) of
                 ok ->
                     dperl_dal:remove_from_channel(Channel, Key),
                     {false, State};
@@ -228,26 +275,24 @@ delete_dst(Key, #state{channel=Channel, type=push, clContacts=ClContacts,
         false -> 
             {false, State}
     end;
-delete_dst(Key, #state{channel=Channel, pushChannel=PushChannel} = State) ->
+delete_dst(Key, #state{channel=Channel} = State) ->
+    ?Info("delete_dst ~p",[Key]),
     dperl_dal:remove_from_channel(Channel, Key),
-    dperl_dal:remove_from_channel(PushChannel, Key),
     {false, State}.
 
 -spec update_dst(Key::list(), Value::map(), #state{}) -> tuple().
-update_dst(Key, Value, #state{name=Name, channel=Channel, pushChannel=PushChannel, type=push, 
-                        clContacts=ClContacts, apiUrl=ApiUrl, accessToken=AccessToken} = State) ->
+update_dst(Key, Value, #state{name=Name, channel=Channel, type=push, 
+                clContacts=ClContacts, apiUrl=ApiUrl, token=Token} = State) ->
     case lists:keyfind(Key, 1, ClContacts) of
         {Key, RemoteId, _Value} -> 
             ContactUrl = erlang:iolist_to_binary([ApiUrl, RemoteId]),
-            case exec_req(ContactUrl, AccessToken, Value, patch) of
+            case exec_req(ContactUrl, Token, Value, patch) of
                 #{<<"id">> := _} = RemoteValue ->
                     FormRemote = format_value(RemoteValue, Name),
-                    OldValue = dperl_dal:read_channel(PushChannel, Key),
+                    OldValue = dperl_dal:read_channel(Channel, Key),
                     MergeValue = maps:merge(OldValue, FormRemote),
                     MergedBin = imem_json:encode(MergeValue),
-                    dperl_dal:remove_from_channel(PushChannel, Key),
                     dperl_dal:write_channel(Channel, Key, MergedBin),
-                    dperl_dal:write_channel(PushChannel, Key, MergedBin),
                     {false, State};
                 {error, unauthorized} ->
                     reconnect_exec(State, update_dst, [Key, Value]);
@@ -257,27 +302,29 @@ update_dst(Key, Value, #state{name=Name, channel=Channel, pushChannel=PushChanne
         false -> 
             {false, State}
     end;
-update_dst(Key, Value, #state{channel=Channel, pushChannel=PushChannel} = State) when is_map(Value) ->
+update_dst(Key, Value, #state{channel=Channel} = State) when is_map(Value) ->
     OldValue = dperl_dal:read_channel(Channel, Key),
     MergeValue = maps:merge(OldValue, Value),
     MergedBin = imem_json:encode(MergeValue),
     dperl_dal:write_channel(Channel, Key, MergedBin),
-    dperl_dal:write_channel(PushChannel, Key, MergedBin),
     {false, State}.
 
 report_status(_Key, _Status, _State) -> no_op.
 
-load_dst_after_key(CurKey, BlkCount, #state{channel = Channel}) ->
-    dperl_dal:read_gt(Channel, CurKey, BlkCount).
+load_dst_after_key(CurKey, BlkCount, #state{type=pull, keyPrefix=KeyPrefix} = State) when CurKey < KeyPrefix ->
+    load_dst_after_key(KeyPrefix, BlkCount, State);
+load_dst_after_key(CurKey, BlkCount, #state{channel=Channel, type=pull, keyPrefix=KeyPrefix}) ->
+    Filter = fun({K,_}) -> lists:prefix(KeyPrefix,K) end,
+    lists:filter(Filter, dperl_dal:read_gt(Channel, CurKey, BlkCount)).
 
 load_src_after_key(CurKey, BlkCount, #state{type=pull, fetchUrl=undefined, apiUrl=ApiUrl} = State) ->
     UrlParams = dperl_dal:url_enc_params(#{"$top" => integer_to_list(BlkCount)}),
     ContactsUrl = erlang:iolist_to_binary([ApiUrl, "?", UrlParams]),
     load_src_after_key(CurKey, BlkCount, State#state{fetchUrl=ContactsUrl});
 load_src_after_key(CurKey, BlkCount, #state{name=Name, type=pull, isCleanupFinished=true, 
-                            keyPrefix=KeyPrefix, accessToken=AccessToken, fetchUrl=FetchUrl} = State) ->
+                            keyPrefix=KeyPrefix, token=Token, fetchUrl=FetchUrl} = State) ->
     % fetch all contacts
-    case fetch_all_contacts(FetchUrl, AccessToken, KeyPrefix, Name) of
+    case fetch_all_contacts(FetchUrl, Token, KeyPrefix, Name) of
         {ok, Contacts} ->
             load_src_after_key(CurKey, BlkCount, State#state{clContacts=Contacts, isCleanupFinished=false});
         {error, unauthorized} ->
@@ -285,7 +332,7 @@ load_src_after_key(CurKey, BlkCount, #state{name=Name, type=pull, isCleanupFinis
         {error, Error} ->
             {error, Error, State}
     end;
-load_src_after_key(CurKey, BlkCount, #state{clContacts=Contacts} = State) ->
+load_src_after_key(CurKey, BlkCount, #state{type=pull, clContacts=Contacts} = State) ->
     {ok, get_contacts_gt(CurKey, BlkCount, Contacts), State}.
 
 reconnect_exec(State, Fun, Args) ->
@@ -309,7 +356,7 @@ get_status(#state{}) -> #{}.
 init_state(_) -> #state{}.
 
 init({#dperlJob{name=Name, srcArgs=#{apiUrl:=ApiUrl}, args=Args,
-                dstArgs=#{channel:=Channel, pushChannel:=PChannel} = DstArgs}, State}) ->
+                dstArgs=#{channel:=Channel} = DstArgs}, State}) ->
     case dperl_auth_cache:get_enc_hash(Name) of
         undefined ->
             ?JError("Encryption hash is not avaialable"),
@@ -318,18 +365,27 @@ init({#dperlJob{name=Name, srcArgs=#{apiUrl:=ApiUrl}, args=Args,
             ?JInfo("Starting with ~p's enchash...", [AccountId]),
             imem_enc_mnesia:put_enc_hash(EncHash),
             KeyPrefix = maps:get(keyPrefix, DstArgs, get_key_prefix(Name)),
-            case dderl_oauth:get_token_info(AccountId, KeyPrefix, ?SYNC_OFFICE365) of
-                #{<<"access_token">> := AccessToken} ->
-                    ChannelBin = dperl_dal:to_binary(Channel),
-                    PChannelBin = dperl_dal:to_binary(PChannel),
+            TokenPrefix = get_auth_token_key_prefix(Name),
+            case dderl_oauth:get_token_info(AccountId, TokenPrefix, ?SYNC_OFFICE365) of
+                #{<<"access_token">> := Token} ->
                     Type = maps:get(type, Args, pull),
+                    ChannelBin = dperl_dal:to_binary(Channel),
                     dperl_dal:create_check_channel(ChannelBin),
-                    dperl_dal:create_check_channel(PChannelBin),
-                    {ok, State#state{channel = ChannelBin, name = Name, apiUrl = ApiUrl,
-                                    keyPrefix = KeyPrefix, accessToken = AccessToken,
-                                    pushChannel = PChannelBin, type = Type, accountId = AccountId}};
+                    ContactIff = <<"fun() ->imem_index:gen_iff_binterm_list_pattern([\"contact\",'_','_']) end.">>,
+                    PLContact = [{':',<<"id">>, {'#', <<"values">>, {':', <<"META">>, <<"cvalue">>}}}],
+                    IdxContact = #ddIdxDef{id = ?CONTACT_INDEXID
+                                          ,name = <<"idx_contact">>
+                                          ,type = iv_k
+                                          ,pl = PLContact
+                                          ,vnf = <<"fun imem_index:vnf_identity/1.">>
+                                          ,iff = ContactIff},
+                    dperl_dal:create_check_index(ChannelBin, [IdxContact]),
+                    {ok, State#state{ name=Name, type=Type, channel=ChannelBin, keyPrefix=KeyPrefix
+                                    , apiUrl=ApiUrl, tokenPrefix=TokenPrefix
+                                    , token=Token, accountId = AccountId
+                                    , template=dperl_dal:read_channel(Channel, KeyPrefix)}};
                 _ ->
-                    ?JError("Access token not found for ~p at ~p", [AccountId, KeyPrefix]),
+                    ?JError("Access token not found for ~p at ~p", [AccountId, TokenPrefix]),
                     {stop, badarg}
             end
     end;
@@ -357,16 +413,16 @@ terminate(Reason, _State) ->
 
 %% Fetch all remote contacts, create 3-tuple {Key::list(), RemoteId::binary(), RemoteValue::map())
 %% Sort by Key (needed for sync)
-fetch_all_contacts(Url, AccessToken, KeyPrefix, JobName) ->
-    fetch_all_contacts(Url, AccessToken, KeyPrefix, JobName, []).
+fetch_all_contacts(Url, Token, KeyPrefix, JobName) ->
+    fetch_all_contacts(Url, Token, KeyPrefix, JobName, []).
 
-fetch_all_contacts(Url, AccessToken, KeyPrefix, JobName, AccContacts) ->
+fetch_all_contacts(Url, Token, KeyPrefix, JobName, AccContacts) ->
     ?JTrace("Fetching contacts with url : ~s", [Url]),
     ?JTrace("Fetched contacts : ~p", [length(AccContacts)]),
-    case exec_req(Url, AccessToken) of
+    case exec_req(Url, Token) of
         #{<<"@odata.nextLink">> := NextUrl, <<"value">> := MoreContacts} ->
             Contacts = format_remote_values_to_kv(MoreContacts, KeyPrefix, JobName),
-            fetch_all_contacts(NextUrl, AccessToken, KeyPrefix, lists:append(Contacts, AccContacts));
+            fetch_all_contacts(NextUrl, Token, KeyPrefix, lists:append(Contacts, AccContacts));
         #{<<"value">> := MoreContacts} ->
             Contacts = format_remote_values_to_kv(MoreContacts, KeyPrefix, JobName),
             {ok, lists:keysort(1, lists:append(Contacts, AccContacts))};
@@ -385,11 +441,11 @@ get_contacts_gt(CurKey, BlkCount, [{Key, _} | Contacts], Acc) when Key =< CurKey
 get_contacts_gt(CurKey, BlkCount, [Contact | Contacts], Acc) ->
     get_contacts_gt(CurKey, BlkCount, Contacts, [Contact | Acc]).
 
--spec exec_req(Url::binary()|string(), AccessToken::binary()) -> tuple().
-exec_req(Url, AccessToken) when is_binary(Url) ->
-    exec_req(binary_to_list(Url), AccessToken);
-exec_req(Url, AccessToken) ->
-    AuthHeader = [{"Authorization", "Bearer " ++ binary_to_list(AccessToken)}],
+-spec exec_req(Url::binary()|string(), Token::binary()) -> tuple().
+exec_req(Url, Token) when is_binary(Url) ->
+    exec_req(binary_to_list(Url), Token);
+exec_req(Url, Token) ->
+    AuthHeader = [{"Authorization", "Bearer " ++ binary_to_list(Token)}],
     case httpc:request(get, {Url, AuthHeader}, [], []) of
         {ok, {{_, 200, "OK"}, _, Result}} ->
             imem_json:decode(list_to_binary(Result), [return_maps]);
@@ -399,11 +455,11 @@ exec_req(Url, AccessToken) ->
             {error, Error}
     end.
 
--spec exec_req(Url::binary()|string(), AccessToken::binary(), Body::map(), Method::atom()) -> tuple().
-exec_req(Url, AccessToken, Body, Method) when is_binary(Url), is_map(Body) ->
-    exec_req(binary_to_list(Url), AccessToken, Body, Method);
-exec_req(Url, AccessToken, Body, Method) ->
-    AuthHeader = [{"Authorization", "Bearer " ++ binary_to_list(AccessToken)}],
+-spec exec_req(Url::binary()|string(), Token::binary(), Body::map(), Method::atom()) -> tuple().
+exec_req(Url, Token, Body, Method) when is_binary(Url), is_map(Body) ->
+    exec_req(binary_to_list(Url), Token, Body, Method);
+exec_req(Url, Token, Body, Method) ->
+    AuthHeader = [{"Authorization", "Bearer " ++ binary_to_list(Token)}],
     % Headers = [AuthHeader, {"Contnet-type", "application/json"}],
     case httpc:request(Method, {Url, AuthHeader, "application/json", imem_json:encode(Body)}, [], []) of
         {ok, {{_, 201, _}, _, Result}} ->
