@@ -607,7 +607,7 @@ is_local_query(Qry) ->
 can_connect_locally(Sess) ->
     erlimem_session:run_cmd(Sess, have_permission, [[?USE_LOCAL_CONN]]) == true.
 
--spec conn_permission({atom(), pid()}, ddEntityId(), #ddConn{}) -> boolean().
+-spec conn_permission({atom(), pid()}, integer()|atom(), #ddConn{}) -> boolean().
 conn_permission(_Sess, UserId, #ddConn{owner=UserId}) -> true; %% If it is the owner always allow usage.
 conn_permission(Sess, _UserId, #ddConn{id=ConnId, owner=system}) ->
     erlimem_session:run_cmd(Sess, have_permission, [?USE_SYS_CONNS]) orelse  %% If it can use system connections.

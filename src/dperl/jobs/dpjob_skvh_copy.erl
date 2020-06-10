@@ -1,6 +1,6 @@
--module(dperl_skvh_copy).
+-module(dpjob_skvh_copy).
 
--include_lib("dperl/dperl.hrl").
+-include("../dperl.hrl").
 
 -behavior(dperl_worker).
 -behavior(dperl_strategy_scr).

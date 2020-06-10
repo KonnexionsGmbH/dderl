@@ -1,6 +1,6 @@
--module(dperl_status_pre).
+-module(dpjob_status_pre).
 
--include("dperl_status.hrl").
+-include("../dperl_status.hrl").
 
 -export([preprocess/5]).
 

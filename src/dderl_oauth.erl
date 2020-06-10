@@ -1,7 +1,6 @@
 -module(dderl_oauth).
 
 -include("dderl.hrl").
-% -include("dderl/_checkouts/imem/include/imem_config.hrl").
 
 -define(TOKEN_KEYPART, "#token#").
 

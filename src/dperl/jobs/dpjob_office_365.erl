@@ -1,10 +1,10 @@
--module(dperl_office_365).
+-module(dpjob_office_365).
 
--include_lib("../dperl.hrl").
+-include("../dperl.hrl").
 
 -behavior(dperl_worker).
--behavior(dperl_strategy_scr).
-
+-behavior(dperl_strategy_scr). 
+ 
 -define(OAUTH2_CONFIG(__JOB_NAME), 
             ?GET_CONFIG(oAuth2Config,
             [__JOB_NAME],

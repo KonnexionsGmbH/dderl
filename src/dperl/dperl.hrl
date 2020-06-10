@@ -3,7 +3,7 @@
 
 -define(LOG_TAG, "_dperl_").
 
--include("../dderl.hrl").          % -include_lib("dderl/src/dderl.hrl").
+-include("../dderl.hrl").          
 
 -type plan() :: at_most_once|at_least_once|on_all_nodes.
 

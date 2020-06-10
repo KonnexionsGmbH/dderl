@@ -1,6 +1,6 @@
--module(dperl_status_agr).
+-module(dpjob_status_agr).
 
--include("dperl_status.hrl").
+-include("../dperl_status.hrl").
 
 -export([sync_puller_error/5, check_nodes/5, merge_node_errors/5,
          check_memory_on_nodes/5, check_heartbeats/5, check_job_error/5,

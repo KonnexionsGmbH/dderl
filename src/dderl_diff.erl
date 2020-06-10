@@ -2,7 +2,7 @@
 
 -include("dderl.hrl").
 -include("gres.hrl").
--include_lib("imem/include/imem_sql.hrl").
+-include_lib("imem/src/imem_sql.hrl").
 
 -export([
     term_diff/6

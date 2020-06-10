@@ -1,6 +1,6 @@
--module(dperl_ouraring_crawl).
+-module(dpjob_ouraring_crawl).
 
--include_lib("../dperl.hrl").
+-include("../dperl.hrl").
 
 -behavior(dperl_worker).
 -behavior(dperl_strategy_scr).
