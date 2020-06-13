@@ -277,8 +277,7 @@ update_job_dyn(JobName, State) when is_binary(JobName) andalso is_map(State) ->
                true -> ok
             end
     end end);
-update_job_dyn(JobName, Status)
-  when is_binary(JobName) andalso 
+update_job_dyn(JobName, Status) when is_binary(JobName) andalso 
        (Status == synced orelse
         Status == cleaning orelse Status == cleaned orelse
         Status == refreshing orelse Status == refreshed orelse
@@ -301,8 +300,7 @@ update_job_dyn(JobName, Status)
             end
     end.
 
-update_job_dyn(JobName, State, Status)
-  when is_binary(JobName) andalso is_map(State) andalso
+update_job_dyn(JobName, State, Status) when is_binary(JobName) andalso is_map(State) andalso
        (Status == synced orelse Status == undefined orelse
         Status == cleaning orelse Status == cleaned orelse
         Status == refreshing orelse Status == refreshed orelse

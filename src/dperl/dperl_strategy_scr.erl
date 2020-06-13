@@ -1,89 +1,181 @@
 -module(dperl_strategy_scr).
 
 -include("dperl.hrl").
+-include("dperl_strategy_scr.hrl").
 
 -export([execute/4]).
 
 -ifdef(TEST).
--export([load_src_after_key/3, load_dst_after_key/3]).
+-export([ load_src_after_key/3  
+        , load_dst_after_key/3
+        ]).
 -endif.
 
--type state() :: any().
+% check if source data is currently acessible
+-callback connect_check_src(scrState()) ->
+    {ok, scrState()} | {error, any()} | {error, any(), scrState()}.
 
--callback connect_check_src(state()) ->
-    {ok, state()} | {error, any()} | {error, any(), state()}.
--callback get_source_events(state(), integer()) ->
-    {error, any()} | {ok, list(), state()} | {ok, sync_complete, state()}.
--callback connect_check_dst(state()) ->
-    {ok, state()} | {error, any()} | {error, any(), state()}.
--callback fetch_src(any(), state()) -> ?NOT_FOUND | term().
--callback fetch_dst(any(), state()) -> ?NOT_FOUND | term().
--callback delete_dst(any(), state()) -> {true, state()} | {false, state()}.
--callback insert_dst(any(), any(), state()) -> {true, state()} | {false, state()}.
--callback update_dst(any(), any(), state()) -> {true, state()} | {false, state()}.
--callback report_status(any(), any(), state()) -> ok | {error, any()}.
--callback do_refresh(state(), integer()) ->
-    {error, any()} | {ok, state()} | {ok, finish, state()}.
+% get a key list (limited in length) of recent changes on source side
+% often achieved by scanning an audit log after last checked timestamp (from state)
+% basis for sync cycle (differential change provisioning)
+-callback get_source_events(scrState(), scrBatchSize()) ->
+    {error, scrAnyKey()} | {ok, scrAnyKeys(), scrState()} | {ok, sync_complete, scrState()}.
+
+% check if destination data is currently acessible
+-callback connect_check_dst(scrState()) ->
+    {ok, scrState()} | {error, any()} | {error, any(), scrState()}.
+
+% fetch one item from source (if it exists)
+-callback fetch_src(scrAnyKey(), scrState()) -> ?NOT_FOUND | scrAnyVal().
+
+% fetch one item from destination (if it exists)
+-callback fetch_dst(scrAnyKey(), scrState()) -> ?NOT_FOUND | scrAnyVal().
+
+% delete one item from destination (if it exists)
+% first element in result is true if a delete was unnecessary ????
+-callback delete_dst(scrAnyKey(), scrState()) -> {scrSoftError(), scrState()}.
+
+% insert one item to destination (which is assumed to not exist)
+% first element in result is true if the insert was compatible but unnecessary (already 
+% existed in correct shape) ????
+% alternatively, the callback implementation can (or should) throw if key already exists
+-callback insert_dst(scrAnyKey(), scrAnyVal(), scrState()) -> {scrSoftError(), scrState()}.
+
+% update one item in destination (which is assumed to exist)
+% first element in result tuple indicates wether an update was possible (false=insert needed) ????
+% alternatively, the callback implementation can (or should) throw if the key does not exist
+-callback update_dst(scrAnyKey(), scrAnyVal(), scrState()) -> {scrSoftError(), scrState()}.
+
+% allow the callback implementation act upon an error or warning message
+% result is ignored, used for debugging only
+-callback report_status(scrAnyKey(), scrStatus(), scrState()) -> ok | no_op | {error, term()}.
+
+% execute one more refresh cycle with limited block size
+-callback do_refresh(scrState(), scrBatchSize()) -> {{ok, scrState()} | {ok, finish, scrState() | error, any()}}.
 
 % optional callbacks
--callback should_cleanup(ddTimestamp()|undefined,
-                         ddTimestamp()|undefined,
-                         integer(), integer(), state()) -> true | false.
--callback should_refresh(ddTimestamp()|undefined,
-                         ddTimestamp()|undefined,
-                         integer(), integer(), [integer()], state()) -> true | false.
--callback is_equal(any(), any(), any(), state()) -> true | false.
--callback update_channel(any(), boolean(), any(), any(), state()) -> {true, state()} | {false, state()}.
--callback finalize_src_events(state()) -> {true, state()} | {false, state()}.
--callback should_sync_log(state()) -> true | false.
+
+% override callback for cleanup execution permission
+-callback should_cleanup( LastAttempt::ddTimestamp(),
+                          LastSuccess::ddTimestamp(),
+                          BatchInterval::scrMsecInterval(),     % delay between cleanup batches
+                          CycleInterval::scrMsecInterval(),     % delay between cleanup cycles
+                          scrState()) -> true | false.
+
+% override callback for refresh execution permission
+-callback should_refresh( LastAttempt::ddTimestamp(),
+                          LastSuccess::ddTimestamp(),
+                          BatchInterval::scrMsecInterval(),     % delay between refresh batches
+                          CycleInterval::scrMsecInterval(),     % delay between refresh cycles
+                          scrHoursOfDay(), 
+                          scrState()) -> true | false.
+
+% override for value compare function
+-callback is_equal(scrAnyKey(), scrAnyVal(), scrAnyVal(), scrState()) -> true | false.
+
+% override for destination channel insert/update/delete (final data change)
+% first element of result indicates if anything was changed on the target ????
+% (ignored by behaviour, used for debugging only)
+-callback update_channel( scrAnyKey(), 
+                          IsSamePlatform::boolean(), 
+                          SourceVal::scrAnyVal(), 
+                          DestVal::scrAnyVal(), 
+                          scrState()) -> {true, scrState()} | {false, scrState()}.
+
+% optional cleanup call after end of differential provisioning (sync phase) ????
+% where and when is it exactly invoked ????
+% first element of result indicates if anything was executed on the target ????
+-callback finalize_src_events(scrState()) -> {true, scrState()} | {false, scrState()}.
+
+% can be used in callback to suppress the logging of individual sync results
+-callback should_sync_log(scrState()) -> true | false.
 
 -optional_callbacks([should_cleanup/5, should_refresh/6, is_equal/4,
                      update_channel/5, finalize_src_events/1,
                      should_sync_log/1]).
 
--callback do_cleanup(state(), integer()) ->
-    {error, any()} | {ok, state()} | {ok, finish, state()}.
--callback do_cleanup(list(), list(), boolean(), state()) -> 
-    {error, any()} | {ok, state()} | {ok, finish, state()}.
--callback do_cleanup(list(), list(), list(), boolean(), state()) -> 
-    {error, any()} | {ok, state()} | {ok, finish, state()}.
--optional_callbacks([do_cleanup/2, do_cleanup/4,do_cleanup/5]).
+% execute simple cleanup for next batch of keys 
+-callback do_cleanup( scrState(), CleanupBulkCount::scrBatchSize()) -> 
+                      {{ok, scrState()} | {ok, finish, scrState() | error, any()}}.
+
+% execute cleanup for found differences (Deletes and Inserts)
+-callback do_cleanup( Deletes::scrAnyKeys(), 
+                      Inserts::scrAnyKeys(), 
+                      SearchingMatch::boolean(),    % NextLastKey == MinKey
+                      scrState()) -> 
+                      {{ok, scrState()} | {ok, finish, scrState() | error, any()}}.
+
+% execute cleanup/refresh for found differences (Deletes, Inserts and value Diffs)
+-callback do_cleanup( Deletes::scrAnyKeys(), 
+                      Inserts::scrAnyKeys(),
+                      Diffs::scrAnyKeys(), 
+                      SearchingMatch::boolean(),    % NextLastKey == MinKey
+                      scrState()) -> 
+                      {{ok, scrState()} | {ok, finish, scrState() | error, any()}}.
+
+% bulk load one batch of keys (for cleanup) or kv-pairs (cleanup/refresh) from source
+% a callback module implementing this and load_dst_after_key signals that it wants
+% to fully control the cleanup/refresh procedure 
+-callback load_src_after_key( LastKeySeen::scrAnyKey(), 
+                              scrBatchSize(), 
+                              scrState()) ->
+    {ok, scrAnyKeys(), scrState()} | {ok, scrAnyKeyVals(), scrState()} | {error, any(), scrState()}.
+
+% bulk load one batch of keys (for cleanup) or kv-pairs (cleanup/refresh) from destination
+% a callback module implementing this and load_src_after_key signals that it wants
+% to fully control the cleanup/refresh procedure 
+-callback load_dst_after_key( LastKeySeen::scrAnyKey(), 
+                              scrBatchSize(), 
+                              scrState()) ->
+    {ok, scrAnyKeys(), scrState()} | {ok, scrAnyKeyVals(), scrState()} | {error, any(), scrState()}.
+
+-optional_callbacks([ do_cleanup/2
+                    , do_cleanup/4
+                    , do_cleanup/5
+                    , load_src_after_key/3
+                    , load_dst_after_key/3
+                    ]).
 
 % chunked cleanup context
--record(cleanup_ctx,
-        {srcKeys          :: list(),
-         srcCount         :: integer(),
-         dstKeys          :: list(),
-         dstCount         :: integer(),
-         bulkCount        :: integer(),
-         minKey           :: any(),
-         maxKey           :: any(),
-         lastKey          :: any(),
-         deletes = []     :: list(),
-         differences = [] :: list(),
-         inserts = []     :: list()}).
+-record(cleanup_ctx,{ srcKeys          :: scrAnyKeys()
+                    , srcCount         :: integer()
+                    , dstKeys          :: scrAnyKeys()
+                    , dstCount         :: integer()
+                    , bulkCount        :: scrBatchSize()
+                    , minKey           :: scrAnyKey()
+                    , maxKey           :: scrAnyKey()
+                    , lastKey          :: scrAnyKey()
+                    , deletes = []     :: scrAnyKeys()
+                    , inserts = []     :: scrAnyKeys()
+                    , differences = [] :: scrAnyKeys()
+                    }).
 
-
+% Debug macros
 -define(DL(__S,__F,__A),
         ?Debug([{state,__S},{mod, Mod},{job, Job}],__F,__A)).
+
 -define(DL(__S,__F), ?DL(__S,__F,[])).
 
 -define(S(__F),     ?DL(sync,__F)).
 -define(S(__F,__A), ?DL(sync,__F,__A)).
+
 -define(C(__F),     ?DL(cleanup,__F)).
 -define(C(__F,__A), ?DL(cleanup,__F,__A)).
+
 -define(R(__F),     ?DL(refresh,__F)).
 -define(R(__F,__A), ?DL(refresh,__F,__A)).
 
+% trigger macro for next action
 -define(RESTART_AFTER(__Timeout, __Args),
         erlang:send_after(__Timeout, self(),
                           {internal, {behavior, ?MODULE, __Args}})).
 
--spec execute(atom(), string(), state(), map()) -> state().
-execute(Mod, Job, State, #{sync := _, cleanup := _, refresh := _}
-        = Args)
-  when is_map(Args) ->
-    try execute(sync, Mod, Job, State, Args) catch
+% execute (start or restart) the synchronisation job
+-spec execute(jobModule(), jobName(), scrState(), jobArgs()) -> scrState().
+execute(Mod, Job, State, #{sync:=_, cleanup:=_, refresh:=_} = Args) when is_map(Args) ->
+    try 
+        execute(sync, Mod, Job, State, Args) 
+    catch
         Class:{step_failed, NewArgs}:Stacktrace when is_map(NewArgs) ->
             ?JError("~p ~p step_failed~n~p", [Mod, Class, Stacktrace]),
             dperl_dal:update_job_dyn(Job, error),
@@ -104,31 +196,29 @@ execute(Mod, Job, State, #{sync := _, cleanup := _, refresh := _}
             State
     end;
 execute(Mod, Job, State, Args) when is_map(Args) ->
-    execute(Mod, Job, State,
-            maps:merge(#{sync => true, cleanup => true, refresh => true},
-                       Args)).
+    execute(Mod, Job, State, maps:merge(#{sync=>true, cleanup=>true, refresh=>true}, Args)).
 
--spec execute(sync|cleanup|refresh, atom(), string(), state(), map()) ->
-    state() | no_return().
-% [sync]
-execute(sync, Mod, Job, State, #{sync := Sync} = Args) ->
+-spec execute(scrPhase(), jobModule(), jobName(), scrState(), jobArgs()) -> scrState() | no_return().
+execute(sync, Mod, Job, State, #{sync:=Sync} = Args) ->
+    % perform a sync cycle
     put(jstate,s),
     ?S("Connect/check source if not already connected (trivial for push)"),
     State1 =
-    case Mod:connect_check_src(State) of
-        {error, Error, S1} ->
-            ?JError("sync(~p) failed at connect_check_src : ~p", [Mod, Error]),
-            dperl_dal:job_error(<<"sync">>, <<"connect_check_src">>, Error),
-            error({step_failed, S1});
-        {error, Error} ->
-            ?JError("sync(~p) failed at connect_check_src : ~p", [Mod, Error]),
-            dperl_dal:job_error(<<"sync">>, <<"connect_check_src">>, Error),
-            error(step_failed);
-        {ok, S1} -> 
-            dperl_dal:job_error_close(),
-            S1
-    end,
-    if Sync == true ->
+        case Mod:connect_check_src(State) of
+            {error, Error, S1} ->
+                ?JError("sync(~p) failed at connect_check_src : ~p", [Mod, Error]),
+                dperl_dal:job_error(<<"sync">>, <<"connect_check_src">>, Error),
+                error({step_failed, S1});
+            {error, Error} ->
+                ?JError("sync(~p) failed at connect_check_src : ~p", [Mod, Error]),
+                dperl_dal:job_error(<<"sync">>, <<"connect_check_src">>, Error),
+                error(step_failed);
+            {ok, S1} -> 
+                dperl_dal:job_error_close(),
+                S1
+        end,
+    if 
+        Sync == true ->
             ?S("Get pending list of events (max n) to process from source"),
             case Mod:get_source_events(State1, ?MAX_BULK_COUNT(Mod, Job)) of
                 {error, Error1, S2} ->
@@ -174,25 +264,22 @@ execute(sync, Mod, Job, State, #{sync := Sync} = Args) ->
                             dperl_dal:job_error_close(),
                             execute(finish, Mod, Job, State4, Args);
                         %% idle used for dperl_mec_ic to have idle timeout on
-                        %% Try later error from oracle
+                        %% try later error from oracle
                         %% would be removed in the future when new
                         %% behavior is used for mec_ic
                         {idle, State4} ->
                             execute(idle, Mod, Job, State4, Args)
                     end
-           end;
-       true ->
+            end;
+        true ->
            ?S("disabled! trying cleanup"),
            execute(cleanup, Mod, Job, State1, Args)
     end;
-
-% [cleanup]
-execute(cleanup, Mod, Job, State, #{cleanup := true} = Args) ->
+execute(cleanup, Mod, Job, State, #{cleanup:=true} = Args) ->
+    % perform a cleanup cycle if due
     put(jstate,c),
-    #{lastAttempt := LastAttempt,
-      lastSuccess := LastSuccess} = CleanupState = get_state(cleanup, Job),
-    ShouldCleanupFun =
-    case erlang:function_exported(Mod, should_cleanup, 5) of
+    #{lastAttempt:=LastAttempt, lastSuccess:=LastSuccess} = CleanupState = get_cycle_state(cleanup, Job),
+    ShouldCleanupFun = case erlang:function_exported(Mod, should_cleanup, 5) of
         true -> fun(LA, LS, BI, CI) -> Mod:should_cleanup(LA, LS, BI, CI, State) end;
         false -> fun(LA, LS, BI, CI) -> should_cleanup(LA, LS, BI, CI) end
     end,
@@ -203,30 +290,29 @@ execute(cleanup, Mod, Job, State, #{cleanup := true} = Args) ->
             ?C("(sync phase was nop) if last cleanup + cleanupInterval < now goto [refresh]"),
             execute(refresh, Mod, Job, State, Args);
         true ->
-            set_state(cleanup, Job, start),
-            Args1 =
-            if LastAttempt =< LastSuccess ->
-                   ?JInfo("Starting cleanup cycle"),
-                   case Args of
-                       #{stats := #{cleanup_count := CC} = Stats} ->
-                           Args#{stats => Stats#{cleanup_count => CC + 1}};
-                       Args ->
-                           Stats = maps:get(stats, Args, #{}),
-                           Args#{stats => Stats#{cleanup_count => 1}}
-                   end;
-               true ->
-                   case Args of
-                       #{stats := #{cleanup_count := CC} = Stats} ->
-                           Args#{stats => Stats#{cleanup_count => CC + 1}};
-                       Args ->
-                           ?JInfo("Resuming cleanup cycle"),
-                           Stats = maps:get(stats, Args, #{}),
-                           Args#{stats => Stats#{cleanup_count => 1}}
-                   end
+            set_cycle_state(cleanup, Job, start),
+            Args1 = if 
+                LastAttempt =< LastSuccess ->
+                    ?JInfo("Starting cleanup cycle"),
+                    case Args of
+                        #{stats := #{cleanup_count := CC} = Stats} ->
+                            Args#{stats => Stats#{cleanup_count => CC + 1}};
+                        Args ->
+                            Stats = maps:get(stats, Args, #{}),
+                            Args#{stats => Stats#{cleanup_count => 1}}
+                    end;
+                true ->
+                    case Args of
+                        #{stats := #{cleanup_count := CC} = Stats} ->
+                            Args#{stats => Stats#{cleanup_count => CC + 1}};
+                        Args ->
+                            ?JInfo("Resuming cleanup cycle"),
+                            Stats = maps:get(stats, Args, #{}),
+                            Args#{stats => Stats#{cleanup_count => 1}}
+                    end
             end,
             ?C("Connect to destination if not already connected (trivial for pull)"),
-            State1 =
-            case Mod:connect_check_dst(State) of
+            State1 = case Mod:connect_check_dst(State) of
                 {error, Error, S1} ->
                     ?JError("cleanup(~p) failed at connect_check_dst : ~p", [Mod, Error]),
                     dperl_dal:job_error(<<"cleanup">>, <<"connect_check_dst">>, Error),
@@ -243,21 +329,22 @@ execute(cleanup, Mod, Job, State, #{cleanup := true} = Args) ->
             ?C("Build a list of provisioning actions to be taken (aggregated audit list)"),
             ?C("If list provisioning action is non empty: perform the actions; goto [finish]"),
             CleanupBulkCount = ?MAX_CLEANUP_BULK_COUNT(Mod, Job),
-            DoCleanupArgs =
-            case (erlang:function_exported(Mod, load_src_after_key, 3) andalso
-                  erlang:function_exported(Mod, load_dst_after_key, 3)) of
-                false -> [State1, CleanupBulkCount];
+            DoCleanupArgs = case (erlang:function_exported(Mod, load_src_after_key, 3) andalso
+                                  erlang:function_exported(Mod, load_dst_after_key, 3)) of
+                false ->
+                    % launch simple cleanup cycle using do_cleanup/2
+                    [State1, CleanupBulkCount];
                 true ->
-                    #{minKey := MinKey, maxKey := MaxKey,
-                      lastKey := LastKey} = CleanupState,
-                    {#{deletes := Deletes, inserts := Inserts, 
-                       differences := Diffs, lastKey := NextLastKey}, State2} =
-                    cleanup_refresh_collect(
-                      Mod,
-                      #cleanup_ctx{minKey = MinKey, maxKey = MaxKey,
-                                   lastKey = LastKey, bulkCount = CleanupBulkCount},
-                      State1),
-                    % update last key
+                    % launch cleanup/refresh combined processing using do_cleanup/5 or do_cleanup/4
+                    #{minKey:=MinKey, maxKey:=MaxKey, lastKey:=LastKey} = CleanupState,
+                    Ctx = #cleanup_ctx{ minKey=MinKey, maxKey=MaxKey
+                                      , lastKey=LastKey, bulkCount=CleanupBulkCount},
+                    {RefreshCollectResult, State2} = cleanup_refresh_collect(Mod,Ctx,State1),
+                    Deletes = maps:get(deletes,RefreshCollectResult),
+                    Inserts = maps:get(inserts,RefreshCollectResult),
+                    Diffs = maps:get(differences,RefreshCollectResult),
+                    NextLastKey = maps:get(lastKey,RefreshCollectResult),
+                    % update last key ToDO: This is UGLY. To be cast into functions !!!!
                     case dperl_dal:select(
                            ?JOBDYN_TABLE,
                            [{#dperlNodeJobDyn{name=Job,_='_'},[],['$_']}]) of
@@ -294,25 +381,25 @@ execute(cleanup, Mod, Job, State, #{cleanup := true} = Args) ->
                     error({step_failed, S2});
                 {ok, S2} ->
                     dperl_dal:job_error_close(),
-                    if length(DoCleanupArgs) == 2 ->
-                        set_state(
-                          cleanup, Job, start,
-                          case Args1 of
-                              #{stats := #{cleanup_count := CC0}} ->
-                                  (Mod:get_status(S2))#{count => CC0};
-                              Args1 -> Mod:get_status(S2)
-                          end);
-                       true -> no_op
+                    if 
+                        length(DoCleanupArgs) == 2 ->
+                            set_cycle_state(cleanup, Job, start,
+                                case Args1 of
+                                    #{stats := #{cleanup_count := CC0}} ->
+                                        (Mod:get_status(S2))#{count => CC0};
+                                    Args1 -> Mod:get_status(S2)
+                                end);
+                       true -> 
+                           no_op
                     end,
                     execute(finish, Mod, Job, S2, Args1);
                 {ok, finish, S2} ->
-                    set_state(
-                      cleanup, Job, stop,
-                      case Args1 of
-                          #{stats := #{cleanup_count := CC1}} ->
-                              (Mod:get_status(S2))#{count => CC1};
-                          Args1 -> Mod:get_status(S2)
-                      end),
+                    set_cycle_state(cleanup, Job, stop,
+                        case Args1 of
+                            #{stats := #{cleanup_count := CC1}} ->
+                                (Mod:get_status(S2))#{count => CC1};
+                            Args1 -> Mod:get_status(S2)
+                        end),
                     dperl_dal:job_error_close(),
                     ?JInfo("Cleanup cycle is complete"),
                     execute(finish, Mod, Job, S2, Args1)
@@ -322,14 +409,11 @@ execute(cleanup, Mod, Job, State, Args) ->
     put(jstate,c),
     ?C("disabled! trying refresh"),
     execute(refresh, Mod, Job, State, Args);
-
-% [refresh]
 execute(refresh, Mod, Job, State, #{refresh := true} = Args) ->
+    % execute a refresh cycle if due
     put(jstate,r),
-    #{lastAttempt := LastAttempt,
-      lastSuccess := LastSuccess} = get_state(refresh, Job),
-    ShouldRefreshFun =
-    case erlang:function_exported(Mod, should_refresh, 6) of
+    #{lastAttempt:=LastAttempt, lastSuccess:=LastSuccess} = get_cycle_state(refresh, Job),
+    ShouldRefreshFun = case erlang:function_exported(Mod, should_refresh, 6) of
         true -> fun(LA, LS, BI, RI, RH) -> Mod:should_refresh(LA, LS, BI, RI, RH, State) end;
         false -> fun(LA, LS, BI, RI, RH) -> should_refresh(LA, LS, BI, RI, RH) end
     end,
@@ -341,9 +425,9 @@ execute(refresh, Mod, Job, State, #{refresh := true} = Args) ->
             ?R("If current hour is not in refreshHours): goto [idle]"),
             execute(idle, Mod, Job, State, Args);
         true ->
-            set_state(refresh, Job, start),
-            Args1 =
-            if LastAttempt =< LastSuccess ->
+            set_cycle_state(refresh, Job, start),
+            Args1 = if 
+                LastAttempt =< LastSuccess ->
                    ?JInfo("Starting refresh cycle"),
                    case Args of
                        #{stats := #{refresh_count := RC} = Stats} ->
@@ -363,8 +447,7 @@ execute(refresh, Mod, Job, State, #{refresh := true} = Args) ->
                    end
             end,
             ?R("Connect to destination if not already connected (trivial for pull)"),
-            State1 =
-            case Mod:connect_check_dst(State) of
+            State1 = case Mod:connect_check_dst(State) of
                 {error, Error, S1} ->
                     ?JError("refresh(~p) failed at connect_check_dst : ~p", [Mod, Error]),
                     dperl_dal:job_error(<<"refresh">>, <<"connect_check_dst">>, Error),
@@ -387,23 +470,21 @@ execute(refresh, Mod, Job, State, #{refresh := true} = Args) ->
                     dperl_dal:job_error(<<"refresh">>, <<"do_refresh">>, Error1),
                     error({step_failed, Args1});
                 {ok, S2} ->
-                    set_state(
-                      refresh, Job, start,
-                      case Args1 of
-                          #{stats := #{refresh_count := RC0}} ->
-                              (Mod:get_status(S2))#{count => RC0};
-                          Args1 -> Mod:get_status(S2)
-                      end),
+                    set_cycle_state(refresh, Job, start,
+                        case Args1 of
+                            #{stats := #{refresh_count := RC0}} ->
+                                (Mod:get_status(S2))#{count => RC0};
+                            Args1 -> Mod:get_status(S2)
+                        end),
                     dperl_dal:job_error_close(),
                     execute(finish, Mod, Job, S2, Args1);
                 {ok, finish, S2} ->
-                    set_state(
-                      refresh, Job, stop,
-                      case Args1 of
-                          #{stats := #{refresh_count := RC1}} ->
-                              (Mod:get_status(S2))#{count => RC1};
-                          Args1 -> Mod:get_status(S2)
-                      end),
+                    set_cycle_state(refresh, Job, stop,
+                        case Args1 of
+                            #{stats := #{refresh_count := RC1}} ->
+                                (Mod:get_status(S2))#{count => RC1};
+                            Args1 -> Mod:get_status(S2)
+                        end),
                     dperl_dal:job_error_close(),
                     ?JInfo("Refresh cycle is complete"),
                     execute(finish, Mod, Job, S2, Args1)
@@ -424,76 +505,67 @@ execute(finish, Mod, Job, State, Args) ->
     ?RESTART_AFTER(?CYCLE_ALWAYS_WAIT(Mod, Job), Args),
     State.
 
--spec get_state(cleanup|refresh, binary()) ->
-    {ddTimestamp() | undefined, ddTimestamp() | undefined}.
-get_state(Type, Job) when (Type == cleanup orelse Type == refresh)
-                          andalso is_binary(Job) ->
+-spec get_cycle_state(scrCycle(), jobName()) -> scrCycleState().
+get_cycle_state(Cycle, Job) when (Cycle==cleanup orelse Cycle==refresh) andalso is_binary(Job) ->
     maps:merge(
-      if Type == cleanup ->
-             #{minKey => -1, maxKey => <<255>>, lastKey => 0};
-         true -> #{}
-      end,
-      case dperl_dal:select(
-             ?JOBDYN_TABLE,
-             [{#dperlNodeJobDyn{name=Job,state='$1',_='_'},[],['$1']}]) of
-          {[#{Type:=State}], true} when is_map(State) -> State;
-          {_, true} -> #{lastAttempt => ?EPOCH, lastSuccess => ?EPOCH}
-      end).
+        if 
+            Cycle==cleanup ->   #{minKey => -1, maxKey => <<255>>, lastKey => 0};
+            true ->             #{}
+        end,
+        case dperl_dal:select(
+                ?JOBDYN_TABLE, 
+                [{#dperlNodeJobDyn{name=Job,state='$1',_='_'},[],['$1']}]) of
+            {[#{Cycle:=CycleState}], true} when is_map(CycleState) -> CycleState;
+            {_, true} -> #{lastAttempt => ?EPOCH, lastSuccess => ?EPOCH}
+        end).
 
--spec set_state(cleanup|refresh, binary(), start | stop) -> any().
-set_state(Type, Job, Status) -> set_state(Type, Job, Status, #{}).
+% update dperlNodeJobDyn table according to planned action, reset statistics 
+-spec set_cycle_state(scrCycle(), jobName(), start | stop) -> ok.
+set_cycle_state(Cycle, Job, Action) -> set_cycle_state(Cycle, Job, Action, #{}).
 
--spec set_state(cleanup|refresh, binary(), start | stop, map()) -> any().
-set_state(Type, Job, Status, State0)
-  when (Type == cleanup orelse Type == refresh) andalso
-       (Status == start orelse Status == stop) andalso is_binary(Job) ->
-    {NodeJobDyn, NewStatus0} =
-    case dperl_dal:select(
-           ?JOBDYN_TABLE,
-           [{#dperlNodeJobDyn{name=Job,_='_'},[],['$_']}]) of
-        {[#dperlNodeJobDyn{state=#{Type:=OldState}} = NJD], true}
-          when is_map(OldState) ->            
-            {NJD, OldState};
+% update dperlNodeJobDyn table according to planned action, update statistics in  
+-spec set_cycle_state(scrCycle(), jobName(), start | stop, jobArgs()) -> ok.
+set_cycle_state(Cycle, Job, Action, Stats0)
+        when (Cycle==cleanup orelse Cycle==refresh) andalso
+             (Action==start orelse Action==stop) andalso is_binary(Job) ->
+    {NodeJobDyn, CycleState1} = case dperl_dal:select(?JOBDYN_TABLE,
+                [{#dperlNodeJobDyn{name=Job, _='_'}, [], ['$_']}]) of
+        {[#dperlNodeJobDyn{state=#{Cycle:=CycleState0}} = NJD], true} when is_map(CycleState0) ->            
+            {NJD, CycleState0};
         {[#dperlNodeJobDyn{} = NJD], true} ->
-            {NJD, #{lastAttempt => os:timestamp(),
-                    lastSuccess => ?EPOCH}}
+            {NJD, #{lastAttempt=>os:timestamp(), lastSuccess=>?EPOCH}} % ToDo: Should it be imem_meta:time() ????
+        end,
+    {CycleState2, Stats1} = case maps:get(count, Stats0, '$not_found') of
+        '$not_found' -> {CycleState1, Stats0};
+        Count ->        {CycleState1#{count => Count}, maps:remove(count, Stats0)}
     end,
-    {NewStatus, State} =
-    case maps:get(count, State0, '$not_found') of
-        '$not_found' -> {NewStatus0, State0};
-        Count ->
-            {NewStatus0#{count => Count}, maps:remove(count, State0)}
+    CycleState3 = if 
+        Action == start ->  CycleState2#{lastAttempt => imem_meta:time()};
+        true ->             CycleState2#{lastSuccess => imem_meta:time()}
     end,
-    TypeState = case {Type, Status} of
-                    {cleanup, start} -> cleaning;
-                    {cleanup, stop} -> cleaned;
-                    {refresh, start} -> refreshing;
-                    {refresh, stop} -> refreshed
-                end,
-    % create 'Type' state if doesn't exists
-    % if exists update 'LastSuccess' timestamp to current time
+    Status = case {Cycle, Action} of
+        {cleanup, start} -> cleaning;
+        {cleanup, stop} -> cleaned;
+        {refresh, start} -> refreshing;
+        {refresh, stop} -> refreshed
+    end,
     NodeJobDynState = NodeJobDyn#dperlNodeJobDyn.state,
-    dperl_dal:update_job_dyn(
-      Job,
-      maps:merge(
-      NodeJobDynState#{
-        Type =>
-        if Status == start ->
-               NewStatus#{lastAttempt => imem_meta:time()};
-           true ->
-               NewStatus#{lastSuccess => imem_meta:time()}
-        end}, State), TypeState).
+    NewStateWithStats = maps:merge(NodeJobDynState#{Cycle=>CycleState3}, Stats1),
+    dperl_dal:update_job_dyn(Job, NewStateWithStats, Status).
 
-%
 % default callbacks
-% 
-should_cleanup(LastAttempt, LastSuccess, BatchInterval, Interval) ->
+
+-spec should_cleanup(ddTimestamp(), ddTimestamp(), 
+                     scrMsecInterval(), scrMsecInterval()) -> true | false.
+should_cleanup(LastAttempt, LastSuccess, BatchInterval, CycleInterval) ->
     if LastAttempt > LastSuccess -> 
            imem_datatype:msec_diff(LastAttempt) > BatchInterval;
        true ->
-           imem_datatype:msec_diff(LastSuccess) > Interval
+           imem_datatype:msec_diff(LastSuccess) > CycleInterval
     end.
 
+-spec should_refresh(ddTimestamp(), ddTimestamp(), scrMsecInterval(), 
+                     scrMsecInterval(), scrHoursOfDay()) -> true | false.
 should_refresh(LastAttempt, LastSuccess, BatchInterval, Interval, Hours) ->
     if LastAttempt > LastSuccess ->
            imem_datatype:msec_diff(LastAttempt) > BatchInterval;
@@ -512,6 +584,8 @@ should_refresh(LastAttempt, LastSuccess, BatchInterval, Interval, Hours) ->
            end
     end.
 
+
+-spec is_equal(scrAnyKey(), scrAnyVal(), scrAnyVal(), scrState()) -> boolean().
 is_equal(_Key, S, S, _State) -> true;
 is_equal(_Key, S, D, _State) when is_map(S), is_map(D) ->
     dperl_dal:normalize_map(S) == dperl_dal:normalize_map(D);
@@ -519,37 +593,38 @@ is_equal(_Key, S, D, _State) when is_list(S), is_list(D) ->
     lists:sort(S) == lists:sort(D);
 is_equal(_Key, _, _, _State) -> false.
 
+-spec cleanup_log(string(), scrAnyKeys()) -> no_op | ok.
 cleanup_log(_Msg, []) -> no_op;
 cleanup_log(Msg, [K | _] = Keys) when is_integer(K) ->
     ?JWarn("~s (~p) ~w", [Msg, length(Keys), Keys]);
 cleanup_log(Msg, Keys) ->
     ?JWarn("~s (~p) ~p", [Msg, length(Keys), Keys]).
 
+-spec sync_log(scrOperation(), scrAnyKey() | {scrAnyKey(),term()}, boolean()) -> no_op | ok.
 sync_log(_, _, false) -> no_op;
 sync_log(Msg, {Key, _}, ShouldLog) -> sync_log(Msg, Key, ShouldLog);
 sync_log(Msg, Key, _) when is_binary(Key) -> ?JInfo("~s : ~s", [Msg, Key]);
 sync_log(Msg, Key, _) -> ?JInfo("~s : ~p", [Msg, Key]).
 
-%%----------------
 %% chunked cleanup
-%%
 
+-spec process_events(scrAnyKeys(), jobModule(), scrState()) -> {boolean(), scrState()}.
 process_events(Keys, Mod, State) ->
-    ShouldLog =
-    case erlang:function_exported(Mod, should_sync_log, 1) of
+    ShouldLog = case erlang:function_exported(Mod, should_sync_log, 1) of
         true -> Mod:should_sync_log(State);
         false -> true
     end,
     process_events(Keys, Mod, State, ShouldLog, false).
 
+-spec process_events(scrAnyKeys(), jobModule(), scrState(), boolean(), boolean()) -> 
+        {boolean(), scrState()}.
 process_events([], Mod, State, _ShouldLog, IsError) ->
     case erlang:function_exported(Mod, finalize_src_events, 1) of
         true -> execute_prov_fun(no_log, Mod, finalize_src_events, [State], false, IsError);
         false -> {IsError, State}
     end;
 process_events([Key | Keys], Mod, State, ShouldLog, IsError) ->
-    {NewIsError, NewState} =
-    case {Mod:fetch_src(Key, State), Mod:fetch_dst(Key, State)} of
+    {NewIsError, NewState} = case {Mod:fetch_src(Key, State), Mod:fetch_dst(Key, State)} of
         {S, S} ->
             Mod:report_status(Key, no_op, State),
             {IsError, State}; %% nothing to do
@@ -584,8 +659,7 @@ process_events([Key | Keys], Mod, State, ShouldLog, IsError) ->
             Mod:report_status(Key, {error, Error}, State1),
             {true, State1};
         {S, D} ->
-            DiffFun =
-            case erlang:function_exported(Mod, is_equal, 4) of
+            DiffFun = case erlang:function_exported(Mod, is_equal, 4) of
                 true -> fun Mod:is_equal/4;
                 false -> fun is_equal/4
             end,
@@ -598,6 +672,8 @@ process_events([Key | Keys], Mod, State, ShouldLog, IsError) ->
     end,
     process_events(Keys, Mod, NewState, ShouldLog, NewIsError).
 
+-spec execute_prov_fun(scrOperation(), jobModule(), atom(), list(), boolean(), boolean()) -> 
+        {true | false | idle, scrState() | term()}.
 execute_prov_fun(Op, Mod, Fun, Args, ShouldLog, IsError) ->
     case catch apply(Mod, Fun, Args) of
         {false, NewState} ->
@@ -616,20 +692,21 @@ execute_prov_fun(Op, Mod, Fun, Args, ShouldLog, IsError) ->
             {true, lists:last(Args)}
     end.
 
+-spec execute_prov_fun(scrOperation(), jobModule(), atom(), list(), boolean(), boolean(), check) -> 
+        {true|false|idle, scrState()|term()}.
 execute_prov_fun(Op, Mod, Fun, Args, ShouldLog, IsError, check) ->
     case erlang:function_exported(Mod, Fun, length(Args)) of
-        true -> execute_prov_fun(Op, Mod, Fun, Args, ShouldLog, IsError);
+        true -> 
+            execute_prov_fun(Op, Mod, Fun, Args, ShouldLog, IsError);
         false ->
             ?Error("Function : ~p not exported in mod : ~p", [Fun, Mod]),
             {true, lists:last(Args)}
     end.
 
--spec cleanup_refresh_collect(atom(), #cleanup_ctx{}, state()) ->
-    #{deletes => list(), inserts => list(), lastKey => any()}.
-cleanup_refresh_collect(Mod,
-                #cleanup_ctx{minKey = MinKey, maxKey = MaxKey,
-                             lastKey = LastKey, bulkCount = BulkCnt} = CleanupCtx,
-                State) ->
+-spec cleanup_refresh_collect(jobModule(), #cleanup_ctx{}, scrState()) ->
+    #{deletes => scrAnyKeys(), inserts => scrAnyKeys(), lastKey => scrAnyKey()}.
+cleanup_refresh_collect(Mod, CleanupCtx, State) ->
+    #cleanup_ctx{minKey=MinKey, maxKey=MaxKey, lastKey=LastKey, bulkCount=BulkCnt} = CleanupCtx,
     CurKey = if
                  LastKey =< MinKey -> MinKey;  % throw to cycle start if getting
                  LastKey >= MaxKey -> MinKey;  % out of key bounds by re-config
@@ -657,66 +734,62 @@ cleanup_refresh_collect(Mod,
         srcKeys = SrcKeys, srcCount = length(SrcKeys),
         dstKeys = DstKeys, dstCount = length(DstKeys), lastKey = CurKey}), State4}.
 
--spec cleanup_refresh_compare(#cleanup_ctx{}) -> #{deletes => list(), differences => list(), inserts => list(), lastKey => any()}.
+-spec cleanup_refresh_compare(#cleanup_ctx{}) -> 
+        #{deletes=>scrAnyKeys(), differences=>scrAnyKeys()
+         , inserts=>scrAnyKeys(), lastKey=>scrAnyKey()}.
 cleanup_refresh_compare(#cleanup_ctx{
-                   srcKeys = SrcKeys, dstKeys = [], deletes = Deletes, 
-                   inserts = Inserts, minKey = MinKey, differences = Diffs,
-                   dstCount = DstCount, bulkCount = BulkCnt, srcCount = SrcCount})
-  when DstCount < BulkCnt, SrcCount < BulkCnt ->
+                   srcKeys=SrcKeys, dstKeys=[], deletes=Deletes, 
+                   inserts=Inserts, minKey=MinKey, differences=Diffs,
+                   dstCount=DstCount, bulkCount=BulkCnt, srcCount=SrcCount})
+        when DstCount < BulkCnt, SrcCount < BulkCnt ->
     Remaining = fetch_keys(SrcKeys),
-    #{deletes => Deletes, differences => Diffs, inserts => Inserts++Remaining, lastKey => MinKey};
-cleanup_refresh_compare(#cleanup_ctx{srcKeys = SrcKeys, dstKeys = [], deletes = Deletes, dstCount = DstCount,
-                                     inserts = Inserts, differences = Diffs})
-  when DstCount == 0 ->
+    #{deletes=>Deletes, differences=>Diffs, inserts=>Inserts++Remaining, lastKey=>MinKey};
+cleanup_refresh_compare(#cleanup_ctx{srcKeys=SrcKeys, dstKeys=[], deletes=Deletes
+                            , dstCount=DstCount, inserts=Inserts, differences=Diffs})
+        when DstCount == 0 ->
     Remaining = fetch_keys(SrcKeys),
-    #{deletes => Deletes, differences => Diffs, inserts => Inserts++Remaining, lastKey => last_key(SrcKeys)};
-cleanup_refresh_compare(#cleanup_ctx{dstKeys = [], deletes = Deletes, differences = Diffs,
-                                     inserts = Inserts, lastKey = LK}) ->
-    #{deletes => Deletes, differences => Diffs, inserts => Inserts, lastKey => LK};
-cleanup_refresh_compare(#cleanup_ctx{
-                   srcCount = SrcCount, dstKeys = DstKeys, bulkCount = BulkCnt,
-                   minKey = MinKey, srcKeys = [], deletes = Deletes, 
-                   inserts = Inserts, dstCount = DstCount, differences = Diffs})
-  when SrcCount < BulkCnt, DstCount < BulkCnt ->
+    #{deletes=>Deletes, differences=>Diffs, inserts=>Inserts++Remaining, lastKey=>last_key(SrcKeys)};
+cleanup_refresh_compare(#cleanup_ctx{dstKeys=[], deletes=Deletes, differences=Diffs,
+                                     inserts=Inserts, lastKey=LK}) ->
+    #{deletes=>Deletes, differences=>Diffs, inserts=>Inserts, lastKey=>LK};
+cleanup_refresh_compare(#cleanup_ctx{ srcCount=SrcCount, dstKeys=DstKeys,bulkCount=BulkCnt
+                                    , minKey=MinKey, srcKeys=[], deletes=Deletes
+                                    , inserts=Inserts, dstCount=DstCount, differences=Diffs})
+        when SrcCount < BulkCnt, DstCount < BulkCnt ->
     Remaining = fetch_keys(DstKeys),
-    #{deletes => Deletes++Remaining, differences => Diffs, inserts => Inserts, lastKey => MinKey};
-cleanup_refresh_compare(#cleanup_ctx{srcKeys = [], deletes = Deletes,
-                                     inserts = Inserts, dstKeys = DstKeys,
-                                     differences = Diffs, srcCount = SrcCount}) 
-  when SrcCount == 0 ->
+    #{deletes=>Deletes++Remaining, differences=>Diffs, inserts=>Inserts, lastKey=>MinKey};
+cleanup_refresh_compare(#cleanup_ctx{ srcKeys=[], deletes=Deletes, inserts=Inserts
+                                    , dstKeys=DstKeys, differences=Diffs, srcCount=SrcCount}) 
+        when SrcCount == 0 ->
     Remaining = fetch_keys(DstKeys),
-    #{deletes => Deletes ++ Remaining, differences => Diffs, inserts => Inserts, lastKey => last_key(DstKeys)};
-cleanup_refresh_compare(#cleanup_ctx{srcKeys = [], deletes = Deletes, differences = Diffs,
-                                     inserts = Inserts, lastKey = LK}) ->
-    #{deletes => Deletes, differences => Diffs, inserts => Inserts, lastKey => LK};
-cleanup_refresh_compare(#cleanup_ctx{srcKeys = [K|SrcKeys], dstKeys = [K|DstKeys]}
-                = CleanupCtx) ->
-    cleanup_refresh_compare(CleanupCtx#cleanup_ctx{srcKeys = SrcKeys, dstKeys = DstKeys,
-                                                   lastKey = last_key([K])});
-cleanup_refresh_compare(#cleanup_ctx{srcKeys = [{K, _} | SrcKeys], dstKeys = [{K, _} | DstKeys],
-                                     differences = Diffs} = CleanupCtx) ->
-    cleanup_refresh_compare(CleanupCtx#cleanup_ctx{srcKeys = SrcKeys, dstKeys = DstKeys,
-                                                   lastKey = K, differences = [K | Diffs]});
-cleanup_refresh_compare(#cleanup_ctx{srcKeys = [SK|SrcKeys], dstKeys = [DK | DstKeys],
-                                     inserts = Inserts, deletes = Deletes} = CleanupCtx) ->
+    #{deletes=>Deletes++Remaining, differences=>Diffs, inserts=>Inserts, lastKey=>last_key(DstKeys)};
+cleanup_refresh_compare(#cleanup_ctx{ srcKeys=[], deletes=Deletes, differences=Diffs
+                                    , inserts=Inserts, lastKey=LK}) ->
+    #{deletes=>Deletes, differences=>Diffs, inserts=>Inserts, lastKey=>LK};
+cleanup_refresh_compare(#cleanup_ctx{srcKeys=[K|SrcKeys], dstKeys=[K|DstKeys]} = CleanupCtx) ->
+    cleanup_refresh_compare(CleanupCtx#cleanup_ctx{ srcKeys=SrcKeys, dstKeys=DstKeys
+                                                  , lastKey = last_key([K])});
+cleanup_refresh_compare(#cleanup_ctx{ srcKeys=[{K, _} | SrcKeys], dstKeys=[{K, _} | DstKeys]
+                                    , differences=Diffs} = CleanupCtx) ->
+    cleanup_refresh_compare(CleanupCtx#cleanup_ctx{ srcKeys=SrcKeys, dstKeys=DstKeys
+                                                  , lastKey=K, differences=[K | Diffs]});
+cleanup_refresh_compare(#cleanup_ctx{ srcKeys=[SK|SrcKeys], dstKeys=[DK | DstKeys]
+                                    , inserts=Inserts, deletes=Deletes} = CleanupCtx) ->
     case {last_key([SK]), last_key([DK])} of
         {K1, K2} when K1 < K2 -> cleanup_refresh_compare(
-                CleanupCtx#cleanup_ctx{srcKeys = SrcKeys,
-                                       inserts = [K1|Inserts], lastKey = K1});
+            CleanupCtx#cleanup_ctx{srcKeys=SrcKeys, inserts=[K1|Inserts], lastKey=K1});
         {K1, K2} when K2 < K1 -> cleanup_refresh_compare(
-                CleanupCtx#cleanup_ctx{dstKeys = DstKeys,
-                                       deletes = [K2|Deletes], lastKey = K2})
+            CleanupCtx#cleanup_ctx{dstKeys=DstKeys, deletes=[K2|Deletes], lastKey=K2})
     end.
 
+-spec fetch_keys(scrAnyKeys()) -> scrAnyKeys().
 fetch_keys([]) -> [];
 fetch_keys([{_, _} | _] = KVs) -> [K || {K, _} <- KVs];
 fetch_keys(Keys) -> Keys.
 
+-spec last_key(scrAnyKeys()) -> scrAnyKey().
 last_key([{_, _} | _] = KVs) -> element(1, lists:last(KVs));
 last_key(Keys) -> lists:last(Keys).
-
-%% ----------------------
-
 
 %% ----------------------
 %% Eunit Tests
