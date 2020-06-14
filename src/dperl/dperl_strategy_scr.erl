@@ -32,18 +32,16 @@
 -callback fetch_dst(scrAnyKey(), scrState()) -> ?NOT_FOUND | scrAnyVal().
 
 % delete one item from destination (if it exists)
-% first element in result is true if a delete was unnecessary ????
+% first element in result is true if a delete was unnecessary
+% callback is responsible for deciding if no_op delete is an error or not
 -callback delete_dst(scrAnyKey(), scrState()) -> {scrSoftError(), scrState()}.
 
 % insert one item to destination (which is assumed to not exist)
-% first element in result is true if the insert was compatible but unnecessary (already 
-% existed in correct shape) ????
-% alternatively, the callback implementation can (or should) throw if key already exists
+% if the callback is able to do an update instead of an insert it can do it responsibly.
 -callback insert_dst(scrAnyKey(), scrAnyVal(), scrState()) -> {scrSoftError(), scrState()}.
 
 % update one item in destination (which is assumed to exist)
-% first element in result tuple indicates wether an update was possible (false=insert needed) ????
-% alternatively, the callback implementation can (or should) throw if the key does not exist
+% if the callback is able to do an insert instead of an update it can do it responsibly.
 -callback update_dst(scrAnyKey(), scrAnyVal(), scrState()) -> {scrSoftError(), scrState()}.
 
 % allow the callback implementation act upon an error or warning message
@@ -74,17 +72,16 @@
 -callback is_equal(scrAnyKey(), scrAnyVal(), scrAnyVal(), scrState()) -> true | false.
 
 % override for destination channel insert/update/delete (final data change)
-% first element of result indicates if anything was changed on the target ????
-% (ignored by behaviour, used for debugging only)
+% only used for protected configurations (reversing the direction of data flow)
 -callback update_channel( scrAnyKey(), 
                           IsSamePlatform::boolean(), 
                           SourceVal::scrAnyVal(), 
                           DestVal::scrAnyVal(), 
                           scrState()) -> {true, scrState()} | {false, scrState()}.
 
-% optional cleanup call after end of differential provisioning (sync phase) ????
-% where and when is it exactly invoked ????
-% first element of result indicates if anything was executed on the target ????
+% called at the end of all the sync cycles, for example used for smsc push job
+% to push the addresslists. 
+% optional callback when there is a risk of target inconsistency after individual sync updates.
 -callback finalize_src_events(scrState()) -> {true, scrState()} | {false, scrState()}.
 
 % can be used in callback to suppress the logging of individual sync results
@@ -265,8 +262,7 @@ execute(sync, Mod, Job, State, #{sync:=Sync} = Args) ->
                             execute(finish, Mod, Job, State4, Args);
                         %% idle used for dperl_mec_ic to have idle timeout on
                         %% try later error from oracle
-                        %% would be removed in the future when new
-                        %% behavior is used for mec_ic
+                        %% results in calling idle wait instead of always wait
                         {idle, State4} ->
                             execute(idle, Mod, Job, State4, Args)
                     end
@@ -533,7 +529,7 @@ set_cycle_state(Cycle, Job, Action, Stats0)
         {[#dperlNodeJobDyn{state=#{Cycle:=CycleState0}} = NJD], true} when is_map(CycleState0) ->            
             {NJD, CycleState0};
         {[#dperlNodeJobDyn{} = NJD], true} ->
-            {NJD, #{lastAttempt=>os:timestamp(), lastSuccess=>?EPOCH}} % ToDo: Should it be imem_meta:time() ????
+            {NJD, #{lastAttempt=>imem_meta:time(), lastSuccess=>?EPOCH}} % ToDo: Should it be imem_meta:time() ????
         end,
     {CycleState2, Stats1} = case maps:get(count, Stats0, '$not_found') of
         '$not_found' -> {CycleState1, Stats0};
@@ -673,7 +669,7 @@ process_events([Key | Keys], Mod, State, ShouldLog, IsError) ->
     process_events(Keys, Mod, NewState, ShouldLog, NewIsError).
 
 -spec execute_prov_fun(scrOperation(), jobModule(), atom(), list(), boolean(), boolean()) -> 
-        {true | false | idle, scrState() | term()}.
+        {scrSoftError(), scrState() | term()}.
 execute_prov_fun(Op, Mod, Fun, Args, ShouldLog, IsError) ->
     case catch apply(Mod, Fun, Args) of
         {false, NewState} ->

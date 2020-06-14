@@ -19,7 +19,9 @@
 -type scrMessage() :: binary().
 -type scrStatus() :: no_op | {error,term()} | scrMessage().
 -type scrOperation() :: finalize_src_events | no_log | string().  %  "Protected"|"Deleted"|"Inserted"|"Updated".
--type scrSoftError() :: true|false.
+-type scrSoftError() :: true|false|idle. % idle only used in special case where the dst is not ready and we have to do an idle wait.
+                                         % true signifies the one or more events in the sync cycle resulted in an error
+                                         % false means all the events were processed successfully by the sync cycle
 
 -type scrMsecInterval() :: integer().   % delays in milli-seconds
 -type scrHoursOfDay() :: [integer()].   % execute only on these hours, [] = any hour
