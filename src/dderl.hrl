@@ -325,8 +325,8 @@
 
 % OAUTH 
 
--define(SYNC_OURARING, dperl_ouraring_crawl).
+-define(SYNC_OURARING, dpjob_ouraring_crawl).
 
--define(SYNC_OFFICE365, dperl_office_365).
+-define(SYNC_OFFICE365, dpjob_office_365).
 
 -endif.

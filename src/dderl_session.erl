@@ -382,16 +382,16 @@ process_call({[<<"about">>], _ReqData}, _Adapter, From, {SrcIp,_}, State) ->
 
 process_call({[<<"office_365_auth_config">>], _ReqData}, _Adapter, From, {SrcIp, _}, State) ->
     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "office_365_auth_config"}, State),
-    AuthConfig = dperl_office_365:get_auth_config(), % ToDo: may depend on JobName or TokenPrefix
+    AuthConfig = dpjob_office_365:get_auth_config(), % ToDo: may depend on JobName or TokenPrefix
     Url = dderl_oauth:get_authorize_url(State#state.xsrf_token, AuthConfig, ?SYNC_OFFICE365),
     reply(From, #{<<"office_365_auth_config">> => #{<<"url">> => Url}}, self()),
     State;
 
 process_call({[<<"oura_ring_auth_config">>], _ReqData}, _Adapter, From, {SrcIp, _}, State) ->
     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "oura_ring_auth_config"}, State),
-    AuthConfig = dperl_ouraring_crawl:get_auth_config(), % ToDo: may depend on JobName or TokenPrefix
-    ?Info("oura_ring_auth_config ~p",[AuthConfig]),
+    AuthConfig = dpjob_ouraring_crawl:get_auth_config(), % ToDo: may depend on JobName or TokenPrefix
     Url = dderl_oauth:get_authorize_url(State#state.xsrf_token, AuthConfig, ?SYNC_OURARING),
+    ?Info("oura_ring_auth_config ~p ~p",[AuthConfig, Url]),
     reply(From, #{<<"oura_ring_auth_config">> => #{<<"url">> => Url}}, self()),
     State;
 

@@ -14,6 +14,14 @@
               scope => "email personal daily"},
             "Oura Ring auth config")).
 
+-define(OAUTH2_TOKEN_KEY_PREFIX(__JOB_NAME),
+            ?GET_CONFIG(oAuth2TokenKeyPrefix,
+            [__JOB_NAME],
+            ["dperlJob","OuraRing"],
+            "Default KeyPrefix for OuraRing token cache"
+            )
+       ).
+
 -define(KEY_PREFIX(__JOB_NAME),
           ?GET_CONFIG(keyPrefix, [__JOB_NAME], ["healthDevice","OuraRing"],
           "Default KeyPrefix for Oura Ring data")
@@ -52,6 +60,8 @@
         , get_auth_config/1
         , get_key_prefix/0
         , get_key_prefix/1
+        , get_auth_token_key_prefix/0
+        , get_auth_token_key_prefix/1
         ]).
 
 % dperl_strategy_scr export
@@ -75,6 +85,10 @@ get_auth_config(JobName) -> ?AUTH_CONFIG(JobName).
 get_key_prefix() -> ?KEY_PREFIX(<<>>).
 
 get_key_prefix(JobName) -> ?KEY_PREFIX(JobName).
+
+get_auth_token_key_prefix() -> ?OAUTH2_TOKEN_KEY_PREFIX(<<>>).
+
+get_auth_token_key_prefix(JobName) -> ?OAUTH2_TOKEN_KEY_PREFIX(JobName).
 
 connect_check_src(#state{is_connected = true} = State) ->
     {ok, State};
@@ -161,7 +175,7 @@ init({#dperlJob{name=Name, dstArgs = #{channel := Channel} = DstArgs,
             ?JInfo("Starting with ~p's enchash...", [AccountId]),
             imem_enc_mnesia:put_enc_hash(EncHash),
             KeyPrefix = maps:get(key_prefix, DstArgs, get_key_prefix(Name)),
-            case dderl_oauth:get_token_info(AccountId, KeyPrefix, ?SYNC_OURARING) of
+            case dderl_oauth:get_token_info(AccountId, get_auth_token_key_prefix(Name), ?SYNC_OURARING) of
                 #{<<"access_token">> := AccessToken} ->
                     ChannelBin = dperl_dal:to_binary(Channel),
                     dperl_dal:create_check_channel(ChannelBin),
