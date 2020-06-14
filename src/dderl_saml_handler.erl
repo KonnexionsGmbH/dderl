@@ -20,7 +20,7 @@ init(Req0, Args) ->
                 #{app := Application} -> Application;
                 _ -> dderl
             end,
-            Req = ?COW_REQ_SET_META(App, reqTime, os:timestamp(), Req0),
+            Req = ?COW_REQ_SET_META(App, reqTime, imem_meta:time(), Req0),
             Req1 = ?COW_REQ_SET_META(App, accessLog, #{}, Req),
             HostUrl = iolist_to_binary(cowboy_req:uri(Req1, #{path => undefined, qs => undefined})),
             Url = iolist_to_binary(cowboy_req:uri(Req1)),
