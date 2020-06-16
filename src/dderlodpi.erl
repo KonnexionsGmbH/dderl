@@ -860,7 +860,7 @@ number_to_binary(Else) -> ?Error("Tried to convert bad term to binary: ~p", [Els
 
 dpi_conn_prepareStmt(#odpi_conn{node = Node, connection = Conn}, Sql) ->
     Stmt = dpi:safe(Node, fun() -> dpi:conn_prepareStmt(Conn, false, Sql, <<"">>) end), % tentative statement with scrollable set to false
-    #{statementType := StatementType} = dpi:safe(Node, fun() -> dpi:stmt_getInfo(Stmt) end), % fin out whether it is a SELECT
+    #{statementType := StatementType} = dpi:safe(Node, fun() -> dpi:stmt_getInfo(Stmt) end), % find out whether it is a SELECT
     case StatementType of 'DPI_STMT_TYPE_SELECT' -> % SELECT statement needs to be redone with scrollable set to true
         dpi:safe(Node, fun() -> dpi:stmt_close(Stmt) end), % remove the "bad" statement
         dpi:safe(Node, fun() -> dpi:conn_prepareStmt(Conn, true, Sql, <<"">>) end); % return the proper statement
