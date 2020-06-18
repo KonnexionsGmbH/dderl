@@ -15,9 +15,9 @@
             "Oura Ring auth config")).
 
 -define(OAUTH2_TOKEN_KEY_PREFIX(__JOB_NAME),
-            ?GET_CONFIG(oAuth2TokenKeyPrefix,
+            ?GET_CONFIG(oAuth2KeyPrefix,
             [__JOB_NAME],
-            ["dperlJob","OuraRing"],
+            ["dpjob","OuraRing"],
             "Default KeyPrefix for OuraRing token cache"
             )
        ).

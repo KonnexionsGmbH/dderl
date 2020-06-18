@@ -33,9 +33,9 @@
         ).
 
 -define(OAUTH2_TOKEN_KEY_PREFIX(__JOB_NAME),
-            ?GET_CONFIG(oAuth2TokenKeyPrefix,
+            ?GET_CONFIG(oAuth2KeyPrefix,
             [__JOB_NAME],
-            ["dperlJob","Office365"],
+            ["dpjob","Office365"],
             "Default KeyPrefix for Office365 token cache"
             )
        ).
