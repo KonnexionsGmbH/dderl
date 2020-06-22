@@ -1,11 +1,35 @@
 -module(dpjob_ouraring_crawl).
 
+%% implements scr puller callback for OuraRing cloud data as a cleanupCumRefresh job (c/r)
+%% avoids pulling incomplete intra-day data by not pulling beyond yesterday's data
+%% the default "OuraRing" identifier can be altered to camouflage the nature of the data
+%% this also supports multiple OuraRing pullers into the same table, if needed 
+
 -include("../dperl.hrl").
+-include("../dperl_strategy_scr.hrl").
 
 -behavior(dperl_worker).
 -behavior(dperl_strategy_scr).
 
--define(AUTH_CONFIG(__JOB_NAME),
+-type metric()      :: string().     % "userinfo" | "sleep" | "readiness" | "activity".
+-type locKey()      :: [string()].   % local key of a metric, e.g. ["healthDevice","OuraRing","sleep"]
+-type locVal()      :: map().        % local cvalue of a metric, converted to a map for processing
+-type locKVP()      :: {locKey(), locVal()}.    % local key value pair
+-type year()        :: non_neg_integer().
+-type month()       :: 1..12.
+-type day()         :: 1..31.
+-type date()        :: {year(), month(), day()}.
+-type stringDate()  :: string().     % "YYYY-MM-DD"
+-type dayDate()     :: date() | stringDate().
+-type maybeDate()   :: undefined | date().
+-type status()      :: #{ lastSleepDay := maybeDate()
+                        , lastActivityDay := maybeDate()
+                        , lastReadinessDay := maybeDate()}.     % relevant cleanup status
+-type token()       :: binary().    % OAuth access token (refreshed after 'unauthorized')
+
+-define(METRICS, ["userinfo", "activity", "readiness", "sleep"]).
+
+-define(OAUTH2_CONFIG(__JOB_NAME),
         ?GET_CONFIG(oAuth2Config,[__JOB_NAME],
             #{auth_url =>"https://cloud.ouraring.com/oauth/authorize?response_type=code",
               client_id => "12345", redirect_uri => "https://localhost:8443/dderl/",
@@ -32,17 +56,19 @@
           "Days to be shifted backwards for starting the job")
        ).
 
--record(state,  { name
-                , channel
-                , is_connected = true
-                , access_token
-                , api_url
-                , last_sleep_day
-                , last_activity_day
-                , last_readiness_day
-                , infos = []
-                , key_prefix
-                , accountId
+-record(state,  { name                  :: jobName()
+                , type = pull           :: scrDirection()   % constant here
+                , channel               :: scrChannel()     % channel name
+                , keyPrefix             :: locKey()         % key space prefix in channel
+                , tokenPrefix           :: locKey()         % without id #token#
+                , token                 :: token()          % token binary string 
+                , apiUrl                :: string()
+                , isConnected = true    :: boolean()        % provokes unauthorized in first cycle
+                , lastSleepDay          :: maybeDate()
+                , lastActivityDay       :: maybeDate()
+                , lastReadinessDay      :: maybeDate()
+                , cycleBuffer = []      :: [locKVP()]       % dirty buffer for one c/r cycle
+                , accountId             :: ddEntityId()
                 }).
 
 % dperl_worker exports
@@ -78,35 +104,46 @@
         , report_status/3
         ]).
 
-get_auth_config() -> ?AUTH_CONFIG(<<>>).
+-spec get_auth_config() -> map().
+get_auth_config() -> ?OAUTH2_CONFIG(<<>>).
 
-get_auth_config(JobName) -> ?AUTH_CONFIG(JobName).
+-spec get_auth_config(jobName()) -> map().
+get_auth_config(JobName) -> ?OAUTH2_CONFIG(JobName).
 
-get_key_prefix() -> ?KEY_PREFIX(<<>>).
-
-get_key_prefix(JobName) -> ?KEY_PREFIX(JobName).
-
+-spec get_auth_token_key_prefix() -> locKey().
 get_auth_token_key_prefix() -> ?OAUTH2_TOKEN_KEY_PREFIX(<<>>).
 
+-spec get_auth_token_key_prefix(jobName()) -> locKey().
 get_auth_token_key_prefix(JobName) -> ?OAUTH2_TOKEN_KEY_PREFIX(JobName).
 
-connect_check_src(#state{is_connected = true} = State) ->
+-spec get_key_prefix() -> locKey().
+get_key_prefix() -> ?KEY_PREFIX(<<>>).
+
+-spec get_key_prefix(jobName()) -> locKey().
+get_key_prefix(JobName) -> ?KEY_PREFIX(JobName).
+
+
+-spec connect_check_src(#state{}) -> {ok, #state{}} | {error, term(), #state{}}.
+connect_check_src(#state{isConnected = true} = State) ->
     {ok, State};
-connect_check_src(#state{is_connected=false, accountId=AccountId, key_prefix=KeyPrefix} = State) ->
+connect_check_src(#state{isConnected=false, accountId=AccountId, tokenPrefix=TokenPrefix} = State) ->
     ?JTrace("Refreshing access token"),
-    case dderl_oauth:refresh_access_token(AccountId, KeyPrefix, ?SYNC_OURARING) of
-        {ok, AccessToken} ->
-            ?Info("new access token fetched"),
-            {ok, State#state{access_token=AccessToken, is_connected=true}};
+    case dderl_oauth:refresh_access_token(AccountId, TokenPrefix, ?SYNC_OURARING) of
+        {ok, Token} ->
+            %?Info("new access token fetched"),
+            {ok, State#state{token=Token, isConnected=true}};
         {error, Error} ->
             ?JError("Unexpected response : ~p", [Error]),
             {error, Error, State}
     end.
 
-get_source_events(#state{infos = []} = State, _BulkSize) ->
+%% get CycleBuffer (dirty kv-pairs as detected in this c/r cycle)
+-spec get_source_events(#state{}, scrBatchSize()) ->
+    {ok, [{locKey(),locVal()}], #state{}} | {ok, sync_complete, #state{}}.
+get_source_events(#state{cycleBuffer=[]} = State, _BulkSize) ->
     {ok, sync_complete, State};
-get_source_events(#state{infos = Infos} = State, _BulkSize) ->
-    {ok, Infos, State#state{infos = []}}.
+get_source_events(#state{cycleBuffer=CycleBuffer} = State, _BulkSize) ->
+    {ok, CycleBuffer, State#state{cycleBuffer=[]}}.
 
 connect_check_dst(State) -> {ok, State}.
 
@@ -114,59 +151,71 @@ do_refresh(_State, _BulkSize) -> {error, cleanup_only}.
 
 fetch_src({_Key, Value}, _State) -> Value.
 
-fetch_dst({Key, _}, State) ->
-    dperl_dal:read_channel(State#state.channel, Key).
+-spec fetch_dst(locKey(), #state{}) -> ?NOT_FOUND | locVal().
+fetch_dst({Key, _}, #state{channel=Channel}) ->
+    dperl_dal:read_channel(Channel, Key).
 
+-spec insert_dst(locKey(), locVal(), #state{}) -> {scrSoftError(), #state{}}.
 insert_dst(Key, Val, State) ->
     update_dst(Key, Val, State).
 
 report_status(_Key, _Status, _State) -> no_op.
 
-do_cleanup(State, _BlkCount) ->
-    Types = ["sleep", "activity", "readiness", "userinfo"],
-    case fetch_metrics(Types, State) of
+-spec do_cleanup(#state{}, scrBatchSize()) ->
+    {ok, #state{}} | {ok, finish, #state{}} | {error, term(), #state{}}.
+do_cleanup(#state{cycleBuffer=CycleBuffer} = State, _BlkCount) ->
+    case fetch_metrics(?METRICS, State) of
         {ok, State2} ->
-            case State2#state.infos of
-                [_] ->
+            case CycleBuffer of
+                [_] ->  % only userinfo remains. we are done
                     {ok, finish, State2};
-                _ ->
+                _ ->    % other items in the list, continue
                     {ok, State2}
             end;
         {error, Error} ->
-            {error, Error, State#state{is_connected = false}}
+            {error, Error, State#state{isConnected=false}}
     end.
 
+-spec delete_dst(locKey(), #state{}) -> {scrSoftError(), #state{}}. 
 delete_dst(Key, #state{channel = Channel} = State) ->
     ?JInfo("Deleting : ~p", [Key]),
     dperl_dal:remove_from_channel(Channel, Key),
     {false, State}.
 
+-spec update_dst(locKey() | locKVP(), locVal(), #state{}) -> {scrSoftError(), #state{}}.
 update_dst({Key, _}, Val, State) ->
     update_dst(Key, Val, State);
-update_dst(Key, Val, #state{channel = Channel} = State) when is_binary(Val) ->
+update_dst(Key, Val, #state{channel=Channel} = State) when is_binary(Val) ->
     dperl_dal:write_channel(Channel, Key, Val),
     {false, State};
 update_dst(Key, Val, State) ->
     update_dst(Key, imem_json:encode(Val), State).
 
-get_status(#state{last_sleep_day = LastSleepDay,
-                  last_activity_day = LastActivityDay,
-                  last_readiness_day = LastReadinessDay}) ->
-    #{lastSleepDay => LastSleepDay, lastActivityDay => LastActivityDay,
-      lastReadinessDay => LastReadinessDay}.
+-spec get_status(#state{}) -> status().
+get_status(#state{ lastSleepDay=LastSleepDay, lastActivityDay=LastActivityDay
+                 , lastReadinessDay=LastReadinessDay}) ->
+    #{ lastSleepDay=>LastSleepDay
+     , lastActivityDay=>LastActivityDay
+     , lastReadinessDay=>LastReadinessDay}.
 
+%% (partially) initialize job state from status info in first matching 
+%% jobDyn table (from all available nodes) 
+-spec init_state([#dperlNodeJobDyn{}]) -> #state{}.
 init_state([]) -> #state{};
 init_state([#dperlNodeJobDyn{state = State} | _]) ->
     LastSleepDay = maps:get(lastSleepDay, State, undefined),
     LastActivityDay = maps:get(lastActivityDay, State, undefined),
     LastReadinessDay = maps:get(lastReadinessDay, State, undefined),
-    #state{last_sleep_day = LastSleepDay, last_activity_day = LastActivityDay,
-           last_readiness_day = LastReadinessDay};
-init_state([_ | Others]) ->
-    init_state(Others).
+    #state{ lastSleepDay=LastSleepDay
+          , lastActivityDay=LastActivityDay
+          , lastReadinessDay = LastReadinessDay};
+init_state([_|Others]) -> init_state(Others).
 
-init({#dperlJob{name=Name, dstArgs = #{channel := Channel} = DstArgs,
-                srcArgs = #{api_url := ApiUrl}}, State}) ->
+%% fully initialize a job using the job config and the partially filled
+%% state record (see init_state) derived from nodeJobDyn entries
+-spec init({#dperlJob{}, #state{}}) -> {ok, #state{}} | {stop, badarg}.
+init({#dperlJob{ name=Name, dstArgs=#{channel:=Channel} = DstArgs, args=Args
+               , srcArgs=#{apiUrl:=ApiUrl}}, State}) ->
     case dperl_auth_cache:get_enc_hash(Name) of
         undefined ->
             ?JError("Encryption hash is not avaialable"),
@@ -174,13 +223,15 @@ init({#dperlJob{name=Name, dstArgs = #{channel := Channel} = DstArgs,
         {AccountId, EncHash} ->
             ?JInfo("Starting with ~p's enchash...", [AccountId]),
             imem_enc_mnesia:put_enc_hash(EncHash),
-            KeyPrefix = maps:get(key_prefix, DstArgs, get_key_prefix(Name)),
-            case dderl_oauth:get_token_info(AccountId, get_auth_token_key_prefix(Name), ?SYNC_OURARING) of
-                #{<<"access_token">> := AccessToken} ->
-                    ChannelBin = dperl_dal:to_binary(Channel),
-                    dperl_dal:create_check_channel(ChannelBin),
-                    {ok, State#state{channel=ChannelBin, api_url=ApiUrl, accountId=AccountId,
-                                    key_prefix=KeyPrefix, access_token=AccessToken}};
+            KeyPrefix = maps:get(keyPrefix, DstArgs, get_key_prefix(Name)),
+            TokenPrefix = maps:get(tokenPrefix, Args, get_auth_token_key_prefix(Name)),
+            ChannelBin = dperl_dal:to_binary(Channel),
+            dperl_dal:create_check_channel(ChannelBin),
+            case dderl_oauth:get_token_info(AccountId, TokenPrefix, ?SYNC_OURARING) of
+                #{<<"access_token">> := Token} ->
+                    {ok, State#state{ name=Name, channel=ChannelBin, keyPrefix=KeyPrefix
+                                    , apiUrl=ApiUrl, tokenPrefix=TokenPrefix, token=Token
+                                    , accountId = AccountId}};
                 _ ->
                     ?JError("Access token not found for KeyPrefix ~p",[KeyPrefix]),
                     {stop, badarg}
@@ -208,92 +259,105 @@ terminate(Reason, _State) ->
 
 %% private functions
 
+%% perform one fetch round for all desired metrics
+%% fetch one value per metric for its respective due date
+%% skip to next metric, if metric is not available or if all values are fetched
+%% aggregate kv into cycleBuffer in state to be processed/stored per round  
+-spec fetch_metrics([metric()], #state{}) -> {ok, #state{}} | {error, term()}.
 fetch_metrics([], State) -> {ok, State};
-fetch_metrics(["userinfo" | Types], State) ->
+fetch_metrics(["userinfo"|Metrics], State) ->
     case fetch_userinfo(State) of
-        {error, Error} ->
-            {error, Error};
-        State1 ->
-            fetch_metrics(Types, State1)
+        {error, Error} ->   {error, Error};
+        {ok, State1} ->     fetch_metrics(Metrics, State1)
     end;
-fetch_metrics([Type | Types], State) ->
-    case get_day(Type, State) of
+fetch_metrics([Metric|Metrics], #state{cycleBuffer=CycleBuffer} = State) ->
+    case get_day(Metric, State) of
         fetched ->
-            fetch_metrics(Types, State);
+            fetch_metrics(Metrics, State);
         Day ->
-            case fetch_metric(Type, Day, State) of
+            case fetch_metric(Metric, Day, State) of
                 {error, Error} ->
                     {error, Error};
                 none ->
-                    fetch_metrics(Types, State);
-                {ok, MDay, Metric} ->
-                    State1 = set_metric_day(Type, MDay, State#state{infos = [Metric | State#state.infos]}),
-                    fetch_metrics(Types, State1)
+                    fetch_metrics(Metrics, State);
+                {ok, MDay, KVP} ->
+                    State1 = set_metric_day(Metric, MDay, State#state{cycleBuffer=[KVP|CycleBuffer]}),
+                    fetch_metrics(Metrics, State1)
             end
     end.
 
-fetch_metric(Type, Day, #state{api_url = ApiUrl, access_token = AccessToken} = State) ->
-    ?JInfo("Fetching metric for ~s on ~p", [Type, Day]),
+%% fetch metric value for Day from cloud service, if it exists
+%% values may be missing for certain days in which case a 'start_day_query' is used which gives
+%% the first data after the missing day 
+-spec fetch_metric(metric(), date(), #state{}) -> {ok, date(), locKVP()} | none | {error, term()}.
+fetch_metric(Metric, Day, #state{keyPrefix=KeyPrefix, apiUrl=ApiUrl, token=Token} = State) ->
+    ?JInfo("Fetching metric for ~s on ~p", [Metric, Day]),
     NextDay = next_day(Day),
-    case fetch_metric(Type, day_query(Day), ApiUrl, AccessToken) of
+    case fetch_metric(Metric, day_query(Day), ApiUrl, Token) of
         none ->
-            case fetch_metric(Type, start_day_query(NextDay), ApiUrl, AccessToken) of
-                {ok, _} ->
-                    fetch_metric(Type, NextDay, State);
-                _Other ->
-                    none
+            case fetch_metric(Metric, start_day_query(NextDay), ApiUrl, Token) of
+                {ok, _} ->  fetch_metric(Metric, NextDay, State);
+                _Other ->   none
             end;
-        {ok, Metric} ->
-            Key = build_key(Type, State#state.key_prefix),
-            Info = {Key, Metric#{<<"_day">> => list_to_binary(edate:date_to_string(Day))}},
-            case Type of
-                Type when Type == "sleep"; Type == "readiness" ->
-                    {ok, Day, Info};
+        {ok, Value} ->
+            Key = build_key(KeyPrefix, Metric),
+            KVP = {Key, Value#{<<"_day">> => list_to_binary(edate:date_to_string(Day))}},
+            case Metric of
+                Metric when Metric=="sleep"; Metric=="readiness" ->
+                    {ok, Day, KVP};
                 "activity" ->
-                    % fetching activity only if next days data exists
-                    case fetch_metric(Type, start_day_query(NextDay), ApiUrl, AccessToken) of
-                        {ok, _} ->
-                            {ok, Day, Info};
-                        Other ->
-                            Other
+                    % fetching activity only if next days activity data (partially) exists
+                    case fetch_metric(Metric, start_day_query(NextDay), ApiUrl, Token) of
+                        {ok, _} ->          {ok, Day, KVP};
+                        none ->             none;
+                        {error, Error} ->   {error, Error}
                     end
             end;
         {error, Error} ->
-            ?JError("Error fetching ~s for ~p : ~p", [Type, Day, Error]),
+            ?JError("Error fetching ~s for ~p : ~p", [Metric, Day, Error]),
             {error, Error}
     end.
 
-fetch_metric(Type, DayQuery, ApiUrl, AccessToken) ->
-    Url = ApiUrl ++ Type ++ DayQuery,
-    TypeBin = list_to_binary(Type),
-    case exec_req(Url, AccessToken) of
-        #{TypeBin := []} ->
-            none;
-        Metric when is_map(Metric) ->
-            {ok, Metric};
-        {error, Error} ->
-            {error, Error}
+%% fetch metric data from Oura cloud by metric and date condition (given as url parameter string)
+-spec fetch_metric(metric(), string(), string(), token()) -> {ok, locVal()} | none | {error, term()}.
+fetch_metric(Metric, DayQuery, ApiUrl, Token) ->
+    Url = ApiUrl ++ Metric ++ DayQuery,
+    MetricBin = list_to_binary(Metric),
+    case exec_req(Url, Token) of
+        #{MetricBin:=[]} ->             none;
+        Value when is_map(Value) ->     {ok, Value};
+        {error, Error} ->               {error, Error}
     end.
 
-fetch_userinfo(#state{api_url = ApiUrl, access_token = AccessToken} = State) ->
-    case exec_req(ApiUrl ++ "userinfo", AccessToken) of
+%% fetch userinfo from Oura cloud and add it to the CycleBuffer
+%% userinfo comes as latest value only, no day history available
+-spec fetch_userinfo(#state{}) ->{ok, #state{}} | {error, term()}.
+fetch_userinfo(#state{keyPrefix=KeyPrefix, apiUrl=ApiUrl, token=Token, cycleBuffer=CycleBuffer} = State) ->
+    case exec_req(ApiUrl ++ "userinfo", Token) of
         UserInfo when is_map(UserInfo) ->
-            Info = {build_key("userinfo", State#state.key_prefix), UserInfo},
-            State#state{infos = [Info | State#state.infos]};
+            KVP = {build_key(KeyPrefix, "userinfo"), UserInfo},
+            {ok, State#state{cycleBuffer=[KVP|CycleBuffer]}};
         {error, Error} ->
             ?JError("Error fetching userinfo : ~p", [Error]),
             {error, Error}
     end.
 
-get_day(Type, State) ->
-    LastDay = get_last_day(Type, State),
-    Key = build_key(Type, State#state.key_prefix),
+%% evaluate next day to fetch or 'fetched' if done
+%% increment the _day value for the current metric but not beyond yesterday
+%% if current metric does not exist in avatar, it may need to be initialized
+%% in the past as configured in ?SHIFT_DAYS, else use last day previously fetched
+%% day for this metric according to jobDyn state and increment by one day
+%% re-fetch yesterday if not there
+-spec get_day(metric(), #state{}) -> date() | fetched.
+get_day(Metric, #state{name=Name, keyPrefix=KeyPrefix, channel=Channel} = State) ->
+    LastDay = get_last_day(Metric, State),
+    Key = build_key(KeyPrefix, Metric),
     Yesterday = edate:yesterday(),
-    case dperl_dal:read_channel(State#state.channel, Key) of
+    case dperl_dal:read_channel(Channel, Key) of
         ?NOT_FOUND ->
             case LastDay of
                 undefined ->
-                    SDays = ?SHIFT_DAYS(State#state.name),
+                    SDays = ?SHIFT_DAYS(Name),
                     edate:shift(-1 * SDays, days);
                 Yesterday ->
                     Yesterday;
@@ -309,8 +373,10 @@ get_day(Type, State) ->
             end
     end.
 
-exec_req(Url, AccessToken) ->
-    AuthHeader = [{"Authorization", "Bearer " ++ binary_to_list(AccessToken)}],
+%% request a map response from web service (local value to be stored in avatar)
+-spec exec_req(string(),token()) -> locVal() | {error, term()}.
+exec_req(Url, Token) ->
+    AuthHeader = [{"Authorization", "Bearer " ++ binary_to_list(Token)}],
     case httpc:request(get, {Url, AuthHeader}, [], []) of
         {ok, {{_, 200, "OK"}, _, Result}} ->
             imem_json:decode(list_to_binary(Result), [return_maps]);
@@ -321,29 +387,28 @@ exec_req(Url, AccessToken) ->
             {error, Error}
     end.
 
-next_day(Day) when is_list(Day) ->
-    next_day(edate:string_to_date(Day));
-next_day(Day) when is_tuple(Day) ->
-    edate:shift(Day, 1, day).
+-spec next_day(dayDate()) -> date().
+next_day(Day) when is_list(Day) ->          (edate:string_to_date(Day));
+next_day(Day) when is_tuple(Day) ->         edate:shift(Day, 1, day).
 
-day_query(Day) when is_tuple(Day) ->
-    day_query(edate:date_to_string(Day));
-day_query(Day) when is_list(Day) ->
-    "?start=" ++ Day ++ "&end=" ++ Day.
+-spec day_query(dayDate()) -> string().
+day_query(Day) when is_tuple(Day) ->        day_query(edate:date_to_string(Day));
+day_query(Day) when is_list(Day) ->         "?start=" ++ Day ++ "&end=" ++ Day.
 
-start_day_query(Day) when is_tuple(Day) ->
-    start_day_query(edate:date_to_string(Day));
-start_day_query(Day) when is_list(Day) ->
-    "?start=" ++ Day.
+-spec start_day_query(dayDate()) -> string().
+start_day_query(Day) when is_tuple(Day) ->  start_day_query(edate:date_to_string(Day));
+start_day_query(Day) when is_list(Day) ->   "?start=" ++ Day.
 
-get_last_day("sleep", #state{last_sleep_day = LastSleepDay}) -> LastSleepDay;
-get_last_day("activity", #state{last_activity_day = LastActivityDay}) -> LastActivityDay;
-get_last_day("readiness", #state{last_readiness_day = LastReadinessDay}) -> LastReadinessDay.
+-spec get_last_day(metric(), #state{}) -> maybeDate().
+get_last_day("sleep", #state{lastSleepDay=LastSleepDay}) -> LastSleepDay;
+get_last_day("activity", #state{lastActivityDay=LastActivityDay}) -> LastActivityDay;
+get_last_day("readiness", #state{lastReadinessDay=LastReadinessDay}) -> LastReadinessDay.
 
-set_metric_day("sleep", Day, State) -> State#state{last_sleep_day = Day};
-set_metric_day("activity", Day, State) -> State#state{last_activity_day = Day};
-set_metric_day("readiness", Day, State) -> State#state{last_readiness_day = Day}.
+-spec set_metric_day(metric(), maybeDate(), #state{}) -> #state{}.
+set_metric_day("sleep", Day, State) -> State#state{lastSleepDay=Day};
+set_metric_day("activity", Day, State) -> State#state{lastActivityDay=Day};
+set_metric_day("readiness", Day, State) -> State#state{lastReadinessDay=Day}.
 
-build_key(Type, KeyPrefix) when is_list(Type), is_list(KeyPrefix)->
-    KeyPrefix ++ [Type].
+-spec build_key(locKey(), metric()) -> locKey().
+build_key(KeyPrefix, Metric) when is_list(Metric), is_list(KeyPrefix) -> KeyPrefix ++ [Metric].
 

@@ -1,5 +1,7 @@
 -module(dperl_strategy_scr).
 
+%% implements the scr behaviour for sync / cleanup / refresh / cleanupCumRefresh (c/r) jobs
+
 -include("dperl.hrl").
 -include("dperl_strategy_scr.hrl").
 
@@ -18,8 +20,13 @@
 % get a key list (limited in length) of recent changes on source side
 % often achieved by scanning an audit log after last checked timestamp (from state)
 % basis for sync cycle (differential change provisioning)
+% for normal cleanup, a list of (possibly) dirty keys is returned
+% for c/r jobs, a list of (possibly) dirty KV pairs is returned
 -callback get_source_events(scrState(), scrBatchSize()) ->
-    {error, scrAnyKey()} | {ok, scrAnyKeys(), scrState()} | {ok, sync_complete, scrState()}.
+    {ok, scrAnyKeys(), scrState()} | 
+    {ok, scrAnyKeyVals(), scrState()} | 
+    {ok, sync_complete, scrState()} | 
+    {error, scrAnyKey()}.
 
 % check if destination data is currently acessible
 -callback connect_check_dst(scrState()) ->
@@ -42,7 +49,8 @@
 
 % update one item in destination (which is assumed to exist)
 % if the callback is able to do an insert instead of an update it can do it responsibly.
--callback update_dst(scrAnyKey(), scrAnyVal(), scrState()) -> {scrSoftError(), scrState()}.
+% ATTENTION: for c/r jobs the first parameter may be a KV Pair from which only the key is used
+-callback update_dst(scrAnyKey()|scrAnyKeyVal(), scrAnyVal(), scrState()) -> {scrSoftError(), scrState()}.
 
 % allow the callback implementation act upon an error or warning message
 % result is ignored, used for debugging only
@@ -73,7 +81,7 @@
 
 % override for destination channel insert/update/delete (final data change)
 % only used for protected configurations (reversing the direction of data flow)
--callback update_channel( scrAnyKey(), 
+-callback update_channel( scrAnyKey() | scrAnyKeyVal(), 
                           IsSamePlatform::boolean(), 
                           SourceVal::scrAnyVal(), 
                           DestVal::scrAnyVal(), 
@@ -93,35 +101,35 @@
 
 % execute simple cleanup for next batch of keys 
 -callback do_cleanup( scrState(), CleanupBulkCount::scrBatchSize()) -> 
-                      {{ok, scrState()} | {ok, finish, scrState() | error, any()}}.
+    {ok, scrState()} | {ok, finish, scrState()} | {error, term(), scrState()} | {error, term()}.
 
 % execute cleanup for found differences (Deletes and Inserts)
--callback do_cleanup( Deletes::scrAnyKeys(), 
-                      Inserts::scrAnyKeys(), 
+-callback do_cleanup( Deletes::scrAnyKeys() | scrAnyKeyVal(), 
+                      Inserts::scrAnyKeys() | scrAnyKeyVal(), 
                       SearchingMatch::boolean(),    % NextLastKey == MinKey
                       scrState()) -> 
-                      {{ok, scrState()} | {ok, finish, scrState() | error, any()}}.
+    {ok, scrState()} | {ok, finish, scrState()} | {error, term(), scrState()} | {error, term()}.
 
 % execute cleanup/refresh for found differences (Deletes, Inserts and value Diffs)
--callback do_cleanup( Deletes::scrAnyKeys(), 
-                      Inserts::scrAnyKeys(),
-                      Diffs::scrAnyKeys(), 
+-callback do_cleanup( Deletes::scrAnyKeys() | scrAnyKeyVal(), 
+                      Inserts::scrAnyKeys() | scrAnyKeyVal(),
+                      Diffs::scrAnyKeys() | scrAnyKeyVal(), 
                       SearchingMatch::boolean(),    % NextLastKey == MinKey
                       scrState()) -> 
-                      {{ok, scrState()} | {ok, finish, scrState() | error, any()}}.
+    {ok, scrState()} | {ok, finish, scrState()} | {error, term(), scrState()} | {error, term()}.
 
 % bulk load one batch of keys (for cleanup) or kv-pairs (cleanup/refresh) from source
 % a callback module implementing this and load_dst_after_key signals that it wants
 % to fully control the cleanup/refresh procedure 
--callback load_src_after_key( LastKeySeen::scrAnyKey(), 
+-callback load_src_after_key( LastKeySeen::scrAnyKey() | scrAnyKeyVal(), 
                               scrBatchSize(), 
                               scrState()) ->
-    {ok, scrAnyKeys(), scrState()} | {ok, scrAnyKeyVals(), scrState()} | {error, any(), scrState()}.
+    {ok, scrAnyKeys(), scrState()} | {ok, scrAnyKeyVals(), scrState()} | {error, term(), scrState()}.
 
 % bulk load one batch of keys (for cleanup) or kv-pairs (cleanup/refresh) from destination
 % a callback module implementing this and load_src_after_key signals that it wants
 % to fully control the cleanup/refresh procedure 
--callback load_dst_after_key( LastKeySeen::scrAnyKey(), 
+-callback load_dst_after_key( LastKeySeen::scrAnyKey() | scrAnyKeyVal(), 
                               scrBatchSize(), 
                               scrState()) ->
     {ok, scrAnyKeys(), scrState()} | {ok, scrAnyKeyVals(), scrState()} | {error, any(), scrState()}.
@@ -134,17 +142,17 @@
                     ]).
 
 % chunked cleanup context
--record(cleanup_ctx,{ srcKeys          :: scrAnyKeys()
+-record(cleanup_ctx,{ srcKeys          :: scrAnyKeys()| scrAnyKeyVal() % ?????
                     , srcCount         :: integer()
-                    , dstKeys          :: scrAnyKeys()
+                    , dstKeys          :: scrAnyKeys()| scrAnyKeyVal() % ?????
                     , dstCount         :: integer()
                     , bulkCount        :: scrBatchSize()
-                    , minKey           :: scrAnyKey()
-                    , maxKey           :: scrAnyKey()
-                    , lastKey          :: scrAnyKey()
-                    , deletes = []     :: scrAnyKeys()
-                    , inserts = []     :: scrAnyKeys()
-                    , differences = [] :: scrAnyKeys()
+                    , minKey           :: scrAnyKey() | scrAnyKeyVal() % ?????
+                    , maxKey           :: scrAnyKey() | scrAnyKeyVal() % ?????
+                    , lastKey          :: scrAnyKey() | scrAnyKeyVal() % ?????
+                    , deletes = []     :: scrAnyKeys() | scrAnyKeyVals()
+                    , inserts = []     :: scrAnyKeys() | scrAnyKeyVals()
+                    , differences = [] :: scrAnyKeys() | scrAnyKeyVals()
                     }).
 
 % Debug macros
@@ -195,6 +203,8 @@ execute(Mod, Job, State, #{sync:=_, cleanup:=_, refresh:=_} = Args) when is_map(
 execute(Mod, Job, State, Args) when is_map(Args) ->
     execute(Mod, Job, State, maps:merge(#{sync=>true, cleanup=>true, refresh=>true}, Args)).
 
+%% execute one provisioning cycle (round) which can mean one sync, cleanup, refresh or a c/r cycle
+%% with priority in this order
 -spec execute(scrPhase(), jobModule(), jobName(), scrState(), jobArgs()) -> scrState() | no_return().
 execute(sync, Mod, Job, State, #{sync:=Sync} = Args) ->
     % perform a sync cycle
@@ -580,7 +590,6 @@ should_refresh(LastAttempt, LastSuccess, BatchInterval, Interval, Hours) ->
            end
     end.
 
-
 -spec is_equal(scrAnyKey(), scrAnyVal(), scrAnyVal(), scrState()) -> boolean().
 is_equal(_Key, S, S, _State) -> true;
 is_equal(_Key, S, D, _State) when is_map(S), is_map(D) ->
@@ -602,8 +611,8 @@ sync_log(Msg, {Key, _}, ShouldLog) -> sync_log(Msg, Key, ShouldLog);
 sync_log(Msg, Key, _) when is_binary(Key) -> ?JInfo("~s : ~s", [Msg, Key]);
 sync_log(Msg, Key, _) -> ?JInfo("~s : ~p", [Msg, Key]).
 
-%% chunked cleanup
-
+%% chunked cleanup, process possibly dirty keys (change events/differences) in the list
+%% for c/r (where events consist of kv tuples) this must be done in callback module ????
 -spec process_events(scrAnyKeys(), jobModule(), scrState()) -> {boolean(), scrState()}.
 process_events(Keys, Mod, State) ->
     ShouldLog = case erlang:function_exported(Mod, should_sync_log, 1) of

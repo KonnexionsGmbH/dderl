@@ -9,11 +9,11 @@
 -type locKey() :: [string()].   % local key of a contact, e.g. ["contact","My","Ah2hA77a"]
 -type locId()  :: string().     % last item in locKey() is called local id e.g. "Ah2hA77a"
 -type locVal() :: map().        % local cvalue of a contact, converted to a map for processing
--type locBin() :: binary().     % local cvalue of a contact in binary form (often stored like that)
+%-type locBin() :: binary().     % local cvalue of a contact in binary form (often stored like that)
 -type remKey() :: binary().     % remote key of a contact, called <<"id">> in Office365
 -type remKeys():: [remKey()].   % list of remKey() type (e.g. DirtyKeys)
 -type remVal() :: map().        % remote value of a contact (relevant fields only)
--type remBin() :: binary().     % remote value of a contract in raw binary JSON form
+%-type remBin() :: binary().     % remote value of a contract in raw binary JSON form
 -type meta()   :: map().        % contact meta information with respect to this remote cloud
 
 
@@ -386,8 +386,8 @@ get_status(#state{}) -> #{}.
 
 init_state(_) -> #state{}.
 
-init({#dperlJob{name=Name, srcArgs=#{apiUrl:=ApiUrl}, args=Args,
-                dstArgs=#{channel:=Channel} = DstArgs}, State}) ->
+init({#dperlJob{ name=Name, srcArgs=#{apiUrl:=ApiUrl}, args=Args
+               , dstArgs=#{channel:=Channel} = DstArgs}, State}) ->
     case dperl_auth_cache:get_enc_hash(Name) of
         undefined ->
             ?JError("Encryption hash is not avaialable"),
@@ -396,21 +396,21 @@ init({#dperlJob{name=Name, srcArgs=#{apiUrl:=ApiUrl}, args=Args,
             ?JInfo("Starting with ~p's enchash...", [AccountId]),
             imem_enc_mnesia:put_enc_hash(EncHash),
             KeyPrefix = maps:get(keyPrefix, DstArgs, get_key_prefix(Name)),
-            TokenPrefix = get_auth_token_key_prefix(Name),
+            TokenPrefix = maps:get(tokenPrefix, Args, get_auth_token_key_prefix(Name)),
+            Type = maps:get(type, Args, pull),
+            ChannelBin = dperl_dal:to_binary(Channel),
+            dperl_dal:create_check_channel(ChannelBin),
+            ContactIff = <<"fun() ->imem_index:gen_iff_binterm_list_pattern([\"contact\",'_','_']) end.">>,
+            PLContact = [{':',<<"id">>, {'#', <<"values">>, {':', <<"META">>, <<"cvalue">>}}}],
+            IdxContact = #ddIdxDef{ id = ?CONTACT_INDEXID
+                                  , name = <<"idx_contact">>
+                                  , type = iv_k
+                                  , pl = PLContact
+                                  , vnf = <<"fun imem_index:vnf_identity/1.">>
+                                  , iff = ContactIff},
+            dperl_dal:create_check_index(ChannelBin, [IdxContact]),
             case dderl_oauth:get_token_info(AccountId, TokenPrefix, ?SYNC_OFFICE365) of
-                #{<<"access_token">> := Token} ->
-                    Type = maps:get(type, Args, pull),
-                    ChannelBin = dperl_dal:to_binary(Channel),
-                    dperl_dal:create_check_channel(ChannelBin),
-                    ContactIff = <<"fun() ->imem_index:gen_iff_binterm_list_pattern([\"contact\",'_','_']) end.">>,
-                    PLContact = [{':',<<"id">>, {'#', <<"values">>, {':', <<"META">>, <<"cvalue">>}}}],
-                    IdxContact = #ddIdxDef{id = ?CONTACT_INDEXID
-                                          ,name = <<"idx_contact">>
-                                          ,type = iv_k
-                                          ,pl = PLContact
-                                          ,vnf = <<"fun imem_index:vnf_identity/1.">>
-                                          ,iff = ContactIff},
-                    dperl_dal:create_check_index(ChannelBin, [IdxContact]),
+                #{<<"access_token">>:=Token} ->
                     {ok, State#state{ name=Name, type=Type, channel=ChannelBin, keyPrefix=KeyPrefix
                                     , apiUrl=ApiUrl, tokenPrefix=TokenPrefix
                                     , token=Token, accountId = AccountId

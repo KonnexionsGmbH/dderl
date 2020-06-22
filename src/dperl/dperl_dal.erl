@@ -2,23 +2,73 @@
 
 -include("dperl.hrl").
 
--export([select/2, subscribe/1, unsubscribe/1, write/2, check_table/5,
-         sql_jp_bind/1, sql_bind_jp_values/2, read_channel/2, url_enc_params/1,
-         io_to_oci_datetime/1, create_check_channel/1, write_channel/3,
-         read_check_write/4, read_audit_keys/3, read_audit/3, get_enabled/1,
-         update_job_dyn/2, update_job_dyn/3, job_error_close/1, to_binary/1,
-         count_sibling_jobs/2, create_check_channel/2, write_protected/6,
-         get_last_state/1, get_last_audit_time/1, connect_imem_link/4,
-         remove_from_channel/2, remove_deep/2, data_nodes/0, job_state/1,
-         job_error/3, job_error/4, job_error_close/0, update_service_dyn/4,
-         update_service_dyn/3, all_keys/1, read_gt/3, time_str/1, ts_str/1,
-         safe_json_map/1, read_gt_lt/4, normalize_map/1, read_keys_gt/3,
-         write_if_different/3, maps_diff/2, read_keys_gt_lt/4, oci_opts/2,
-         oci_fetch_rows/2, key_from_json/1, disable/1, set_running/2,
-         read_siblings/2, read_channel_raw/2, worker_error/4, sort_links/1,
-         get_pool_name/1, remote_dal/3, get_pool_name/2, run_oci_stmt/3,
-         activity_logger/3, create_check_index/2, to_atom/1, report_status/7,
-         key_to_json/1, key_to_json_enc/1, create_or_replace_tigger/2]).
+-export([activity_logger/3
+        ,all_keys/1
+        ,check_table/5
+        ,connect_imem_link/4
+        ,count_sibling_jobs/2
+        ,create_check_channel/1
+        ,create_check_channel/2
+        ,create_check_index/2
+        ,create_or_replace_tigger/2
+        ,data_nodes/0
+        ,disable/1
+        ,get_enabled/1
+        ,get_last_audit_time/1
+        ,get_last_state/1
+        ,get_pool_name/1
+        ,get_pool_name/2
+        ,io_to_oci_datetime/1
+        ,job_error/3
+        ,job_error/4
+        ,job_error_close/0
+        ,job_error_close/1
+        ,job_state/1
+        ,key_from_json/1
+        ,key_to_json/1
+        ,key_to_json_enc/1
+        ,maps_diff/2
+        ,normalize_map/1
+        ,oci_fetch_rows/2
+        ,oci_opts/2
+        ,read_audit/3
+        ,read_audit_keys/3
+        ,read_channel/2
+        ,read_channel_raw/2
+        ,read_check_write/4
+        ,read_gt/3
+        ,read_gt_lt/4
+        ,read_keys_gt/3
+        ,read_keys_gt_lt/4
+        ,read_siblings/2
+        ,remote_dal/3
+        ,remove_deep/2
+        ,remove_from_channel/2
+        ,report_status/7
+        ,run_oci_stmt/3
+        ,safe_json_map/1
+        ,select/2
+        ,set_running/2
+        ,sort_links/1
+        ,sql_bind_jp_values/2
+        ,sql_jp_bind/1
+        ,subscribe/1
+        ,time_str/1
+        ,to_atom/1
+        ,to_binary/1
+        ,ts_str/1
+        ,unsubscribe/1
+        ,update_job_dyn/2
+        ,update_job_dyn/3
+        ,update_service_dyn/3
+        ,update_service_dyn/4
+        ,url_enc_params/1
+        ,worker_error/4
+        ,write/2
+        ,write_channel/3
+        ,write_if_different/3
+        ,write_protected/6
+        ]).
 
 check_table(Table, ColumnNames, ColumnTypes, DefaultRecord, Opts) ->
     case catch imem_meta:create_check_table(
@@ -26,8 +76,9 @@ check_table(Table, ColumnNames, ColumnTypes, DefaultRecord, Opts) ->
                  Opts, system) of
         {'EXIT', {'ClientError', _} = Reason} ->
             ?Error("create_check table ~p, ~p", [Table, Reason]);
-        Else ->
-            ?Info("create_check table ~p... ~p", [Table, Else])
+        _Else ->
+            %?Info("create_check table ~p... ~p", [Table, _Else]),
+            ok
     end.
 
 -spec create_check_channel(binary() | list()) ->  ok | no_return().

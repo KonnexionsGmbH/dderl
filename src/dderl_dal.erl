@@ -871,7 +871,7 @@ create_check_avatar_channel(AccountId) ->
     imem_dal_skvh:create_check_channel(avatar_channel_name(AccountId), ?GET_AVATAR_CHANNEL_OPTIONS).
 
 write_to_avatar_channel(AccountId, Key, Value) ->
-    imem_dal_skvh:write(AccountId, AccountId, Key, Value).
+    imem_dal_skvh:write(AccountId, avatar_channel_name(AccountId), Key, Value).
 
 read_from_avatar_channel(AccountId, Key) ->
     case imem_dal_skvh:read(AccountId, avatar_channel_name(AccountId), [Key]) of

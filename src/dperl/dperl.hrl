@@ -6,7 +6,7 @@
 -include("../dderl.hrl").          
 
 -type jobName()         :: binary().
--type jobModule()       :: atom().
+-type jobModule()       :: module().
 -type jobArgs()         :: map().
 -type jobEnabled()      :: true|false.
 -type jobRunning()      :: true|false|undefined.
