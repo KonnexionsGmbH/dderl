@@ -1001,7 +1001,7 @@ get_column_values(Conn, Stmt, ColIdx, VarsDatas, RowIndex) ->
         {_Var, Datas, OraType} -> % if a variable was made for this column: the value was fetched into the variable's data object, so get it from there
             Value = dpi:data_get(lists:nth(RowIndex, Datas)), % get the value out of that data variable
             ValueFixed = case OraType of % depending on the ora type, the value might have to be changed into a different format so it displays properly
-                'DPI_ORACLE_TYPE_BLOB' -> list_to_binary(lists:flatten([io_lib:format("~2.16.0B", [X]) || X <- binary_to_list(Value)])); % turn binary to hex string
+                'DPI_ORACLE_TYPE_BLOB' -> list_to_binary(lists:flatten([io_lib:format("~2.16.0B", [X]) || X <- binary_to_list(dpi:lob_readBytes(Value, 1, 4000))])); % turn binary to hex string
                 _Else -> Value end, % the value is already in the correct format for most types, so do nothing
 
             [ValueFixed | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas, RowIndex)]; % recursive call
