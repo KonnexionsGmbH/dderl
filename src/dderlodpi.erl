@@ -958,6 +958,7 @@ get_rows_prepare(Conn, Stmt, NRows, Acc)->
 
     VarsDatas = [
             begin
+        io:format("nativetype: ~p oratype ~p~n",[NativeType, OraType]),
                 case NativeType of 'DPI_NATIVE_TYPE_DOUBLE' ->  % if the type is a double, make a variable for it, but say that the native type is bytes
                         % if stmt_getQueryValue() is used to get the values, then they will have their "correct" type. But doubles need to be
                         % fetched as a binary in order to avoid a rounding error that would occur if they were transformed from their internal decimal
@@ -967,7 +968,7 @@ get_rows_prepare(Conn, Stmt, NRows, Acc)->
                         ok = dpi:stmt_define(Stmt, Col, Var),    %% results will be fetched to the vars and go into the data
                         {Var, Datas, OraType}; % put the variable and its data list into a tuple
                     'DPI_NATIVE_TYPE_LOB' ->
-                        #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_LOB', 100, 0, false, false, null),
+                        #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_LOB', 100, 4000, false, false, null),
                         ok = dpi:stmt_define(Stmt, Col, Var),    %% results will be fetched to the vars and go into the data
                         {Var, Datas, OraType}; % put the variable and its data list into a tuple
                     _else -> noVariable % when no variable needs to be made for the type, just put an atom signlizing that no variable was made and stmt_getQueryValue() can be used to get the values
@@ -1000,10 +1001,11 @@ get_column_values(Conn, Stmt, ColIdx, VarsDatas, RowIndex) ->
     case lists:nth(ColIdx, VarsDatas) of % get the entry that is either a {Var, Datas} tuple or noVariable if no variable was made for this column
         {_Var, Datas, OraType} -> % if a variable was made for this column: the value was fetched into the variable's data object, so get it from there
             Value = dpi:data_get(lists:nth(RowIndex, Datas)), % get the value out of that data variable
-            ValueFixed = case OraType of % depending on the ora type, the value might have to be changed into a different format so it displays properly
-                'DPI_ORACLE_TYPE_BLOB' -> list_to_binary(lists:flatten([io_lib:format("~2.16.0B", [X]) || X <- binary_to_list(Value)])); % turn binary to hex string
+            io:format("val ~p ~n", [Value]),    
+        ValueFixed = case OraType of % depending on the ora type, the value might have to be changed into a different format so it displays properly
+                'DPI_ORACLE_TYPE_BLOB' -> io:format("B L O B L~n"),list_to_binary(lists:flatten([io_lib:format("~2.16.0B", [X]) || X <- binary_to_list(Value)])); % turn binary to hex string
                 _Else -> Value end, % the value is already in the correct format for most types, so do nothing
-
+                io:format("val fixd ~p ~n", [Value]),   
             [ValueFixed | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas, RowIndex)]; % recursive call
         noVariable -> % if no variable has been made then that means that the value can be fetched with stmt_getQueryValue()
             #{data := Data} = dpi:stmt_getQueryValue(Stmt, ColIdx), % get the value 
