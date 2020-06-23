@@ -970,16 +970,16 @@ get_rows_prepare(Conn, Stmt, NRows, Acc)->
                         #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_LOB', 100, 0, false, false, null),
                         ok = dpi:stmt_define(Stmt, Col, Var),    %% results will be fetched to the vars and go into the data
                         {Var, Datas, OraType}; % put the variable and its data list into a tuple
-                    _else -> noVariable % when no variable needs to be made for the type, just put an atom signlizing that no variable was made and stmt_getQueryValue() can be used to get the values
+                    _else -> {noVariable, OraType} % when no variable needs to be made for the type, just put an atom signlizing that no variable was made and stmt_getQueryValue() can be used to get the values
                 end
             end
             || {OraType, NativeType, Col} <- Types], % make a list of {Var, Datas} tuples. Var is the dpiVar handle, Datas is the list of Data handles in that respective Var  
 R = get_rows(Conn, Stmt, NRows, Acc, VarsDatas), % gets all the results from the query
     [begin
-        case VarDatas of {Var, Datas} -> % if there is a variable (which was made to fetch a double as a binary)
+        case VarDatas of {noVariable, _OraType} -> nop; % if no variable was made, then nothing needs to be done here
+            {Var, Datas} -> % if there is a variable (which was made to fetch a double as a binary)
                 [dpi:data_release(Data)|| Data <- Datas], % loop through the list of datas and release them all
-                dpi:var_release(Var); % now release the variable
-            _else -> nop % if no variable was made, then nothing needs to be done here
+                dpi:var_release(Var) % now release the variable
         end
     end || VarDatas <- VarsDatas], % clean up eventual variables that may have been made
 R. % return query results
@@ -1001,15 +1001,19 @@ get_column_values(Conn, Stmt, ColIdx, VarsDatas, RowIndex) ->
         {_Var, Datas, OraType} -> % if a variable was made for this column: the value was fetched into the variable's data object, so get it from there
             Value = dpi:data_get(lists:nth(RowIndex, Datas)), % get the value out of that data variable
             ValueFixed = case OraType of % depending on the ora type, the value might have to be changed into a different format so it displays properly
-                'DPI_ORACLE_TYPE_BLOB' -> list_to_binary(lists:flatten([io_lib:format("~2.16.0B", [X]) || X <- binary_to_list(Value)])); % turn binary to hex string
-                _Else -> Value end, % the value is already in the correct format for most types, so do nothing
+                'DPI_ORACLE_TYPE_BLOB' -> list_to_binary(lists:flatten([io_lib:format("~2.16.0B", [X]) || X <- binary_to_list(dpi:lob_readBytes(Value, 1, 4000))])); % turn binary to hex string
+                'DPI_ORACLE_TYPE_CLOB' -> dpi:lob_readBytes(Value, 1, 4000);
+            _Else -> Value end, % the value is already in the correct format for most types, so do nothing
 
             [ValueFixed | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas, RowIndex)]; % recursive call
-        noVariable -> % if no variable has been made then that means that the value can be fetched with stmt_getQueryValue()
+        {noVariable, OraType} -> % if no variable has been made then that means that the value can be fetched with stmt_getQueryValue()
             #{data := Data} = dpi:stmt_getQueryValue(Stmt, ColIdx), % get the value 
             Value = dpi:data_get(Data), % take the value from this freshly made data
             dpi:data_release(Data), % release this new data object
-            [Value | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas, RowIndex)]; % recursive call
+            ValueFixed = case OraType of % some types may require additional casting/unmarshalling
+                'DPI_ORACLE_TYPE_LONG_VARCHAR' -> list_to_binary(lists:flatten([io_lib:format("~2.16.0B", [X]) || X <- binary_to_list(Value)])); % turn binary into hex representation of binary
+                _Else -> Value end, % value doesn't need any converting
+            [ValueFixed | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas, RowIndex)]; % recursive call
         Else ->
             ?Error("Invalid variable term of ~p", [Else])
     end.
