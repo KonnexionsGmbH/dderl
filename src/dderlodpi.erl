@@ -963,11 +963,11 @@ get_rows_prepare(Conn, Stmt, NRows, Acc)->
                         % fetched as a binary in order to avoid a rounding error that would occur if they were transformed from their internal decimal
                         % representation to double. Therefore, stmt_getQueryValue() can't be used for this, so a variable needs to be made because
                         % the data has to be fetched using define so the value goes into the data and then retrieving the values from the data
-                        #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_BYTES', 100, 0, false, false, null),
+                        #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_BYTES', 100, 4000, false, false, null),
                         ok = dpi:stmt_define(Stmt, Col, Var),    %% results will be fetched to the vars and go into the data
                         {Var, Datas, OraType}; % put the variable and its data list into a tuple
                     'DPI_NATIVE_TYPE_LOB' ->
-                        #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_LOB', 100, 0, false, false, null),
+                        #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_LOB', 100, 4000, false, false, null),
                         ok = dpi:stmt_define(Stmt, Col, Var),    %% results will be fetched to the vars and go into the data
                         {Var, Datas, OraType}; % put the variable and its data list into a tuple
                     _else -> {noVariable, OraType} % when no variable needs to be made for the type, just put an atom signlizing that no variable was made and stmt_getQueryValue() can be used to get the values
@@ -977,7 +977,7 @@ get_rows_prepare(Conn, Stmt, NRows, Acc)->
 R = get_rows(Conn, Stmt, NRows, Acc, VarsDatas), % gets all the results from the query
     [begin
         case VarDatas of {noVariable, _OraType} -> nop; % if no variable was made, then nothing needs to be done here
-            {Var, Datas} -> % if there is a variable (which was made to fetch a double as a binary)
+            {Var, Datas, _OraType} -> % if there is a variable (which was made to fetch a double as a binary)
                 [dpi:data_release(Data)|| Data <- Datas], % loop through the list of datas and release them all
                 dpi:var_release(Var) % now release the variable
         end
