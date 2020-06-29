@@ -66,8 +66,12 @@
         ,worker_error/4
         ,write/2
         ,write_channel/3
+        ,write_channel_no_audit/3
         ,write_if_different/3
         ,write_protected/6
+        ,read_channel_index/2
+        ,read_channel_index_key/2
+        ,read_channel_index_key_prefix/3
         ]).
 
 check_table(Table, ColumnNames, ColumnTypes, DefaultRecord, Opts) ->
@@ -115,6 +119,16 @@ write_channel(Channel, Key, Val) when is_map(Val); byte_size(Val) > 0 ->
        Other -> {error, Other}
    end.
 
+-spec write_channel_no_audit(binary(), any(), any()) -> ok | {error, any()}.
+write_channel_no_audit(Channel, Key, Val) when is_map(Val); byte_size(Val) > 0 ->
+   case catch imem_dal_skvh:write(system, Channel, Key, Val) of
+       Res when is_map(Res) -> ok;
+       {'EXIT', Error} -> {error, Error};
+       {error, Error} -> {error, Error};
+       Other -> {error, Other}
+   end.
+
+
 write_if_different(Channel, Key, Val) ->
     case imem_dal_skvh:read(system, Channel, [Key]) of
         [#{cvalue := Val}] -> no_op;
@@ -129,6 +143,16 @@ read_channel(Channel, Key) when is_binary(Channel) ->
        [#{cvalue := Val}] -> Val;
        _ -> ?NOT_FOUND
    end.
+
+read_channel_index(Channel, Stu) ->
+    imem_meta:read(imem_meta:index_table(Channel), Stu).
+
+read_channel_index_key(Channel, Stu) ->
+    [sext:decode(Row#ddIndex.lnk) || Row <- read_channel_index(Channel, Stu)].
+
+read_channel_index_key_prefix(Channel, Stu, Prefix) ->
+    F = fun(X) -> lists:prefix(Prefix,X) end,
+    lists:filter(F, read_channel_index_key(Channel, Stu)).
 
 read_channel_raw(Channel, Key) when is_list(Channel) ->
     read_channel_raw(list_to_binary(Channel), Key);
@@ -313,18 +337,16 @@ update_job_dyn(JobName, State) when is_binary(JobName) andalso is_map(State) ->
     imem_meta:transaction(fun() ->
     case imem_meta:read(?JOBDYN_TABLE, JobName) of
         [] ->
-            ok = imem_meta:write(
-                   ?JOBDYN_TABLE,
-                   #dperlNodeJobDyn{name = JobName, state = State,
-                                   status = synced,
-                                   statusTime = imem_meta:time_uid()});
+            ok = imem_meta:write(?JOBDYN_TABLE,
+                                 #dperlNodeJobDyn{ name=JobName, state=State, status=synced
+                                                 , statusTime = imem_meta:time_uid()});
         [#dperlNodeJobDyn{state=OldState} = J] ->
             NewState = maps:merge(OldState, State),
-            if OldState /= NewState ->
-                   ok = imem_meta:write(
-                          ?JOBDYN_TABLE,
-                          J#dperlNodeJobDyn{state = NewState,
-                                           statusTime = imem_meta:time_uid()});
+            if 
+                OldState /= NewState ->
+                    ok = imem_meta:write(?JOBDYN_TABLE,
+                                         J#dperlNodeJobDyn{ state=State
+                                                          , statusTime=imem_meta:time_uid()});
                true -> ok
             end
     end end);
@@ -335,45 +357,44 @@ update_job_dyn(JobName, Status) when is_binary(JobName) andalso
         Status == idle orelse Status == error orelse Status == stopped) ->
     case imem_meta:read(?JOBDYN_TABLE, JobName) of
         [] ->
-            ok = imem_meta:write(
-                   ?JOBDYN_TABLE,
-                   #dperlNodeJobDyn{name = JobName, state = #{},
-                                   status = Status,
-                                   statusTime = imem_meta:time_uid()});
+            ok = imem_meta:write(?JOBDYN_TABLE,
+                                 #dperlNodeJobDyn{ name=JobName, state=#{}
+                                                 , status=Status
+                                                 , statusTime=imem_meta:time_uid()});
         [#dperlNodeJobDyn{status = OldStatus} = J] ->
-            if OldStatus /= Status orelse
-               (OldStatus == Status andalso Status == error) ->
-                   ok = imem_meta:write(
-                          ?JOBDYN_TABLE,
-                          J#dperlNodeJobDyn{status = Status,
-                                           statusTime = imem_meta:time_uid()});
-               true -> ok
+            if 
+                OldStatus /= Status orelse
+                (OldStatus == Status andalso Status == error) ->
+                    ok = imem_meta:write(?JOBDYN_TABLE,
+                                         J#dperlNodeJobDyn{ status=Status
+                                                          , statusTime=imem_meta:time_uid()});
+                true -> ok
             end
     end.
 
-update_job_dyn(JobName, State, Status) when is_binary(JobName) andalso is_map(State) andalso
+update_job_dyn(JobName, State, Status) 
+    when is_binary(JobName) andalso is_map(State) andalso
        (Status == synced orelse Status == undefined orelse
         Status == cleaning orelse Status == cleaned orelse
         Status == refreshing orelse Status == refreshed orelse
         Status == idle orelse Status == error orelse Status == stopped) ->
     case imem_meta:read(?JOBDYN_TABLE, JobName) of
         [] ->
-            ok = imem_meta:write(
-                   ?JOBDYN_TABLE,
-                   #dperlNodeJobDyn{name = JobName, state = State,
-                                   status = Status,
-                                   statusTime = imem_meta:time_uid()});
-        [#dperlNodeJobDyn{state=OldState, status=OldStatus, statusTime = OTime} = J] ->
+            ok = imem_meta:write(?JOBDYN_TABLE,
+                                 #dperlNodeJobDyn{ name=JobName, state=State
+                                                 , status=Status
+                                                 , statusTime=imem_meta:time_uid()});
+        [#dperlNodeJobDyn{state=OldState, status=OldStatus, statusTime=OTime} = J] ->
             NewState = maps:merge(OldState,State),
             TimeDiff = imem_datatype:sec_diff(OTime),
-            if NewState /= OldState orelse (OldStatus == error andalso Status /= idle)
-               orelse (OldStatus /= error andalso Status /= OldStatus) 
-               orelse (OldStatus == Status andalso Status == idle)
-               orelse TimeDiff > 1  ->
-                   ok = imem_meta:write(
-                          ?JOBDYN_TABLE,
-                          J#dperlNodeJobDyn{state = NewState, status = Status,
-                                           statusTime = imem_meta:time_uid()});
+            if 
+                NewState /= OldState orelse (OldStatus == error andalso Status /= idle)
+                orelse (OldStatus /= error andalso Status /= OldStatus) 
+                orelse (OldStatus == Status andalso Status == idle)
+                orelse TimeDiff > 1  ->
+                    ok = imem_meta:write(?JOBDYN_TABLE,
+                                         J#dperlNodeJobDyn{ state=NewState, status=Status
+                                                          , statusTime=imem_meta:time_uid()});
                true -> ok
             end
     end.
@@ -387,9 +408,8 @@ get_last_state(JobName) when is_binary(JobName) ->
 
 get_last_audit_time(JobName) ->
     case get_last_state(JobName) of
-        #{lastAuditTime := LastAuditTime} ->
-            LastAuditTime;
-        _ -> {0,0,0}
+        #{lastAuditTime := LastAuditTime} ->    LastAuditTime;
+        _ ->                                    ?EPOCH
     end.
 
 count_sibling_jobs(Module, Channel) ->
@@ -564,6 +584,8 @@ safe_json_map(Value) when is_binary(Value) ->
         DecodedValue when is_list(DecodedValue) -> DecodedValue
     end.
 
+%% sort lists inside a map recursively so that the compare result 
+%% does not depend on list order 
 -spec normalize_map(map()) -> map().
 normalize_map(Map) when is_map(Map)->
     maps:map(
@@ -719,10 +741,8 @@ activity_logger(StatusCtx, Name, Extra) ->
 -spec url_enc_params(map()) -> binary().
 url_enc_params(Params) ->
     EParams = maps:fold(
-        fun(K, {enc, V}, Acc) ->
-            ["&", K, "=", http_uri:encode(V) | Acc];
-           (K, V, Acc) ->
-            ["&", K, "=", V | Acc]
+        fun(K, {enc, V}, Acc) ->    ["&", K, "=", http_uri:encode(V) | Acc];
+           (K, V, Acc) ->           ["&", K, "=", V | Acc]
         end, [], Params),
     erlang:iolist_to_binary([tl(EParams)]).
 

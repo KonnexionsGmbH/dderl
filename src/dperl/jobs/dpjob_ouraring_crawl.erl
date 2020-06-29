@@ -1,6 +1,6 @@
 -module(dpjob_ouraring_crawl).
 
-%% implements scr puller callback for OuraRing cloud data as a cleanupCumRefresh job (c/r)
+%% implements scr puller callback for OuraRing cloud data as a cleanup/refresh job (c/r)
 %% avoids pulling incomplete intra-day data by not pulling beyond yesterday's data
 %% the default "OuraRing" identifier can be altered to camouflage the nature of the data
 %% this also supports multiple OuraRing pullers into the same table, if needed 
@@ -27,7 +27,7 @@
                         , lastReadinessDay := maybeDate()}.     % relevant cleanup status
 -type token()       :: binary().    % OAuth access token (refreshed after 'unauthorized')
 
--define(METRICS, ["userinfo", "activity", "readiness", "sleep"]).
+-define(METRICS, ["userinfo", "readiness", "sleep", "activity"]).
 
 -define(OAUTH2_CONFIG(__JOB_NAME),
         ?GET_CONFIG(oAuth2Config,[__JOB_NAME],
@@ -161,16 +161,19 @@ insert_dst(Key, Val, State) ->
 
 report_status(_Key, _Status, _State) -> no_op.
 
+% execute simple cleanup for next batch of KVPs 
 -spec do_cleanup(#state{}, scrBatchSize()) ->
     {ok, #state{}} | {ok, finish, #state{}} | {error, term(), #state{}}.
-do_cleanup(#state{cycleBuffer=CycleBuffer} = State, _BlkCount) ->
+do_cleanup(State, _BlkCount) ->
     case fetch_metrics(?METRICS, State) of
-        {ok, State2} ->
+        {ok, #state{cycleBuffer=CycleBuffer} = State1} ->
             case CycleBuffer of
                 [_] ->  % only userinfo remains. we are done
-                    {ok, finish, State2};
+                    %?Info("do_cleanup is finished with ~p", [CycleBuffer]),
+                    {ok, finish, State1};
                 _ ->    % other items in the list, continue
-                    {ok, State2}
+                    %?Info("do_cleanup continues with ~p", [CycleBuffer]),
+                    {ok, State1}
             end;
         {error, Error} ->
             {error, Error, State#state{isConnected=false}}
@@ -324,11 +327,17 @@ fetch_metric(Metric, DayQuery, ApiUrl, Token) ->
     Url = ApiUrl ++ Metric ++ DayQuery,
     MetricBin = list_to_binary(Metric),
     case exec_req(Url, Token) of
-        #{MetricBin:=[]} ->             none;
-        Value when is_map(Value) ->     {ok, Value};
-        {error, Error} ->               {error, Error}
+        #{MetricBin:=[]} = _R ->         
+            %?Info("fetch_metric ~p ~p result none ~p",[Metric, DayQuery, _R]),
+            none;
+        Value when is_map(Value) ->     
+            %?Info("fetch_metric ~p ~p result ok",[Metric, DayQuery]),
+            {ok, Value};
+        {error, Error} ->               
+            %?Info("fetch_metric ~p ~p result error ~p",[Metric, DayQuery, Error]),
+            {error, Error}
     end.
-
+    
 %% fetch userinfo from Oura cloud and add it to the CycleBuffer
 %% userinfo comes as latest value only, no day history available
 -spec fetch_userinfo(#state{}) ->{ok, #state{}} | {error, term()}.
@@ -336,6 +345,7 @@ fetch_userinfo(#state{keyPrefix=KeyPrefix, apiUrl=ApiUrl, token=Token, cycleBuff
     case exec_req(ApiUrl ++ "userinfo", Token) of
         UserInfo when is_map(UserInfo) ->
             KVP = {build_key(KeyPrefix, "userinfo"), UserInfo},
+            %?Info("fetch_userinfo adds ~p to ~p",[KVP,CycleBuffer]),
             {ok, State#state{cycleBuffer=[KVP|CycleBuffer]}};
         {error, Error} ->
             ?JError("Error fetching userinfo : ~p", [Error]),

@@ -400,7 +400,7 @@ process_call({[<<"oauth2_callback">>], ReqData}, _Adapter, From, {SrcIp, _}, Sta
     #{<<"oauth2_callback">> := 
         #{<<"code">> := Code, <<"state">> := #{<<"type">> := SyncType}}} = jsx:decode(ReqData, [return_maps]),
     ?Info("oauth2_callback SyncType: ~p Code: ~p",[SyncType, Code]),
-    % ToDo: Check if this data can this be trusted
+    % ToDo: Check if this data can be trusted
     {SyncHandler,TokenPrefix} = try
         SH = binary_to_existing_atom(SyncType,utf8),
         {SH,SH:get_auth_token_key_prefix()} % ToDo: may depend on JobName or TokenPrefix

@@ -24,8 +24,8 @@ get_authorize_url(XSRFToken, AuthConfig, SyncType) ->
     State = #{xsrfToken => XSRFToken, type => SyncType},
     #{auth_url:=Url, client_id:=ClientId, redirect_uri:=RedirectURI, scope:=Scope} = AuthConfig, 
     UrlParams = dperl_dal:url_enc_params(
-        #{"client_id" => ClientId, "redirect_uri" => {enc, RedirectURI},
-          "scope" => {enc, Scope}, "state" => {enc, imem_json:encode(State)}}),
+        #{"client_id" => ClientId, "redirect_uri" => {enc, RedirectURI}
+         ,"scope" => {enc, Scope}, "state" => {enc, imem_json:encode(State)}}),
     erlang:iolist_to_binary([Url, "&", UrlParams]).
 
 
@@ -41,13 +41,13 @@ get_access_token(AccountId, TokenPrefix, Code, SyncType) ->
             {error, E}
     end,
     %?Info("get_access_token AuthConfig: ~p",[AuthConfig]),
-    #{token_url := TUrl, client_id := ClientId, redirect_uri := RedirectURI,
-            client_secret := Secret, grant_type := GrantType,
-            scope := Scope} = AuthConfig,
+    #{token_url:=TUrl, client_id:=ClientId, redirect_uri:=RedirectURI
+     ,client_secret:=Secret, grant_type:=GrantType
+     ,scope := Scope} = AuthConfig,
     Body = dperl_dal:url_enc_params(
-        #{"client_id" => ClientId, "scope" => {enc, Scope}, "code" => Code,
-        "redirect_uri" => {enc, RedirectURI}, "grant_type" => GrantType,
-        "client_secret" => {enc, Secret}}),
+        #{ "client_id" => ClientId, "scope" => {enc, Scope}, "code" => Code
+         , "redirect_uri" => {enc, RedirectURI}, "grant_type" => GrantType
+         , "client_secret" => {enc, Secret}}),
     ContentType = "application/x-www-form-urlencoded",
     case httpc:request(post, {TUrl, "", ContentType, Body}, [], []) of
         {ok, {{_, 200, "OK"}, _, TokenInfo}} ->
@@ -66,15 +66,16 @@ get_access_token(AccountId, TokenPrefix, Code, SyncType) ->
 refresh_access_token(AccountId, TokenPrefix, SyncType) ->
     #{token_url:=TUrl, client_id:=ClientId, scope:=Scope, client_secret:=Secret} 
         = SyncType:get_auth_config(),
-    %?Info("refresh_access_token ~p ~p ~p",[AccountId, TokenPrefix, SyncType]),
+    ?Info("refresh_access_token ~p ~p ~p",[AccountId, TokenPrefix, SyncType]),
     #{<<"refresh_token">>:=RefreshToken} = get_token_info(AccountId, TokenPrefix, SyncType),
     Body = dperl_dal:url_enc_params(#{ "client_id"=>ClientId, "client_secret"=>{enc, Secret}
                                      , "scope"=>{enc, Scope}, "refresh_token"=>RefreshToken
                                      , "grant_type"=>"refresh_token"}),
     ContentType = "application/x-www-form-urlencoded",
-    %?Info("refresh_access_token TUrl=~p",[TUrl]),
-    %?Info("refresh_access_token ContentType=~p",[ContentType]),
-    %?Info("refresh_access_token Body=~p",[Body]),
+    ?Info("refresh_access_token TUrl=~p",[TUrl]),
+    ?Info("refresh_access_token ContentType=~p",[ContentType]),
+    ?Info("refresh_access_token Body=~p",[Body]),
+    ?Info("refresh_access_token RefreshToken=~p",[RefreshToken]),
     case httpc:request(post, {TUrl, "", ContentType, Body}, [], []) of
         {ok, {{_, 200, "OK"}, _, TokenBody}} ->
             TokenInfo = imem_json:decode(list_to_binary(TokenBody), [return_maps]),

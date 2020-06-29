@@ -1,21 +1,39 @@
 -module(dpjob_office_365).
 
+%% implements scr puller (and later also) pusher for Office356 contact data as a c/r job.
+%% The KeyPrefix ["contacts","Office365"] can be altered to camouflage the nature of the data.
+%% This also supports multiple Office365 synchronisations on the same table, if needed 
+
+%% sync order: remKey() which is the binary contact Id on the remote side (cloud)
+%% remKey() is injected into the value as the primary value of a META attribute with one META
+%% object per sync job. Multiple cloud contact lists can be merged into one local table key range.
+%% The intermediate table (could be an encrypted skvh table). It uses an index on remKeys()
+%% for lookup and for cleanup scanning in remKey() order.
+
 -include("../dperl.hrl").
 -include("../dperl_strategy_scr.hrl").
 
 -behavior(dperl_worker).
 -behavior(dperl_strategy_scr). 
 
--type locKey() :: [string()].   % local key of a contact, e.g. ["contact","My","Ah2hA77a"]
--type locId()  :: string().     % last item in locKey() is called local id e.g. "Ah2hA77a"
--type locVal() :: map().        % local cvalue of a contact, converted to a map for processing
-%-type locBin() :: binary().     % local cvalue of a contact in binary form (often stored like that)
--type remKey() :: binary().     % remote key of a contact, called <<"id">> in Office365
--type remKeys():: [remKey()].   % list of remKey() type (e.g. DirtyKeys)
--type remVal() :: map().        % remote value of a contact (relevant fields only)
-%-type remBin() :: binary().     % remote value of a contract in raw binary JSON form
--type meta()   :: map().        % contact meta information with respect to this remote cloud
+-type remKey()  :: binary().     % remote key, <<"id">> in Office365 (cleanup sort order)
+-type remKeys() :: [remKey()].   % remote keys
+-type remVal()  :: map().        % remote value of a contact (relevant fields only)
+-type remMeta() :: map().        % contact meta information with respect to this remote cloud
+-type remKVP()  :: {remKey(), {remVal(), remMeta()}}.    % remote key value pair
+-type remKVPs() :: [remKVP()].   % list of remote key value pairs 
 
+-type locKey()  :: [string()].   % local key of a contact, e.g. ["contact","My","Ah2hA77a"]
+-type locId()   :: string().     % last item in locKey() is called local id e.g. "Ah2hA77a"
+-type locVal()  :: map().        % sync relevant part of local cvalue of a contact
+-type locMeta() :: map().        % meta part of local cvalue of a contact
+-type locKVP()  :: {remKey(), {locVal(), locMeta()}}.    % local key value pair
+-type locKVPs() :: [locKVP()].   % local key value pairs
+
+-type token()   :: binary().     % OAuth access token (refreshed after 'unauthorized')
+
+-define(COMPARE_MIN_KEY, <<>>).     % cleanup traversal by external id, scan starting after this key  
+-define(COMPARE_MAX_KEY, <<255>>>). % scan ending at or beyond this key  
 
 -define(OAUTH2_CONFIG(__JOB_NAME), 
             ?GET_CONFIG(oAuth2Config,
@@ -59,26 +77,32 @@
 -define(CONTENT_ATTRIBUTES(__JOB_NAME),
             ?GET_CONFIG(contactAttributes,
             [__JOB_NAME],
-            [<<"businessPhones">>,<<"mobilePhone">> %,<<"title">> ,<<"personalNotes">>
-            ,<<"companyName">>,<<"emailAddresses">> % ,<<"middleName">>,<<"businessHomePage">>
-            ,<<"assistantName">>,<<"department">> % ,<<"children">>,<<"officeLocation">>
-            ,<<"profession">>,<<"givenName">>,<<"categories">>,<<"jobTitle">> % ,<<"nickName">>,<<"yomiGivenName">>
-            ,<<"surname">>,<<"imAddresses">>,<<"businessAddress">> % ,<<"spouseName">>,<<"yomiSurname">>
-            ,<<"manager">> % ,<<"generation">>,<<"initials">>,<<"displayName">>
-            % ,<<"homeAddress">>,<<"otherAddress">>,<<"homePhones">>,<<"fileAs">>,<<"yomiCompanyName">>,<<"birthday">>
+            [<<"companyName">>
+            ,<<"givenName">>,<<"surname">>,<<"jobTitle">>,<<"profession">>
+            %,<<"emailAddresses">>,<<"businessPhones">>,<<"mobilePhone">>,<<"homePhones">>,<<"imAddresses">>
+            %,<<"department">>,<<"manager">>,<<"assistantName">> 
+            %,<<"businessAddress">>
+            %,<<"officeLocation">>,<<"businessHomePage">>
+            %,<<"displayName">>,<<"title">>,<<"middleName">>,<<"initials">>,<<"nickName">>
+            %,<<"birthday">>,<<"categories">>,<<"personalNotes">>
+            %,<<"spouseName">>,<<"children">>,<<"generation">>
+            %,<<"yomiSurname">>,<<"yomiGivenName">>,<<"yomiCompanyName">>
+            %,<<"homeAddress">>,<<"otherAddress">>,<<"fileAs">>
             ], 
             "Attributes to be synced for Office365 contact data"
             )
        ).
 
 -define(META_ATTRIBUTES(__JOB_NAME),
-            ?GET_CONFIG(contactAttributes,
+            ?GET_CONFIG(metaAttributes,
             [__JOB_NAME],
             [<<"id">>
-            ,<<"lastModifiedDateTime">>
-            ,<<"changeKey">>            %,<<"parentFolderId">>,<<"createdDateTime">>
+            %,<<"lastModifiedDateTime">>
+            %,<<"changeKey">>
+            %,<<"parentFolderId">>
+            %,<<"createdDateTime">>
             ], 
-            "Attributes used for Office365 contact change tracking"
+            "Meta attributes used for Office365 contact change tracking"
             )
        ).
 
@@ -95,28 +119,21 @@
 % contacts graph api
 % https://docs.microsoft.com/en-us/graph/api/resources/contact?view=graph-rest-1.0
 
-%% remote item (single contact info in cache)
--record(remItem,    { remKey                    :: remKey() % remote key (id) 
-                    , meta                      :: meta()   % META information (id, ...)
-                    , content                   :: remVal() % relevant contact info to be synced
-                    }).
-
 %% scr processing state
 -record(state,      { name                      :: jobName()
                     , type = pull               :: scrDirection()
                     , channel                   :: scrChannel()     % channel name
                     , keyPrefix                 :: locKey()         % key space prefix in channel
                     , tokenPrefix               :: locKey()         % without id #token#
-                    , token                     :: map()            % token info as stored under #token#
-                    , apiUrl                    :: binary()
-                    , fetchUrl                  :: binary()
-                    , dirtyKeys = []            :: remKeys()        % needing insert/update/delete
-                    , remItems = []             :: list(#remItem{}) % cache for cleanup / ToDo: remove
-                    , isConnected = true        :: boolean()
+                    , token                     :: token()          % access token binary
+                    , apiUrl                    :: string()
+                    , fetchUrl                  :: string()
+                    , cycleBuffer = []          :: remKVPs() | remKVPs() % dirty buffer for one c/r cycle
+                    , isConnected = true        :: boolean()        % fail unauthorized on first use
                     , isFirstSync = true        :: boolean()
                     , isCleanupFinished = true  :: boolean()
                     , auditStartTime = {0,0}    :: ddTimestamp()    % UTC timestamp {Sec,MicroSec}
-                    , template  = ?NOT_FOUND    :: ?NOT_FOUND|map() % empty contact with default values 
+                    , template  = #{}           :: locVal()         % empty contact with default values 
                     , accountId                 :: ddEntityId()     % data owner
                     }).
 
@@ -145,241 +162,328 @@
         , get_key_prefix/1
         ]).
 
+-spec get_auth_config() -> map().
 get_auth_config() -> ?OAUTH2_CONFIG(<<>>).
 
+-spec get_auth_config(jobName()) -> map().
 get_auth_config(JobName) -> ?OAUTH2_CONFIG(JobName).
 
+-spec get_auth_token_key_prefix() -> locKey().
 get_auth_token_key_prefix() -> ?OAUTH2_TOKEN_KEY_PREFIX(<<>>).
 
+-spec get_auth_token_key_prefix(jobName()) -> locKey().
 get_auth_token_key_prefix(JobName) -> ?OAUTH2_TOKEN_KEY_PREFIX(JobName).
 
+-spec get_key_prefix() -> locKey().
 get_key_prefix() -> ?KEY_PREFIX(<<>>).
 
+-spec get_key_prefix(jobName()) -> locKey().
 get_key_prefix(JobName) -> ?KEY_PREFIX(JobName).
 
 % determine the local id as the last piece of ckey (if available) 
-%           or hash of remote id (if new to local store)
-% this id is a string representing a hash of the remote id
--spec local_id(locKey()) -> locId().
-local_id(Key) when is_list(Key) -> lists:last(Key).
-
+%-spec local_id(locKey()) -> locId().
+%local_id(Key) when is_list(Key) -> lists:last(Key).
 
 % calculate a new local id as a string representing the hash of the remote key (id)
--spec new_local_id(remKey()) -> locKey().
+-spec new_local_id(remKey()) -> locId().
 new_local_id(RemKey) when is_binary(RemKey) -> io_lib:format("~.36B",[erlang:phash2(RemKey)]).
+
+-spec get_local_key(remKey(), jobName(), scrChannel(), locKey()) -> locKey() | ?NOT_FOUND.
+get_local_key(Id, _Name, Channel, KeyPrefix) ->
+    Stu = {?CONTACT_INDEXID,Id}, 
+    case dperl_dal:read_channel_index_key_prefix(Channel, Stu, KeyPrefix) of 
+        [] ->       ?NOT_FOUND;
+        [Key] ->    Key     % ToDo: Check/filter with META key = Name
+    end.
 
 % convert list of remote values (already maps) to list of {Key,RemoteId,RemoteValue} triples
 % which serves as a lookup buffer of the complete remote state, avoiding sorting issues
--spec format_remote_values_to_kv(remVal(), locKey(), jobName()) -> remVal(). 
-format_remote_values_to_kv(Values, KeyPrefix, JobName) ->
-    format_remote_values_to_kv(Values, KeyPrefix, JobName, []).
+% -spec format_remote_values_to_kv(remVal(), locKey(), jobName()) -> remVal(). 
+% format_remote_values_to_kv(Values, KeyPrefix, JobName) ->
+%     format_remote_values_to_kv(Values, KeyPrefix, JobName, []).
 
-format_remote_values_to_kv([], _KeyPrefix, _JobName, Acc) -> Acc;
-format_remote_values_to_kv([Value|Values], KeyPrefix, JobName, Acc) -> 
-    #{<<"id">> := RemoteId} = Value,        
-    Key = KeyPrefix ++ [new_local_id(RemoteId)],
-    format_remote_values_to_kv(Values, KeyPrefix, JobName, [{Key,RemoteId,format_value(Value, JobName)}|Acc]).
+% format_remote_values_to_kv([], _KeyPrefix, _JobName, Acc) -> Acc;
+% format_remote_values_to_kv([Value|Values], KeyPrefix, JobName, Acc) -> 
+%     #{<<"id">> := RemoteId} = Value,        
+%     Key = KeyPrefix ++ [new_local_id(RemoteId)],
+%     format_remote_values_to_kv(Values, KeyPrefix, JobName, [{Key,RemoteId,format_value(Value, JobName)}|Acc]).
 
-% format remote or local value by projecting it down to configured list of synced (meta + content) attributes
-format_value(Value, JobName) when is_map(Value) -> 
-    maps:with(?META_ATTRIBUTES(JobName)++?CONTENT_ATTRIBUTES(JobName), Value).
+% format remote value into a special KV pair with seperated contact- and meta-maps
+% by projecting out syncable attributes(content / meta)
+-spec remote_kvp(remVal(), jobName()) -> remKVP().
+remote_kvp(#{<<"id">>:=Id} = Value, Name) when is_map(Value) -> 
+    {Id, {maps:with(?CONTENT_ATTRIBUTES(Name), Value), maps:with(?META_ATTRIBUTES(Name), Value)}}.
+
+% format local value into a local KV pair
+% by projecting out syncable attributes(content / meta)
+-spec local_kvp(remKey(), locVal(), jobName()) -> locKVP().
+local_kvp(Id, Value, Name) when is_map(Value) -> 
+    {Id, {maps:with(?CONTENT_ATTRIBUTES(Name), Value), maps:with(?META_ATTRIBUTES(Name), Value)}}.
 
 -spec connect_check_src(#state{}) -> {ok,#state{}} | {error,any()} | {error,any(), #state{}}.
 connect_check_src(#state{isConnected=true} = State) ->
     {ok, State};
-connect_check_src(#state{isConnected=false, accountId=AccountId, tokenPrefix=TokenPrefix} = State) ->
+connect_check_src(#state{isConnected=true, type=push} = State) ->
+    {ok, State#state{isConnected=true}};
+connect_check_src(#state{isConnected=false, type=pull, accountId=AccountId, tokenPrefix=TokenPrefix} = State) ->
     ?JTrace("Refreshing access token"),
     case dderl_oauth:refresh_access_token(AccountId, TokenPrefix, ?SYNC_OFFICE365) of
-        {ok, Token} ->
-            ?Info("new access token fetched"),
+        {ok, Token} ->      %?Info("new access token fetched"),
             {ok, State#state{token=Token, isConnected=true}};
         {error, Error} ->
-            ?JError("Unexpected response : ~p", [Error]),
+            ?JError("Unexpected response refreshing access token: ~p", [Error]),
             {error, Error, State}
     end.
 
 -spec get_source_events(#state{}, scrBatchSize()) -> 
-        {ok,remKeys(),#state{}} | {ok,sync_complete,#state{}}. % {error,scrAnyKey()}
-get_source_events(#state{auditStartTime=LastStartTime, type=push,
-            channel=Channel, isFirstSync=IsFirstSync} = State, BulkSize) ->
-    case dperl_dal:read_audit_keys(Channel, LastStartTime, BulkSize) of
-        {LastStartTime, LastStartTime, []} ->
-            if
-                IsFirstSync -> 
-                    ?JInfo("Audit rollup is complete"),
-                    {ok, sync_complete, State#state{isFirstSync=false}};
-                true -> 
-                    {ok, sync_complete, State}
-            end;
-        {_StartTime, NextStartTime, []} ->
-            {ok, [], State#state{auditStartTime=NextStartTime}};
-        {_StartTime, NextStartTime, Keys} ->
-            UniqueKeys = lists:delete(undefined, lists:usort(Keys)),
-            {ok, UniqueKeys, State#state{auditStartTime=NextStartTime}}
-    end;
-get_source_events(#state{dirtyKeys=[]} = State, _BulkSize) ->
+        {ok, remKVPs(), #state{}} | {ok, sync_complete, #state{}}. % {error,scrAnyKey()}
+% get_source_events(#state{auditStartTime=LastStartTime, type=push,
+%             channel=Channel, isFirstSync=IsFirstSync} = State, BulkSize) ->
+%     case dperl_dal:read_audit_keys(Channel, LastStartTime, BulkSize) of
+%         {LastStartTime, LastStartTime, []} ->
+%             if
+%                 IsFirstSync -> 
+%                     ?JInfo("Audit rollup is complete"),
+%                     {ok, sync_complete, State#state{isFirstSync=false}};
+%                 true -> 
+%                     {ok, sync_complete, State}
+%             end;
+%         {_StartTime, NextStartTime, []} ->
+%             {ok, [], State#state{auditStartTime=NextStartTime}};
+%         {_StartTime, NextStartTime, Keys} ->
+%             UniqueKeys = lists:delete(undefined, lists:usort(Keys)),
+%             {ok, UniqueKeys, State#state{auditStartTime=NextStartTime}}
+%     end;
+get_source_events(#state{cycleBuffer=[]} = State, _BulkSize) ->
     {ok, sync_complete, State};
-get_source_events(#state{dirtyKeys=DirtyKeys} = State, _BulkSize) ->
-    ?Info("get_source_events result count ~p~n~p",[length(DirtyKeys), hd(DirtyKeys)]),
-    {ok, DirtyKeys, State#state{dirtyKeys=[]}}.
+get_source_events(#state{cycleBuffer=CycleBuffer} = State, _BulkSize) ->
+    ?Info("get_source_events result count ~p~n~p",[length(CycleBuffer), hd(CycleBuffer)]),
+    {ok, CycleBuffer, State#state{cycleBuffer=[]}}.
 
-- spec connect_check_dst(#state{}) -> {ok, #state{}}. % {error,any()} | {error,any(),#state{}}
-connect_check_dst(State) -> {ok, State}.    % Question: Why defaulted for push destination?
+- spec connect_check_dst(#state{}) -> {ok, #state{}}. % | {error, term()} | {error, term(), #state{}}
+connect_check_dst(State) -> {ok, State}.    % ToDo: Maybe implement for push destination?
 
 do_refresh(_State, _BulkSize) -> {error, cleanup_only}. % using cleanup/refresh combined
 
--spec fetch_src(remKey(), #state{}) -> ?NOT_FOUND | locVal() | remVal().
-fetch_src(Key, #state{channel=Channel, type=push}) ->
-    dperl_dal:read_channel(Channel, Key);
-fetch_src(Key, #state{remItems=RemItems, type=pull}) ->
-    case lists:keyfind(Key, 1, RemItems) of
-        {Key, _RemoteId, Value} -> Value;
-        false -> ?NOT_FOUND
+-spec fetch_src(remKey(), #state{}) -> ?NOT_FOUND | {remVal(), remMeta()}.
+% fetch_src(Key, #state{channel=Channel, type=push}) ->
+%     dperl_dal:read_channel(Channel, Key);
+fetch_src(Id, #state{name=Name, type=pull, apiUrl=ApiUrl, token=Token} = State) -> 
+    ContactUrl = ApiUrl ++ binary_to_list(Id),
+    ?JTrace("Fetching contact with url : ~s", [ContactUrl]),
+    case exec_req(ContactUrl, Token) of
+        {error, unauthorized} ->        reconnect_exec(State, fetch_src, [Id]);
+        {error, Error} ->               {error, Error, State};
+        #{<<"id">> := _} = RemVal ->    remote_kvp(RemVal, Name);
+        _ ->                            ?NOT_FOUND
     end.
 
--spec fetch_dst(remKey(), #state{}) -> ?NOT_FOUND | locVal() | remVal().
-fetch_dst(Key, #state{ name=Name, remItems=RemItems, type=push
-                     , apiUrl=ApiUrl, token=Token} = State) ->
-    case lists:keyfind(Key, 1, RemItems) of
-        {Key, RemoteId, _Value} -> 
-            ContactUrl = erlang:iolist_to_binary([ApiUrl, RemoteId]),
-            case exec_req(ContactUrl, Token) of
-                #{<<"id">> := _} = RValue ->    format_value(RValue, Name);
-                {error, unauthorized} ->        reconnect_exec(State, fetch_dst, [Key]);
-                {error, Error} ->               {error, Error};
-                _ ->                            ?NOT_FOUND
-            end; 
-        false -> 
-            ?NOT_FOUND
-    end;
-fetch_dst(Key, #state{channel=Channel}) ->
-    dperl_dal:read_channel(Channel, Key).
+-spec fetch_dst(remKVP() | locKVP(), #state{}) -> ?NOT_FOUND | {locVal(), locMeta()} | {remVal(), remMeta()}.
+% fetch_dst(Key, #state{ name=Name, remItems=RemItems, type=push
+%                      , apiUrl=ApiUrl, token=Token} = State) ->
+%     case lists:keyfind(Key, 1, RemItems) of
+%         {Key, RemoteId, _Value} -> 
+%             ContactUrl = erlang:iolist_to_binary([ApiUrl, RemoteId]),
+%             case exec_req(ContactUrl, Token) of
+%                 #{<<"id">> := _} = RValue ->    format_value(RValue, Name);
+%                 {error, unauthorized} ->        reconnect_exec(State, fetch_dst, [Key]);
+%                 {error, Error} ->               {error, Error};
+%                 _ ->                            ?NOT_FOUND
+%             end; 
+%         false -> 
+%             ?NOT_FOUND
+%     end;
+fetch_dst(Id, #state{name=Name, channel=Channel, keyPrefix=KeyPrefix, type=pull}) ->
+    Key = get_local_key(Id, Name, Channel, KeyPrefix),
+    case dperl_dal:read_channel(Channel, Key) of 
+        ?NOT_FOUND ->   ?NOT_FOUND;
+        Value ->        local_kvp(Id, Value, Name)
+    end.
 
--spec insert_dst(remKey(), remVal()|locVal(), #state{}) -> {error, any()}.
-insert_dst(Key, Value, #state{type=push, apiUrl=ApiUrl, token=Token} = State) ->
-    case exec_req(ApiUrl, Token, Value, post) of
-        #{<<"id">> := _} = RemoteValue ->   merge_meta_to_local(Key, RemoteValue, State);
-        {error, unauthorized} ->            reconnect_exec(State, insert_dst, [Key, Value]);
-        {error, Error} ->                   {error, Error}
-    end;
-insert_dst(Key, Value, State) ->
-    Result = update_dst(Key, Value, State),
-    ?Info("insert_dst ~p~n~p~nresult ~p",[Key, Value, Result]),
-    Result.
+-spec insert_dst(remKey(), remKVP()|locKVP(), #state{}) -> {scrSoftError(), #state{}}.
+% insert_dst(Key, Value, #state{type=push, apiUrl=ApiUrl, token=Token} = State) ->
+%     case exec_req(ApiUrl, Token, Value, post) of
+%         #{<<"id">> := _} = RemoteValue ->   merge_meta_to_local(Key, RemoteValue, State);
+%         {error, unauthorized} ->            reconnect_exec(State, insert_dst, [Key, Value]);
+%         {error, Error} ->                   {error, Error}
+%     end;
+insert_dst(Id, {Id, {Value,Meta}}, #state{ name=Name, channel=Channel, type=pull
+                                   , keyPrefix=KeyPrefix, template=Template} = State) ->
+    Key = KeyPrefix ++ [new_local_id(Id)],
+    ?Info("insert_dst ~p",[Key]),
+    MergedValue = maps:merge(maps:merge(Template, Value), #{<<"META">> => #{Name=>Meta}}),
+    MergedBin = imem_json:encode(MergedValue), 
+    case dperl_dal:write_channel(Channel, Key, MergedBin) of 
+        ok ->
+            {false, State};
+        {error, Error} ->   
+            ?Error("insert_dst ~p~n~p~nresult ~p",[Key, MergedBin, {error, Error}]),
+            {true, State}
+    end.
 
-merge_meta_to_local(Key, RemoteValue, #state{channel=Channel, tokenPrefix=TokenPrefix} = State) ->
-    AccessId = access_id(TokenPrefix),
-    MetaItem = #{<<"id">> => maps:get(<<"id">>, RemoteValue)},
+-spec update_dst(remKey(), remKVP()|locKVP(), #state{}) -> {scrSoftError(), #state{}}.
+% update_dst(Key, Value, #state{name=Name, channel=Channel, type=push, 
+%                 remItems=RemItems, apiUrl=ApiUrl, token=Token} = State) ->
+%     case lists:keyfind(Key, 1, RemItems) of
+%         {Key, RemoteId, _Value} -> 
+%             ContactUrl = erlang:iolist_to_binary([ApiUrl, RemoteId]),
+%             case exec_req(ContactUrl, Token, Value, patch) of
+%                 #{<<"id">> := _} = RemoteValue ->
+%                     FormRemote = format_value(RemoteValue, Name),
+%                     OldValue = dperl_dal:read_channel(Channel, Key),
+%                     MergeValue = maps:merge(OldValue, FormRemote),
+%                     MergedBin = imem_json:encode(MergeValue),
+%                     dperl_dal:write_channel(Channel, Key, MergedBin),
+%                     {false, State};
+%                 {error, unauthorized} ->
+%                     reconnect_exec(State, update_dst, [Key, Value]);
+%                 {error, Error} ->
+%                     {error, Error}
+%             end;
+%         false -> 
+%             {false, State}
+%     end;
+update_dst(Id, {Id, {Value,Meta}}, #state{ name=Name, channel=Channel, keyPrefix=KeyPrefix
+                                         , type=pull, template=Template} = State) ->
+    Key = get_local_key(Id, Name, Channel, KeyPrefix),
+    ?Info("update_dst ~p",[Key]),
     case dperl_dal:read_channel(Channel, Key) of
-        #{<<"META">> := Meta} = LocVal ->
-            case maps:merge(Meta, #{AccessId => MetaItem}) of 
-                Meta -> 
-                    ok;     % RemoteMeta already there
-                NewM ->
-                    MergedBin = imem_json:encode(LocVal#{<<"META">> => NewM}), 
-                    dperl_dal:write_channel(Channel, Key, MergedBin)
-            end;
-        LocVal ->
-            MergedBin = imem_json:encode(LocVal#{<<"META">> => MetaItem}),
-            dperl_dal:write_channel(Channel, Key, MergedBin)
-    end,
-    {false, State}.
+        ?NOT_FOUND ->   
+            ?JError("update_dst key ~p not found for remote id ~p", [Key, Id]),
+            {true, State};
+        #{<<"META">> := OldMeta} = OldVal ->
+            NewMeta = maps:merge(OldMeta, #{Name => Meta}),
+            AllVal = maps:merge(Template, OldVal),
+            NewVal = maps:merge(AllVal, Value),
+            case update_local(Channel, Key, OldVal, NewVal, NewMeta) of 
+                ok ->
+                    {false, State};
+                {error, _Error} ->
+                    ?JError("update_dst cannot update key ~p to ~p", [Key, NewVal]),   
+                    {true, State}
+            end 
+    end.
 
-access_id(TokenPrefix) ->
-    list_to_binary(string:join(TokenPrefix,"/")).
+%% update a local contact record to new value and new metadata.
+%% create an audit log only if the value changes, not for a pure meta update.
+%% this should avoid endless provisioning loops for metadata changes only. 
+-spec update_local(scrChannel(), locKey(), remVal(), locVal(), remMeta()) -> 
+        {scrSoftError(), #state{}}.
+update_local(Channel, Key, OldVal, OldVal, NewMeta) ->
+    MergedBin = imem_json:encode(OldVal#{<<"META">> => NewMeta}),
+    dperl_dal:write_channel_no_audit(Channel, Key, MergedBin);
+update_local(Channel, Key, _OldVal, NewVal, NewMeta) ->
+    MergedBin = imem_json:encode(NewVal#{<<"META">> => NewMeta}),
+    dperl_dal:write_channel(Channel, Key, MergedBin).
 
 -spec delete_dst(remKey(), #state{}) -> {scrSoftError(), #state{}}.
-delete_dst(Key, #state{channel=Channel, type=push, remItems=RemItems, 
-                apiUrl=ApiUrl, token=Token} = State) ->
-    case lists:keyfind(Key, 1, RemItems) of
-        {Key, RemoteId, _Value} -> 
-            ContactUrl = erlang:iolist_to_binary([ApiUrl, RemoteId]),
-            case exec_req(ContactUrl, Token, #{}, delete) of
-                ok ->
+% delete_dst(Key, #state{channel=Channel, type=push, remItems=RemItems, 
+%                 apiUrl=ApiUrl, token=Token} = State) ->
+%     case lists:keyfind(Key, 1, RemItems) of
+%         {Key, RemoteId, _Value} -> 
+%             ContactUrl = erlang:iolist_to_binary([ApiUrl, RemoteId]),
+%             case exec_req(ContactUrl, Token, #{}, delete) of
+%                 ok ->
+%                     dperl_dal:remove_from_channel(Channel, Key),
+%                     {false, State};
+%                 {error, unauthorized} ->
+%                     reconnect_exec(State, delete_dst, [Key]);
+%                 Error ->
+%                     Error
+%             end;
+%         false -> 
+%             {false, State}
+%     end;
+delete_dst(Id, #state{ name=Name, channel=Channel, keyPrefix=KeyPrefix
+                     , type=pull, template=Template} = State) ->
+    Key = get_local_key(Id, Name, Channel, KeyPrefix),
+    ?Info("delete_dst ~p",[Key]),
+    case fetch_dst(Id, State) of 
+        ?NOT_FOUND ->           
+            {true, state};
+        {Id, {Value, Meta}} ->
+            case maps:without(Name, Meta) of 
+                #{} ->      % no other syncs remaining for this key
                     dperl_dal:remove_from_channel(Channel, Key),
                     {false, State};
-                {error, unauthorized} ->
-                    reconnect_exec(State, delete_dst, [Key]);
-                Error ->
-                    Error
-            end;
-        false -> 
-            {false, State}
-    end;
-delete_dst(Key, #state{channel=Channel} = State) ->
-    ?Info("delete_dst ~p",[Key]),
-    dperl_dal:remove_from_channel(Channel, Key),
-    {false, State}.
-
--spec update_dst(remKey(), remVal()|locVal(), #state{}) -> {scrSoftError(), #state{}}.
-update_dst(Key, Value, #state{name=Name, channel=Channel, type=push, 
-                remItems=RemItems, apiUrl=ApiUrl, token=Token} = State) ->
-    case lists:keyfind(Key, 1, RemItems) of
-        {Key, RemoteId, _Value} -> 
-            ContactUrl = erlang:iolist_to_binary([ApiUrl, RemoteId]),
-            case exec_req(ContactUrl, Token, Value, patch) of
-                #{<<"id">> := _} = RemoteValue ->
-                    FormRemote = format_value(RemoteValue, Name),
-                    OldValue = dperl_dal:read_channel(Channel, Key),
-                    MergeValue = maps:merge(OldValue, FormRemote),
-                    MergedBin = imem_json:encode(MergeValue),
-                    dperl_dal:write_channel(Channel, Key, MergedBin),
-                    {false, State};
-                {error, unauthorized} ->
-                    reconnect_exec(State, update_dst, [Key, Value]);
-                {error, Error} ->
-                    {error, Error}
-            end;
-        false -> 
-            {false, State}
-    end;
-update_dst(Key, Value, #state{channel=Channel} = State) when is_map(Value) ->
-    OldValue = dperl_dal:read_channel(Channel, Key),
-    MergeValue = maps:merge(OldValue, Value),
-    MergedBin = imem_json:encode(MergeValue),
-    dperl_dal:write_channel(Channel, Key, MergedBin),
-    {false, State}.
+                NewMeta ->  % other syncs remaining for this key
+                    NewVal = maps:merge(Template, Value),       
+                    case update_local(Channel, Key, Value, NewVal, NewMeta) of 
+                        ok ->
+                            {false, State};
+                        {error, _Error} ->
+                            ?JError("delete_dst cannot delete key ~p", [Key]),   
+                            {true, State}
+                    end 
+            end    
+    end.
 
 report_status(_Key, _Status, _State) -> no_op.
 
-load_dst_after_key(CurKey, BlkCount, #state{type=pull, keyPrefix=KeyPrefix} = State) when CurKey < KeyPrefix ->
-    load_dst_after_key(KeyPrefix, BlkCount, State);
-load_dst_after_key(CurKey, BlkCount, #state{channel=Channel, type=pull, keyPrefix=KeyPrefix}) ->
-    Filter = fun({K,_}) -> lists:prefix(KeyPrefix,K) end,
-    lists:filter(Filter, dperl_dal:read_gt(Channel, CurKey, BlkCount)).
-
-load_src_after_key(CurKey, BlkCount, #state{type=pull, fetchUrl=undefined, apiUrl=ApiUrl} = State) ->
-    UrlParams = dperl_dal:url_enc_params(#{"$top" => integer_to_list(BlkCount)}),
-    ContactsUrl = erlang:iolist_to_binary([ApiUrl, "?", UrlParams]),
-    load_src_after_key(CurKey, BlkCount, State#state{fetchUrl=ContactsUrl});
-load_src_after_key(CurKey, BlkCount, #state{name=Name, type=pull, isCleanupFinished=true, 
-                            keyPrefix=KeyPrefix, token=Token, fetchUrl=FetchUrl} = State) ->
-    case fetch_all_contacts(FetchUrl, Token, KeyPrefix, Name) of
-        {ok, Contacts} ->
-            load_src_after_key(CurKey, BlkCount, State#state{remItems=Contacts, isCleanupFinished=false});
-        {error, unauthorized} ->
-            reconnect_exec(State, load_src_after_key, [CurKey, BlkCount]);
-        {error, Error} ->
-            {error, Error, State}
-    end;
-load_src_after_key(CurKey, BlkCount, #state{type=pull, remItems=Contacts} = State) ->
-    {ok, get_contacts_gt(CurKey, BlkCount, Contacts), State}.
-
-reconnect_exec(State, Fun, Args) ->
-    case connect_check_src(State#state{isConnected = false}) of
-        {ok, State1} ->
-            erlang:apply(?MODULE, Fun, Args ++ [State1]);
-        {error, Error, State1} ->
-            {error, Error, State1}
+-spec load_dst_after_key(remKVP() | locKVP(), scrBatchSize(), #state{}) -> {ok, locKVPs(), #state{}} | {error, term(), #state{}}.
+load_dst_after_key({Id,{_,_}}, BlkCount, #state{name=Name, channel=Channel, type=pull, keyPrefix=KeyPrefix}) ->
+    {ok, read_local_kvps_after_id(Channel, Name, KeyPrefix, Id, BlkCount, [])};
+load_dst_after_key(_Key, BlkCount, #state{name=Name, channel=Channel, type=pull, keyPrefix=KeyPrefix} = State) ->
+    ?Info("load_dst_after_key for non-matching (initial) key ~p", [_Key]),
+    case read_local_kvps_after_id(Channel, Name, KeyPrefix, ?COMPARE_MIN_KEY, BlkCount, []) of 
+        L when is_list(L) ->    {ok, L, State};
+        {error, Reason} ->      {error, Reason, State}
     end.
 
--spec do_cleanup(remKeys(), remKeys(), remKeys(), boolean(), #state{}) -> {ok, #state{}}. 
-do_cleanup(_Deletes, _Inserts, _Diffs, _IsFinished, #state{type = push}) ->
-    {error, <<"cleanup only for pull job">>};
-do_cleanup(Deletes, Inserts, Diffs, IsFinished, State) ->
-    NewState = State#state{dirtyKeys=Inserts++Diffs++Deletes},
-    if IsFinished ->    {ok, finish, NewState#state{isCleanupFinished=true}};
-       true ->          {ok, NewState}
+%% starting after Id, run through remoteId index and collect a block of locKVP() data belonging to 
+%% this job name and keyPrefix 
+-spec read_local_kvps_after_id(scrChannel(), jobName(), locKey(), remKey(), scrBatchSize(), locKVPs()) -> locKVPs() | {error, term()}.
+read_local_kvps_after_id(_Channel, _Name, _KeyPrefix, _Id, _BlkCount, _Acc) ->
+    % lists:prefix(KeyPrefix,K)
+    [].
+
+-spec load_src_after_key(remKVP()| locKVP(), scrBatchSize(), #state{}) -> 
+        {ok, remKVPs(), #state{}} | {error, term(), #state{}}.
+load_src_after_key(_CurKVP, _BlkCount, #state{type=pull, fetchUrl=finished} = State) ->
+    {ok, [], State};
+load_src_after_key(CurKVP, BlkCount, #state{type=pull, fetchUrl=undefined, apiUrl=ApiUrl} = State) ->
+    UrlParams = dperl_dal:url_enc_params(#{"$top" => integer_to_list(BlkCount)}),
+    ContactsUrl = lists:flatten([ApiUrl, "?", UrlParams]),
+    load_src_after_key(CurKVP, BlkCount, State#state{fetchUrl=ContactsUrl});
+load_src_after_key(CurKVP, BlkCount, #state{ name=Name, type=pull, token=Token
+                                           , fetchUrl=FetchUrl} = State) ->
+    ?JTrace("Fetching contacts with url : ~s", [FetchUrl]),
+    case exec_req(FetchUrl, Token) of
+        {error, unauthorized} ->    reconnect_exec(State, load_src_after_key, [CurKVP, BlkCount]);
+        {error, Error} ->           {error, Error, State};
+        #{<<"@odata.nextLink">> := NextUrl, <<"value">> := RemVals} ->
+            KVPs = [remote_kvp(RemVal, Name) || RemVal <- RemVals],
+            ?JTrace("Fetched contacts : ~p", [length(KVPs)]),
+            %?Info("First fetched contact : ~p", [element(1,hd(KVPs))]),
+            {ok, KVPs, State#state{fetchUrl=NextUrl}};
+        #{<<"value">> := RemVals} ->        % may be an empty list
+            KVPs = [remote_kvp(RemVal, Name) || RemVal <- RemVals],
+            ?JTrace("Last fetched contacts : ~p", [length(KVPs)]),
+            {ok, KVPs, State#state{fetchUrl=finished}}
+    end.
+
+-spec reconnect_exec(#state{}, fun(), list()) -> 
+        {scrSoftError(), #state{}} | {ok, remKVPs(), #state{}} | {error, term(), #state{}}.
+reconnect_exec(State, Fun, Args) ->
+    case connect_check_src(State#state{isConnected=false}) of
+        {ok, State1} ->             erlang:apply(?MODULE, Fun, Args ++ [State1]);
+        {error, Error, State1} ->   {error, Error, State1}
+    end.
+
+% execute cleanup/refresh for found differences (Deletes, Inserts and value Diffs)
+-spec do_cleanup(remKeys(), remKeys(), remKeys(), boolean(), #state{}) -> 
+        {ok, #state{}} | {ok, finish, #state{}} . 
+do_cleanup(Deletes, Inserts, Diffs, IsFinished, #state{type=pull} = State) ->
+    NewState = State#state{cycleBuffer=Deletes++Diffs++Inserts},
+    if 
+        IsFinished ->
+            %% deposit cleanup batch dirty results in state for sync to pick up
+            %% confirm finished cleanup cycle (last Diffs to sync in cycle)
+            %% re-arm cleanup fetching to restart with top rows in id order    
+            {ok, finish, NewState#state{fetchUrl=undefined}};
+        true ->
+            %% deposit cleanup batch dirty results in state for sync to pick up
+            {ok, NewState}
     end.
 
 get_status(#state{}) -> #{}.
@@ -409,12 +513,16 @@ init({#dperlJob{ name=Name, srcArgs=#{apiUrl:=ApiUrl}, args=Args
                                   , vnf = <<"fun imem_index:vnf_identity/1.">>
                                   , iff = ContactIff},
             dperl_dal:create_check_index(ChannelBin, [IdxContact]),
+            Template = case dperl_dal:read_channel(Channel, KeyPrefix) of 
+                ?NOT_FOUND ->           #{};
+                T when is_map(T) ->     T 
+            end,
             case dderl_oauth:get_token_info(AccountId, TokenPrefix, ?SYNC_OFFICE365) of
                 #{<<"access_token">>:=Token} ->
                     {ok, State#state{ name=Name, type=Type, channel=ChannelBin, keyPrefix=KeyPrefix
                                     , apiUrl=ApiUrl, tokenPrefix=TokenPrefix
-                                    , token=Token, accountId = AccountId
-                                    , template=dperl_dal:read_channel(Channel, KeyPrefix)}};
+                                    , token=Token, accountId=AccountId
+                                    , template=Template}};
                 _ ->
                     ?JError("Access token not found for ~p at ~p", [AccountId, TokenPrefix]),
                     {stop, badarg}
@@ -442,39 +550,9 @@ terminate(Reason, _State) ->
 
 %% private functions
 
-%% Fetch all remote contacts, create 3-tuple {Key::list(), RemoteId::binary(), RemoteValue::map())
-%% Sort by Key (needed for sync)
-fetch_all_contacts(Url, Token, KeyPrefix, JobName) ->
-    fetch_all_contacts(Url, Token, KeyPrefix, JobName, []).
-
-fetch_all_contacts(Url, Token, KeyPrefix, JobName, AccContacts) ->
-    ?JTrace("Fetching contacts with url : ~s", [Url]),
-    ?JTrace("Fetched contacts : ~p", [length(AccContacts)]),
-    case exec_req(Url, Token) of
-        #{<<"@odata.nextLink">> := NextUrl, <<"value">> := MoreContacts} ->
-            Contacts = format_remote_values_to_kv(MoreContacts, KeyPrefix, JobName),
-            fetch_all_contacts(NextUrl, Token, KeyPrefix, lists:append(Contacts, AccContacts));
-        #{<<"value">> := MoreContacts} ->
-            Contacts = format_remote_values_to_kv(MoreContacts, KeyPrefix, JobName),
-            {ok, lists:keysort(1, lists:append(Contacts, AccContacts))};
-        {error, Error} ->
-            {error, Error}
-    end.
-
-get_contacts_gt(CurKey, BlkCount, Contacts) ->
-    get_contacts_gt(CurKey, BlkCount, Contacts, []).
-    
-get_contacts_gt(_CurKey, _BlkCount, [], Acc) -> lists:reverse(Acc);
-get_contacts_gt(_CurKey, BlkCount, _Contacts, Acc) when length(Acc) == BlkCount ->
-    lists:reverse(Acc);
-get_contacts_gt(CurKey, BlkCount, [{Key, _} | Contacts], Acc) when Key =< CurKey ->
-    get_contacts_gt(CurKey, BlkCount, Contacts, Acc);
-get_contacts_gt(CurKey, BlkCount, [Contact | Contacts], Acc) ->
-    get_contacts_gt(CurKey, BlkCount, Contacts, [Contact | Acc]).
-
--spec exec_req(Url::binary()|string(), Token::binary()) -> tuple().
-exec_req(Url, Token) when is_binary(Url) ->
-    exec_req(binary_to_list(Url), Token);
+%% get a json object from the cloud service and convert it to a map
+%% use OAuth2 header with token
+-spec exec_req(string(), binary()) -> map() | {error, term()}.
 exec_req(Url, Token) ->
     AuthHeader = [{"Authorization", "Bearer " ++ binary_to_list(Token)}],
     case httpc:request(get, {Url, AuthHeader}, [], []) of
@@ -482,17 +560,21 @@ exec_req(Url, Token) ->
             imem_json:decode(list_to_binary(Result), [return_maps]);
         {ok, {{_, 401, _}, _, _}} ->
             {error, unauthorized};
-        Error ->
-            {error, Error}
+        {error, Reason} ->
+            ?Info("exec_req get ~p returns error ~p",[Url,Reason]),
+            {error, Reason}
     end.
 
--spec exec_req(Url::binary()|string(), Token::binary(), Body::map(), Method::atom()) -> tuple().
-exec_req(Url, Token, Body, Method) when is_binary(Url), is_map(Body) ->
-    exec_req(binary_to_list(Url), Token, Body, Method);
+%% emit a cloud service request and convert json result into a map.
+%% The request body is cast from a map.
+%% use OAuth2 header with token
+-spec exec_req(string(), binary(), map(), atom()) -> ok | map() | {error, term()}.
 exec_req(Url, Token, Body, Method) ->
     AuthHeader = [{"Authorization", "Bearer " ++ binary_to_list(Token)}],
-    % Headers = [AuthHeader, {"Contnet-type", "application/json"}],
-    case httpc:request(Method, {Url, AuthHeader, "application/json", imem_json:encode(Body)}, [], []) of
+    case httpc:request(Method, 
+                       {Url, AuthHeader, "application/json", imem_json:encode(Body)}, 
+                       [], 
+                       []) of
         {ok, {{_, 201, _}, _, Result}} ->
             % create/post result
             imem_json:decode(list_to_binary(Result), [return_maps]);
