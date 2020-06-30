@@ -18,6 +18,7 @@ set_token_info(AccountId, TokenPrefix, TokenInfo, SyncType) when is_map(TokenInf
 set_token_info(AccountId, TokenPrefix, TokenInfo, SyncType) when is_list(TokenInfo) ->
     set_token_info(AccountId, TokenPrefix, list_to_binary(TokenInfo), SyncType);
 set_token_info(AccountId, TokenPrefix, TokenInfo, _SyncType) when is_binary(TokenInfo) ->
+    ?Info("set_token_info using ~p",[imem_enc_mnesia:get_enc_hash()]),
     dderl_dal:write_to_avatar_channel(AccountId, TokenPrefix ++ [?TOKEN_KEYPART], TokenInfo).
 
 get_authorize_url(XSRFToken, AuthConfig, SyncType) ->

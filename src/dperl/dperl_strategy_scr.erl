@@ -42,14 +42,22 @@
 % fetch one item from source (if it exists)
 % return scrAnyVal() for cleanup
 % return scrAnyKeyVal() for c/r
+% the error pattern decides on the logging details
 -callback fetch_src(scrAnyKey() | scrAnyKeyVal() , scrState()) -> 
-            ?NOT_FOUND | scrAnyVal() | scrAnyKeyVal().
+    ?NOT_FOUND | scrAnyVal() | scrAnyKeyVal() | 
+    {error, term(), scrState()} | 
+    {error, term()} | 
+    error.
 
 % fetch one item from destination (if it exists)
 % return scrAnyVal() for cleanup
 % return scrAnyKeyVal() for c/r
+% the error pattern decides on the logging details
 -callback fetch_dst(scrAnyKey() | scrAnyKeyVal(), scrState()) -> 
-            ?NOT_FOUND | scrAnyVal() | scrAnyKeyVal().
+    ?NOT_FOUND | scrAnyVal() | scrAnyKeyVal() | 
+    {error, term(), scrState()} | 
+    {error, term()} | 
+    error.
 
 % delete one item from destination (if it exists)
 % scrSoftError() = true signals that a soft error happened which is skipped without throwing
@@ -99,7 +107,11 @@
                           scrState()) -> 
             true | false.
 
-% override for value compare function
+% Compare function, used to loosen compare semantics, ignoring some differences if needed.
+% Comparisons will depend on the (FROZEN) callback state just before processing doing batch
+% comparison (sync / cleanup / refresh). This must be taken into account in the optional
+% override is_equal/4 in the callback module.
+% is_equal() is not called and assumed to be true if Erlang compares values/KVPs equal
 -callback is_equal(scrAnyKey() | scrAnyKeyVal(), scrAnyVal(), scrAnyVal(), scrState()) -> 
             true | false.
 
@@ -154,17 +166,20 @@
             {error, term()}.
 
 % bulk load one batch of keys (for cleanup) or kv-pairs (cleanup/refresh) from source.
-% up to scrBatchSize() existing keys must be returned in key order.
+% up to scrBatchSize() existing keys MUST be returned in key order.
+% Postponing trailing keys to next round is not permitted.
 % A callback module implementing this and also the load_dst_after_key callback signals that it wants
 % to do override source loading for cleanup or c/r combined processing.
 % Returning less than scrBatchSize() items does not prevent further calls of this function.
-% If called again in same cycle, {ok, [], scrState()} must be returned.
+% In that case, if called again in same cycle, {ok, [], scrState()} must be returned.
 -callback load_src_after_key(LastSeen::scrAnyKey()|scrAnyKeyVal(), scrBatchSize(), scrState()) ->
             {ok, scrAnyKeys(), scrState()} | 
             {ok, scrAnyKeyVals(), scrState()} | 
             {error, term(), scrState()}.
 
 % bulk load one batch of kv-pairs for combined cleanup/refresh from destination.
+% up to scrBatchSize() existing keys MUST be returned in key order.
+% Postponing trailing keys to next round is not permitted.
 % A callback module implementing this and load_src_after_key signals that it wants
 % to do a cleanup/refresh combined processing.
 % Returning less than scrBatchSize() items does not prevent further calls of this function.
@@ -388,7 +403,7 @@ execute(cleanup, Mod, Job, State, #{cleanup:=true} = Args) ->
                     #{minKey:=MinKey, maxKey:=MaxKey, lastKey:=LastKey} = CleanupState,
                     Ctx = #cleanup_ctx{ minKey=MinKey, maxKey=MaxKey, lastKey=LastKey
                                       , bulkCount=CleanupBulkCount},
-                    {RefreshCollectResult, State2} = cleanup_refresh_collect(Mod,Ctx,State1),
+                    {RefreshCollectResult, State2} = cleanup_refresh_collect(Mod, Ctx, State1),
                     Deletes = maps:get(deletes,RefreshCollectResult),
                     Inserts = maps:get(inserts,RefreshCollectResult),
                     Diffs = maps:get(differences,RefreshCollectResult),
@@ -680,63 +695,73 @@ process_events(Keys, Mod, State) ->
         true -> Mod:should_sync_log(State);
         false -> true
     end,
-    process_events(Keys, Mod, State, ShouldLog, false).
+    IsEqualFun = make_is_equal_fun(Mod, State), 
+    %% Note: Mod:is_equal() will see the current (FROZEN!) scrState()
+    process_events(Keys, Mod, State, ShouldLog, IsEqualFun, false).
 
--spec process_events(scrAnyKeys(), jobModule(), scrState(), boolean(), boolean()) -> 
+-spec process_events(scrAnyKeys(), jobModule(), scrState(), boolean(), fun(), boolean()) -> 
         {boolean(), scrState()}.
-process_events([], Mod, State, _ShouldLog, IsError) ->
+process_events([], Mod, State, _ShouldLog, _IsEqualFun, IsError) ->
     case erlang:function_exported(Mod, finalize_src_events, 1) of
         true -> execute_prov_fun(no_log, Mod, finalize_src_events, [State], false, IsError);
         false -> {IsError, State}
     end;
-process_events([Key | Keys], Mod, State, ShouldLog, IsError) ->
+process_events([Key | Keys], Mod, State, ShouldLog, IsEqualFun, IsError) ->
+    % Both values/KVPs are fetched again in order to avoid race conditions
     {NewIsError, NewState} = case {Mod:fetch_src(Key, State), Mod:fetch_dst(Key, State)} of
-        {S, S} ->                        %% nothing to do
+        {S, S} ->                               % exactly equal Erlang terms, nothing to do
             Mod:report_status(Key, no_op, State),
             {IsError, State};
-        {{protected, _}, ?NOT_FOUND} -> % pusher protection
+        {{protected, _}, ?NOT_FOUND} ->         % pusher protection
             ?JError("Protected ~p is not found on target", [Key]),
             Error = <<"Protected key is not found on target">>,
             Mod:report_status(Key, Error, State),
             dperl_dal:job_error(Key, <<"sync">>, <<"process_events">>, Error),
             {true, State};
-        {{protected, S}, D} ->          % pusher protection
+        {{protected, S}, D} ->                  % pusher protection
             execute_prov_fun("Protected", Mod, update_channel, [Key, true, S, D, State], ShouldLog, IsError, check);
-        {{protected, IsSamePlatform, S}, D} -> % puller protection
+        {{protected, IsSamePlatform, S}, D} ->  % puller protection
             execute_prov_fun("Protected", Mod, update_channel, [Key, IsSamePlatform, S, D, State], ShouldLog, IsError, check);
-        {?NOT_FOUND, _D} -> execute_prov_fun("Deleted", Mod, delete_dst, [Key, State], ShouldLog, IsError);
-        {S, ?NOT_FOUND} -> execute_prov_fun("Inserted", Mod, insert_dst, [Key, S, State], ShouldLog, IsError);
-        {error, _} -> {true, State};
-        {_, error} -> {true, State};
-        {{error, _} = Error, _} ->
+        {?NOT_FOUND, _D} ->                     % orphan 
+            execute_prov_fun("Deleted", Mod, delete_dst, [Key, State], ShouldLog, IsError);
+        {S, ?NOT_FOUND} ->                      % missing
+            execute_prov_fun("Inserted", Mod, insert_dst, [Key, S, State], ShouldLog, IsError);
+        {error, _} -> {true, State};            % src fetch error
+        {{error, _} = Error, _} ->              % src fetch {error, term()}
             ?JError("Fetch src ~p : ~p", [Key, Error]),
             Mod:report_status(Key, Error, State),
             {true, State};
-        {_, {error, _} = Error} ->
-            ?JError("Fetch dst ~p : ~p", [Key, Error]),
-            Mod:report_status(Key, Error, State),
-            {true, State};
-        {{error, Error, State1}, _} ->
+        {{error, Error, State1}, _} ->          % src fetch {error, term(), scrState()}
             ?JError("Fetch src ~p : ~p", [Key, Error]),
             Mod:report_status(Key, {error, Error}, State1),
             {true, State1};
-        {_, {error, Error, State1}} ->
+        {_, error} -> {true, State};            % dst fetch error
+        {_, {error, _} = Error} ->              % dst fetch {error, term()}
+            ?JError("Fetch dst ~p : ~p", [Key, Error]),
+            Mod:report_status(Key, Error, State),
+            {true, State};
+        {_, {error, Error, State1}} ->          % dst fetch {error, term(), scrState()}
             ?JError("Fetch dst ~p : ~p", [Key, Error]),
             Mod:report_status(Key, {error, Error}, State1),
             {true, State1};
-        {S, D} ->
-            DiffFun = case erlang:function_exported(Mod, is_equal, 4) of
-                true -> fun Mod:is_equal/4;
-                false -> fun is_equal/4
-            end,
-            case DiffFun(Key, S, D, State) of
-                false -> execute_prov_fun("Updated", Mod, update_dst, [Key, S, State], ShouldLog, IsError);
+        {S, D} ->                               % need to invoke is_equal()
+            case IsEqualFun(Key, S, D) of
+                false ->
+                    ?Info("process_events diff detected key=~p~n~p~n~p",[Key, S, D]), 
+                    execute_prov_fun("Updated", Mod, update_dst, [Key, S, State], ShouldLog, IsError);
                 true ->
                     Mod:report_status(Key, no_op, State),
                     {IsError, State}
             end
     end,
-    process_events(Keys, Mod, NewState, ShouldLog, NewIsError).
+    process_events(Keys, Mod, NewState, ShouldLog, IsEqualFun, NewIsError).
+
+-spec make_is_equal_fun(module(), scrState()) -> fun().
+make_is_equal_fun(Mod, State) ->
+    case erlang:function_exported(Mod, is_equal, 4) of
+        true -> fun(Key,S,D) -> Mod:is_equal(Key, S, D, State) end;
+        false -> fun(Key,S,D) -> is_equal(Key, S, D, State) end
+    end.
 
 -spec execute_prov_fun(scrOperation(), jobModule(), atom(), list(), boolean(), boolean()) -> 
         {scrSoftError(), scrState() | term()}.
@@ -770,7 +795,7 @@ execute_prov_fun(Op, Mod, Fun, Args, ShouldLog, IsError, check) ->
     end.
 
 -spec cleanup_refresh_collect(jobModule(), #cleanup_ctx{}, scrState()) ->
-    #{deletes => scrAnyKeyVals(), inserts => scrAnyKeyVals(), lastKey => scrAnyKeyVal()}.
+    {#{deletes => scrAnyKeyVals(), inserts => scrAnyKeyVals(), lastKey => scrAnyKeyVal()}, scrState()}.
 cleanup_refresh_collect(Mod, CleanupCtx, State) ->
     % note: Key used here in the sense of key-value-pair (KVP) where the value can itself
     % be structured (e.g. {Content::map(), Meta::map()} in Office365 contact sync)   
@@ -798,69 +823,96 @@ cleanup_refresh_collect(Mod, CleanupCtx, State) ->
             error({step_failed, State3});
         DKeys -> {DKeys, State2} % deprecated simple API which returns the kv-pairs only
     end,
-    {cleanup_refresh_compare(CleanupCtx#cleanup_ctx{ srcKeys=SrcKeys, srcCount=length(SrcKeys)
-                                                   , dstKeys=DstKeys, dstCount=length(DstKeys)
-                                                   , lastKey=CurKey}), State4}.
+    CpResult = cleanup_refresh_compare(
+        make_is_equal_fun(Mod, State), 
+        CleanupCtx#cleanup_ctx{ srcKeys=SrcKeys, srcCount=length(SrcKeys)
+                              , dstKeys=DstKeys, dstCount=length(DstKeys)
+                              , lastKey=CurKey}),
+    {CpResult, State4}.
 
--spec cleanup_refresh_compare(#cleanup_ctx{}) -> #{ deletes=>scrAnyKeys(), differences=>scrAnyKeys()
-                                                  , inserts=>scrAnyKeys(), lastKey=>scrAnyKey()}.
-cleanup_refresh_compare(#cleanup_ctx{ srcKeys=SrcKeys, dstKeys=[]
-                                    , deletes=Deletes,inserts=Inserts, differences=Diffs
-                                    , srcCount=SrcCount, dstCount=DstCount, bulkCount=BulkCnt
-                                    , minKey=MinKey})
+-spec cleanup_refresh_compare( fun(), #cleanup_ctx{}) -> #{ deletes=>scrAnyKeys()
+                                                          , differences=>scrAnyKeys()
+                                                          , inserts=>scrAnyKeys()
+                                                          , lastKey=>scrAnyKey()}.
+cleanup_refresh_compare(_, #cleanup_ctx{ srcKeys=SrcKeys, dstKeys=[]
+                                       , deletes=Deletes, inserts=Inserts, differences=Diffs
+                                       , srcCount=SrcCount, dstCount=DstCount, bulkCount=BulkCnt
+                                       , minKey=MinKey})
         when DstCount < BulkCnt, SrcCount < BulkCnt ->
-    Remaining = take_keys(SrcKeys),
+    Remaining = take_keys(SrcKeys),    % no more dstKeys and all srcKeys fetched -> end of cycle
     #{deletes=>Deletes, differences=>Diffs, inserts=>Inserts++Remaining, lastKey=>MinKey};
-cleanup_refresh_compare(#cleanup_ctx{ srcKeys=SrcKeys, dstKeys=[]
-                                    , deletes=Deletes, inserts=Inserts, differences=Diffs
-                                    , dstCount=DstCount})
+
+cleanup_refresh_compare(_, #cleanup_ctx{ srcKeys=SrcKeys, dstKeys=[]
+                                       , deletes=Deletes, inserts=Inserts, differences=Diffs
+                                       , dstCount=DstCount})
         when DstCount == 0 ->
-    Remaining = take_keys(SrcKeys),
+    Remaining = take_keys(SrcKeys),    % no dstKeys but more srcKeys -> another batch needed 
     #{deletes=>Deletes, differences=>Diffs, inserts=>Inserts++Remaining, lastKey=>last_key(SrcKeys)};
-cleanup_refresh_compare(#cleanup_ctx{ dstKeys=[]
-                                    , deletes=Deletes, inserts=Inserts, differences=Diffs
-                                    , lastKey=LK}) ->
+
+cleanup_refresh_compare(_, #cleanup_ctx{ dstKeys=[]
+                                       , deletes=Deletes, inserts=Inserts, differences=Diffs
+                                       , lastKey=LK}) ->
+                                       % no more data but not complete, another batch needed
     #{deletes=>Deletes, differences=>Diffs, inserts=>Inserts, lastKey=>LK};
-cleanup_refresh_compare(#cleanup_ctx{ srcKeys=[], dstKeys=DstKeys, minKey=MinKey
-                                    , deletes=Deletes, inserts=Inserts, differences=Diffs
-                                    , srcCount=SrcCount, dstCount=DstCount, bulkCount=BulkCnt})
+
+cleanup_refresh_compare(_, #cleanup_ctx{ srcKeys=[], dstKeys=DstKeys, minKey=MinKey
+                                       , deletes=Deletes, inserts=Inserts, differences=Diffs
+                                       , srcCount=SrcCount, dstCount=DstCount, bulkCount=BulkCnt})
         when SrcCount < BulkCnt, DstCount < BulkCnt ->
-    Remaining = take_keys(DstKeys),
+    Remaining = take_keys(DstKeys),    % no more srcKeys and all dstKeys fetched -> end of cycle
     #{deletes=>Deletes++Remaining, differences=>Diffs, inserts=>Inserts, lastKey=>MinKey};
-cleanup_refresh_compare(#cleanup_ctx{ srcKeys=[], dstKeys=DstKeys
-                                    , deletes=Deletes, inserts=Inserts, differences=Diffs
-                                    , srcCount=SrcCount}) 
+
+cleanup_refresh_compare(_, #cleanup_ctx{ srcKeys=[], dstKeys=DstKeys
+                                       , deletes=Deletes, inserts=Inserts, differences=Diffs
+                                       , srcCount=SrcCount}) 
         when SrcCount == 0 ->
-    Remaining = take_keys(DstKeys),
+    Remaining = take_keys(DstKeys),    % no srcKeys but more dstKeys -> another batch needed
     #{deletes=>Deletes++Remaining, differences=>Diffs, inserts=>Inserts, lastKey=>last_key(DstKeys)};
-cleanup_refresh_compare(#cleanup_ctx{ srcKeys=[]
-                                    , deletes=Deletes, inserts=Inserts, differences=Diffs
-                                    , lastKey=LK}) ->
+
+cleanup_refresh_compare(_, #cleanup_ctx{ srcKeys=[]
+                                       , deletes=Deletes, inserts=Inserts, differences=Diffs
+                                       , lastKey=LK}) ->
+                                       % no more data but not complete, another batch needed
     #{deletes=>Deletes, differences=>Diffs, inserts=>Inserts, lastKey=>LK};
-cleanup_refresh_compare(#cleanup_ctx{srcKeys=[K|SrcKeys], dstKeys=[K|DstKeys]} = CleanupCtx) ->
-    cleanup_refresh_compare(CleanupCtx#cleanup_ctx{ srcKeys=SrcKeys, dstKeys=DstKeys
-                                                  , lastKey=last_key([K])});
-cleanup_refresh_compare(#cleanup_ctx{ srcKeys=[{K, _}|SrcKeys], dstKeys=[{K, _}|DstKeys]
-                                    , differences=Diffs} = CleanupCtx) ->
-    cleanup_refresh_compare(CleanupCtx#cleanup_ctx{ srcKeys=SrcKeys, dstKeys=DstKeys
-                                                  , lastKey=K, differences=[K|Diffs]});
-cleanup_refresh_compare(#cleanup_ctx{ srcKeys=[SK|SrcKeys], dstKeys=[DK|DstKeys]
-                                    , inserts=Inserts, deletes=Deletes} = CleanupCtx) ->
-    case {last_key([SK]), last_key([DK])} of
-        {K1, K2} when K1 < K2 -> cleanup_refresh_compare(
+
+cleanup_refresh_compare(IE, #cleanup_ctx{srcKeys=[K|SrcKeys], dstKeys=[K|DstKeys]} = CleanupCtx) ->
+                                       % exact kv-match, no_diff, recurse one item forward
+    cleanup_refresh_compare(IE, CleanupCtx#cleanup_ctx{ srcKeys=SrcKeys, dstKeys=DstKeys
+                                                      , lastKey=last_key([K])});
+
+cleanup_refresh_compare(IE, #cleanup_ctx{ srcKeys=[{K,S}|SrcKeys], dstKeys=[{K,D}|DstKeys]
+                                        , differences=Diffs} = CleanupCtx) ->
+                                       % key match but no exact value match
+    case IE(K, {K,S}, {K,D}) of 
+        true ->                        % values compare equal -> recurse one item forward
+            cleanup_refresh_compare(IE, CleanupCtx#cleanup_ctx{ srcKeys=SrcKeys, dstKeys=DstKeys
+                                                              , lastKey=K, differences=Diffs});
+        false ->                       % values different -> add diff and recurse one item forward
+            cleanup_refresh_compare(IE, CleanupCtx#cleanup_ctx{ srcKeys=SrcKeys, dstKeys=DstKeys
+                                                              , lastKey=K, differences=[K|Diffs]})
+    end;
+
+cleanup_refresh_compare(IE, #cleanup_ctx{ srcKeys=[SK|SrcKeys], dstKeys=[DK|DstKeys]
+                                        , inserts=Inserts, deletes=Deletes} = CleanupCtx) ->
+                                       % keys are different, compare keys
+    K1 = take_key(SK), 
+    K2 = take_key(DK),
+    if 
+        K1 < K2 -> cleanup_refresh_compare(IE,
             CleanupCtx#cleanup_ctx{srcKeys=SrcKeys, inserts=[K1|Inserts], lastKey=K1});
-        {K1, K2} when K2 < K1 -> cleanup_refresh_compare(
+        K2 < K1 -> cleanup_refresh_compare(IE,
             CleanupCtx#cleanup_ctx{dstKeys=DstKeys, deletes=[K2|Deletes], lastKey=K2})
     end.
 
+-spec take_key(scrAnyKey()|scrAnyKeyVal()) -> scrAnyKey().
+take_key({K, _}) -> K;
+take_key(K) ->      K.
+
 -spec take_keys(scrAnyKeys()|scrAnyKeyVals()) -> scrAnyKeys().
-take_keys([]) -> [];
-take_keys([{_, _} | _] = KVs) -> [K || {K, _} <- KVs];
-take_keys(Keys) -> Keys.
+take_keys(KVs) -> [take_key(KV) || KV <- KVs].
 
 -spec last_key(scrAnyKeys()|scrAnyKeyVals()) -> scrAnyKey().
-last_key([{_, _} | _] = KVs) -> element(1, lists:last(KVs));
-last_key(Keys) -> lists:last(Keys).
+last_key(KVs) -> take_key(lists:last(KVs)).
 
 %% ----------------------
 %% Eunit Tests

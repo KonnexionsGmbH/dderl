@@ -151,6 +151,9 @@
         , insert_dst/3
         , update_dst/3
         , report_status/3
+        , is_equal/4
+        , read_local_kvps_after_id/5
+        , get_next_id_key/4
         ]).
 
 % dderl_oauth exports
@@ -160,6 +163,7 @@
         , get_auth_token_key_prefix/1
         , get_key_prefix/0
         , get_key_prefix/1
+        , get_local_key/4
         ]).
 
 -spec get_auth_config() -> map().
@@ -196,6 +200,15 @@ get_local_key(Id, _Name, Channel, KeyPrefix) ->
         [Key] ->    Key     % ToDo: Check/filter with META key = Name
     end.
 
+-spec get_next_id_key(remKey(), jobName(), scrChannel(), locKey()) -> {remKey(), locKey()} | ?NOT_FOUND.
+get_next_id_key(Id, _Name, Channel, KeyPrefix) ->
+    Stu = {?CONTACT_INDEXID,Id}, 
+    case dperl_dal:next_channel_index_key_prefix(Channel, Stu, KeyPrefix) of 
+        [] ->                   ?NOT_FOUND;
+        [{NextId, NextKey}] ->  {NextId, NextKey}     % ToDo: Check/filter with META key = Name
+    end.
+
+
 % convert list of remote values (already maps) to list of {Key,RemoteId,RemoteValue} triples
 % which serves as a lookup buffer of the complete remote state, avoiding sorting issues
 % -spec format_remote_values_to_kv(remVal(), locKey(), jobName()) -> remVal(). 
@@ -207,6 +220,13 @@ get_local_key(Id, _Name, Channel, KeyPrefix) ->
 %     #{<<"id">> := RemoteId} = Value,        
 %     Key = KeyPrefix ++ [new_local_id(RemoteId)],
 %     format_remote_values_to_kv(Values, KeyPrefix, JobName, [{Key,RemoteId,format_value(Value, JobName)}|Acc]).
+
+-spec is_equal(remKVP()|locKVP(), {remVal(), remMeta()}, {locVal(), locMeta()}, #state{}) -> boolean().
+is_equal(_, {Val,_}, {Val,_}, _State) -> true;
+is_equal(_, {_,_}, {_,_}, _State) -> false;
+is_equal(KVP, Val1, Val2, _State) -> 
+    ?Info("is_equal unexpected input ~p~n~p~n~p",[KVP, Val1, Val2]),
+    false.
 
 % format remote value into a special KV pair with seperated contact- and meta-maps
 % by projecting out syncable attributes(content / meta)
@@ -273,6 +293,7 @@ fetch_src(Id, #state{name=Name, type=pull, apiUrl=ApiUrl, token=Token} = State) 
     ?JTrace("Fetching contact with url : ~s", [ContactUrl]),
     case exec_req(ContactUrl, Token) of
         {error, unauthorized} ->        reconnect_exec(State, fetch_src, [Id]);
+        {error, ?NOT_FOUND} ->          ?NOT_FOUND;
         {error, Error} ->               {error, Error, State};
         #{<<"id">> := _} = RemVal ->    remote_kvp(RemVal, Name);
         _ ->                            ?NOT_FOUND
@@ -402,7 +423,7 @@ delete_dst(Id, #state{ name=Name, channel=Channel, keyPrefix=KeyPrefix
         ?NOT_FOUND ->           
             {true, state};
         {Id, {Value, Meta}} ->
-            case maps:without(Name, Meta) of 
+            case maps:without([Name], Meta) of 
                 #{} ->      % no other syncs remaining for this key
                     dperl_dal:remove_from_channel(Channel, Key),
                     {false, State};
@@ -422,20 +443,23 @@ report_status(_Key, _Status, _State) -> no_op.
 
 -spec load_dst_after_key(remKVP() | locKVP(), scrBatchSize(), #state{}) -> {ok, locKVPs(), #state{}} | {error, term(), #state{}}.
 load_dst_after_key({Id,{_,_}}, BlkCount, #state{name=Name, channel=Channel, type=pull, keyPrefix=KeyPrefix}) ->
-    {ok, read_local_kvps_after_id(Channel, Name, KeyPrefix, Id, BlkCount, [])};
+    {ok, read_local_kvps_after_id(Channel, Name, KeyPrefix, Id, BlkCount)};
 load_dst_after_key(_Key, BlkCount, #state{name=Name, channel=Channel, type=pull, keyPrefix=KeyPrefix} = State) ->
     ?Info("load_dst_after_key for non-matching (initial) key ~p", [_Key]),
-    case read_local_kvps_after_id(Channel, Name, KeyPrefix, ?COMPARE_MIN_KEY, BlkCount, []) of 
+    case read_local_kvps_after_id(Channel, Name, KeyPrefix, ?COMPARE_MIN_KEY, BlkCount) of 
         L when is_list(L) ->    {ok, L, State};
         {error, Reason} ->      {error, Reason, State}
     end.
 
 %% starting after Id, run through remoteId index and collect a block of locKVP() data belonging to 
 %% this job name and keyPrefix 
--spec read_local_kvps_after_id(scrChannel(), jobName(), locKey(), remKey(), scrBatchSize(), locKVPs()) -> locKVPs() | {error, term()}.
-read_local_kvps_after_id(_Channel, _Name, _KeyPrefix, _Id, _BlkCount, _Acc) ->
-    % lists:prefix(KeyPrefix,K)
-    [].
+-spec read_local_kvps_after_id(scrChannel(), jobName(), locKey(), remKey(), scrBatchSize()) -> locKVPs() | {error, term()}.
+read_local_kvps_after_id(Channel, Name, KeyPrefix, SeenId, BlkCount) ->
+    Stu = {?CONTACT_INDEXID, SeenId}, % last visited index key, get next BlkCount {Id, Value} tuples
+    case dperl_dal:read_channel_index_key_prefix_gt(Channel, Stu, KeyPrefix, BlkCount) of 
+        [] ->       [];
+        LocKeys ->  [local_kvp(Id, dperl_dal:read_channel(Channel, Key), Name) || {Id,Key} <- LocKeys]   
+    end.
 
 -spec load_src_after_key(remKVP()| locKVP(), scrBatchSize(), #state{}) -> 
         {ok, remKVPs(), #state{}} | {error, term(), #state{}}.
@@ -560,6 +584,8 @@ exec_req(Url, Token) ->
             imem_json:decode(list_to_binary(Result), [return_maps]);
         {ok, {{_, 401, _}, _, _}} ->
             {error, unauthorized};
+        {ok, {{_, 404, _}, _, _}} ->
+            {error, ?NOT_FOUND};
         {error, Reason} ->
             ?Info("exec_req get ~p returns error ~p",[Url,Reason]),
             {error, Reason}
@@ -581,12 +607,14 @@ exec_req(Url, Token, Body, Method) ->
         {ok, {{_, 200, _}, _, Result}} ->
             % update/patch result
             imem_json:decode(list_to_binary(Result), [return_maps]);
-        {ok,{{_, 204, _}, _, _}} ->
+        {ok, {{_, 204, _}, _, _}} ->
             % delete result
             ok;
         {ok, {{_, 401, _}, _, Error}} ->
             ?JError("Unauthorized body : ~s", [Error]),
             {error, unauthorized};
+        {ok, {{_, 404, _}, _, _}} ->
+            {error, ?NOT_FOUND};
         Error ->
             {error, Error}
     end.

@@ -72,6 +72,7 @@
         ,read_channel_index/2
         ,read_channel_index_key/2
         ,read_channel_index_key_prefix/3
+        ,read_channel_index_key_prefix_gt/4
         ]).
 
 check_table(Table, ColumnNames, ColumnTypes, DefaultRecord, Opts) ->
@@ -153,6 +154,27 @@ read_channel_index_key(Channel, Stu) ->
 read_channel_index_key_prefix(Channel, Stu, Prefix) ->
     F = fun(X) -> lists:prefix(Prefix,X) end,
     lists:filter(F, read_channel_index_key(Channel, Stu)).
+
+read_channel_index_key_prefix_gt(Channel, Stu, KeyPrefix, BlkCount) ->
+    read_channel_index_key_prefix_gt(imem_meta:index_table(Channel), Stu, KeyPrefix, BlkCount, []).
+
+read_channel_index_key_prefix_gt(_IndexTable, _Stu, _KeyPrefix, 0, Acc) -> lists:reverse(Acc);
+read_channel_index_key_prefix_gt(IndexTable, Stu, KeyPrefix, More, Acc) ->
+    case imem_meta:dirty_next(IndexTable, Stu) of 
+        '$end_of_table' ->  
+            lists:reverse(Acc);
+        Next ->
+            [Row] = imem_meta:read(IndexTable, Next), 
+            Key = sext:decode(Row#ddIndex.lnk),
+            case lists:prefix(KeyPrefix, Key) of 
+                true ->
+                    read_channel_index_key_prefix_gt( IndexTable, Next, KeyPrefix, 
+                                                      More-1, [{element(2,Next),Key}|Acc]);
+                false ->
+                    read_channel_index_key_prefix_gt( IndexTable, Next, KeyPrefix, 
+                                                      More, Acc)
+            end
+    end.
 
 read_channel_raw(Channel, Key) when is_list(Channel) ->
     read_channel_raw(list_to_binary(Channel), Key);
