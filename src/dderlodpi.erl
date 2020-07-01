@@ -939,13 +939,14 @@ get_column_info(Stmt, ColIdx, Limit) ->
     [QueryInfo2 | get_column_info(Stmt, ColIdx + 1, Limit)].
 
 dpi_fetch_rows( #odpi_conn{node = Node, connection = Conn}, Statement, BlockSize) ->
-    dpi:safe(Node, fun() -> get_rows_prepare(Conn, Statement, BlockSize, []) end).
+    LobSize = ?GET_CONFIG(odpiLobSize,[],4000,"Size of LOB objects in ODPI"),
+    dpi:safe(Node, fun() -> get_rows_prepare(Conn, Statement, BlockSize, [], LobSize) end).
 
 %% initalizes things that need to be done before getting the rows
 %% it finds out how many columns they are and what types all those columns are
 %% then it makes and defines dpiVars for every column where it's necessary because stmt_getQueryValue() can't be used for those cols
 %% and calls get_rows to fetch all the results of the query
-get_rows_prepare(Conn, Stmt, NRows, Acc)->
+get_rows_prepare(Conn, Stmt, NRows, Acc, LobSize)->
     NumCols = dpi:stmt_getNumQueryColumns(Stmt),    % get number of cols returned by the Stmt
     Types = [
         begin
@@ -967,14 +968,14 @@ get_rows_prepare(Conn, Stmt, NRows, Acc)->
                         ok = dpi:stmt_define(Stmt, Col, Var),    %% results will be fetched to the vars and go into the data
                         {Var, Datas, OraType}; % put the variable and its data list into a tuple
                     'DPI_NATIVE_TYPE_LOB' ->
-                        #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_LOB', 100, 4000, false, false, null),
+                        #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_LOB', 100, LobSize, false, false, null),
                         ok = dpi:stmt_define(Stmt, Col, Var),    %% results will be fetched to the vars and go into the data
                         {Var, Datas, OraType}; % put the variable and its data list into a tuple
                     _else -> {noVariable, OraType} % when no variable needs to be made for the type, just put an atom signlizing that no variable was made and stmt_getQueryValue() can be used to get the values
                 end
             end
             || {OraType, NativeType, Col} <- Types], % make a list of {Var, Datas} tuples. Var is the dpiVar handle, Datas is the list of Data handles in that respective Var  
-R = get_rows(Conn, Stmt, NRows, Acc, VarsDatas), % gets all the results from the query
+R = get_rows(Conn, Stmt, NRows, Acc, VarsDatas, LobSize), % gets all the results from the query
     [begin
         case VarDatas of {noVariable, _OraType} -> nop; % if no variable was made, then nothing needs to be done here
             {Var, Datas, _OraType} -> % if there is a variable (which was made to fetch a double as a binary)
@@ -985,27 +986,27 @@ R = get_rows(Conn, Stmt, NRows, Acc, VarsDatas), % gets all the results from the
 R. % return query results
 
 %% this recursive function fetches all the rows. It does so by calling yet another recursive function that fetches all the fields in a row.
-get_rows(_Conn, _, 0, Acc, _VarsDatas) ->  {lists:reverse(Acc), false};
-get_rows(Conn, Stmt, NRows, Acc, VarsDatas) ->
+get_rows(_Conn, _, 0, Acc, _VarsDatas, _LobSize) ->  {lists:reverse(Acc), false};
+get_rows(Conn, Stmt, NRows, Acc, VarsDatas, LobSize) ->
     case dpi:stmt_fetch(Stmt) of % try to fetch a row
         #{found := true} -> % got a row: get the values in that row and then do the recursive call to try to get another row
-            get_rows(Conn, Stmt, NRows -1, [get_column_values(Conn, Stmt, 1, VarsDatas, length(Acc)+1) | Acc], VarsDatas); % recursive call
+            get_rows(Conn, Stmt, NRows -1, [get_column_values(Conn, Stmt, 1, VarsDatas, length(Acc)+1, LobSize) | Acc], VarsDatas, LobSize); % recursive call
         #{found := false} -> % no more rows: that was all of them
             {lists:reverse(Acc), true} % reverse the list so it's in the right order again after it was pieced together the other way around
     end.
 
 %% get all the fields in one row
-get_column_values(_Conn, _Stmt, ColIdx, VarsDatas, _RowIndex) when ColIdx > length(VarsDatas) -> [];
-get_column_values(Conn, Stmt, ColIdx, VarsDatas, RowIndex) ->
+get_column_values(_Conn, _Stmt, ColIdx, VarsDatas, _RowIndex, _LobSize) when ColIdx > length(VarsDatas) -> [];
+get_column_values(Conn, Stmt, ColIdx, VarsDatas, RowIndex, LobSize) ->
     case lists:nth(ColIdx, VarsDatas) of % get the entry that is either a {Var, Datas} tuple or noVariable if no variable was made for this column
         {_Var, Datas, OraType} -> % if a variable was made for this column: the value was fetched into the variable's data object, so get it from there
             Value = dpi:data_get(lists:nth(RowIndex, Datas)), % get the value out of that data variable
             ValueFixed = case OraType of % depending on the ora type, the value might have to be changed into a different format so it displays properly
-                'DPI_ORACLE_TYPE_BLOB' -> list_to_binary(lists:flatten([io_lib:format("~2.16.0B", [X]) || X <- binary_to_list(dpi:lob_readBytes(Value, 1, 4000))])); % turn binary to hex string
-                'DPI_ORACLE_TYPE_CLOB' -> dpi:lob_readBytes(Value, 1, 4000);
+                'DPI_ORACLE_TYPE_BLOB' -> list_to_binary(lists:flatten([io_lib:format("~2.16.0B", [X]) || X <- binary_to_list(dpi:lob_readBytes(Value, 1, LobSize))])); % turn binary to hex string
+                'DPI_ORACLE_TYPE_CLOB' -> dpi:lob_readBytes(Value, 1, LobSize);
             _Else -> Value end, % the value is already in the correct format for most types, so do nothing
 
-            [ValueFixed | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas, RowIndex)]; % recursive call
+            [ValueFixed | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas, RowIndex, LobSize)]; % recursive call
         {noVariable, OraType} -> % if no variable has been made then that means that the value can be fetched with stmt_getQueryValue()
             #{data := Data} = dpi:stmt_getQueryValue(Stmt, ColIdx), % get the value 
             Value = dpi:data_get(Data), % take the value from this freshly made data
@@ -1013,7 +1014,7 @@ get_column_values(Conn, Stmt, ColIdx, VarsDatas, RowIndex) ->
             ValueFixed = case OraType of % some types may require additional casting/unmarshalling
                 'DPI_ORACLE_TYPE_LONG_VARCHAR' -> list_to_binary(lists:flatten([io_lib:format("~2.16.0B", [X]) || X <- binary_to_list(Value)])); % turn binary into hex representation of binary
                 _Else -> Value end, % value doesn't need any converting
-            [ValueFixed | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas, RowIndex)]; % recursive call
+            [ValueFixed | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas, RowIndex, LobSize)]; % recursive call
         Else ->
             ?Error("Invalid variable term of ~p", [Else])
     end.
