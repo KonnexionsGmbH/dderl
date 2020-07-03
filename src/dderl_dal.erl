@@ -84,13 +84,13 @@ del_conn(Sess, UserId, ConId) ->
     HasAll = (erlimem_session:run_cmd(Sess, have_permission, [[?MANAGE_CONNS]]) == true),
     if HasAll ->
         ok = erlimem_session:run_cmd(Sess, delete, [ddConn, ConId]),
-        ?Info("user ~p deleted connection ~p", [UserId, ConId]),
+        %?Info("user ~p deleted connection ~p", [UserId, ConId]),
         ok;
     true ->
         case erlimem_session:run_cmd(Sess, select, [ddConn, [{#ddConn{id=ConId,owner=UserId,_='_'},[],['$_']}]]) of
             {[_|_], true} ->
                 ok = erlimem_session:run_cmd(Sess, delete, [ddConn, ConId]),
-                ?Info("user ~p deleted connection ~p", [UserId, ConId]),
+                %?Info("user ~p deleted connection ~p", [UserId, ConId]),
                 ok;
             _ ->
                 ?Error("user ~p doesn't have permission to delete connection ~p", [UserId, ConId]),

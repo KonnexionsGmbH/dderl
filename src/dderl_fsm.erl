@@ -333,7 +333,7 @@ rows(Pid, {StmtRef, {Rows,Completed}}) when is_list(Rows) ->  % from erlimem/ime
     %?Info("dderl_fsm:rows from ~p ~p~n~p", [StmtRef, length(Rows), Rows]),
     gen_statem:cast(Pid, {rows, {StmtRef,Rows,Completed}});
 rows(Pid, {Rows,Completed}) when is_list(Rows) ->
-    %?Info("dderl_fsm:rows ~p ~p", [length(Rows), Completed]),
+    ?Info("dderl_fsm:rows ~p ~p", [length(Rows), Completed]),
     gen_statem:cast(Pid, {rows, {self(),Rows,Completed}});
 rows(Pid, {StmtRef, Error}) ->   % from erlimem/imem_server
     %?Info("dderl_fsm:rows from ~p ~p", [StmtRef, Error]),

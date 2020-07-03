@@ -708,6 +708,8 @@ process_events([], Mod, State, _ShouldLog, _IsEqualFun, IsError) ->
     end;
 process_events([Key | Keys], Mod, State, ShouldLog, IsEqualFun, IsError) ->
     % Both values/KVPs are fetched again in order to avoid race conditions
+    %?Info("Difference src: ~p", [Mod:fetch_src(Key, State)]),
+    %?Info("Difference dst: ~p", [Mod:fetch_dst(Key, State)]),
     {NewIsError, NewState} = case {Mod:fetch_src(Key, State), Mod:fetch_dst(Key, State)} of
         {S, S} ->                               % exactly equal Erlang terms, nothing to do
             Mod:report_status(Key, no_op, State),

@@ -93,6 +93,7 @@ sql_params(Sql, Types) ->
 
 -spec process_cmd({[binary()], [{binary(), list()}]}, atom(), {atom(), pid()}, ddEntityId(), pid(), term()) -> term().
 process_cmd({[<<"parse_stmt">>], ReqBody}, Adapter, _Sess, _UserId, From, _Priv) ->
+    %?Info("spawn_process_cmd Adapter=~p ReqBody=~p", [Adapter, ReqBody]),
     [{<<"parse_stmt">>,BodyJson}] = ReqBody,
     Sql = string:strip(binary_to_list(proplists:get_value(<<"qstr">>, BodyJson, <<>>))),
     if
@@ -224,7 +225,7 @@ process_cmd({[<<"view_op">>], ReqBody}, _Adapter, Sess, _UserId, From, _Priv) ->
     [{<<"view_op">>,BodyJson}] = ReqBody,
     Operation = string:to_lower(binary_to_list(proplists:get_value(<<"operation">>, BodyJson, <<>>))),
     ViewId = proplists:get_value(<<"view_id">>, BodyJson),
-    ?Info("view_op ~s for ~p", [Operation, ViewId]),
+    %?Info("view_op ~s for ~p", [Operation, ViewId]),
     Res = case Operation of
         "rename" ->
             Name = proplists:get_value(<<"newname">>, BodyJson, <<>>),
@@ -254,7 +255,7 @@ process_cmd({[<<"update_view">>], ReqBody}, Adapter, Sess, UserId, From, _Priv) 
     TableLay = proplists:get_value(<<"table_layout">>, BodyJson, []),
     ColumLay = proplists:get_value(<<"column_layout">>, BodyJson, []),
     ViewId = proplists:get_value(<<"view_id">>, BodyJson),
-    ?Info("update view ~s with id ~p layout ~p", [Name, ViewId, TableLay]),
+    %?Info("update view ~s with id ~p layout ~p", [Name, ViewId, TableLay]),
     ViewState = #viewstate{table_layout=TableLay, column_layout=ColumLay},
     if
         %% System tables can't be overriden.
@@ -540,7 +541,8 @@ process_query(Query, Connection, Params, SessPid) ->
 
 -spec term_diff(list(), term(), pid(), pid()) -> term().
 term_diff(BodyJson, Sess, SessPid, From) ->
-    ?Debug("Term diff called with args: ~p", [BodyJson]),
+    %?Info("term_diff called with args: ~p", [BodyJson]),
+    %?Info("term_diff called with Sess ~p SessPid ~p", [Sess, SessPid]),
     Statement = binary_to_term(base64:decode(proplists:get_value(<<"statement">>, BodyJson, <<>>))),
     {LeftType, LeftValue} = get_cell_value(proplists:get_value(<<"left">>, BodyJson, 0), Statement),
     {RightType, RightValue} = get_cell_value(proplists:get_value(<<"right">>, BodyJson, 0), Statement),

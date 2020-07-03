@@ -44,7 +44,7 @@
              ,client_secret => "12345"
              ,grant_type => "authorization_code"
              ,token_url => "https://login.microsoftonline.com/common/oauth2/v2.0/token"
-             ,scope => "offline_access https://graph.microsoft.com/people.read"
+             ,scope => "offline_access https://graph.microsoft.com/Contacts.ReadWrite"
              },
             "Office 365 (Graph API) auth config"
             )
@@ -97,9 +97,9 @@
             ?GET_CONFIG(metaAttributes,
             [__JOB_NAME],
             [<<"id">>
-            %,<<"lastModifiedDateTime">>
-            %,<<"changeKey">>
-            %,<<"parentFolderId">>
+            ,<<"lastModifiedDateTime">>
+            ,<<"changeKey">>
+            ,<<"parentFolderId">>
             %,<<"createdDateTime">>
             ], 
             "Meta attributes used for Office365 contact change tracking"
@@ -128,7 +128,8 @@
                     , token                     :: token()          % access token binary
                     , apiUrl                    :: string()
                     , fetchUrl                  :: string()
-                    , cycleBuffer = []          :: remKVPs() | remKVPs() % dirty buffer for one c/r cycle
+                    , remCache = []             :: remKVPs()        % filled at start of c/r cycle
+                    , clBuffer = []             :: remKVPs() | remKVPs() % dirty buffer for one c/r cycle
                     , isConnected = true        :: boolean()        % fail unauthorized on first use
                     , isFirstSync = true        :: boolean()
                     , isCleanupFinished = true  :: boolean()
@@ -222,7 +223,7 @@ get_next_id_key(Id, _Name, Channel, KeyPrefix) ->
 %     format_remote_values_to_kv(Values, KeyPrefix, JobName, [{Key,RemoteId,format_value(Value, JobName)}|Acc]).
 
 -spec is_equal(remKVP()|locKVP(), {remVal(), remMeta()}, {locVal(), locMeta()}, #state{}) -> boolean().
-is_equal(_, {Val,_}, {Val,_}, _State) -> true;
+is_equal(_, {Val,Meta}, {Val,Meta}, _State) -> true; % both must match, want to update meta too
 is_equal(_, {_,_}, {_,_}, _State) -> false;
 is_equal(KVP, Val1, Val2, _State) -> 
     ?Info("is_equal unexpected input ~p~n~p~n~p",[KVP, Val1, Val2]),
@@ -274,11 +275,11 @@ connect_check_src(#state{isConnected=false, type=pull, accountId=AccountId, toke
 %             UniqueKeys = lists:delete(undefined, lists:usort(Keys)),
 %             {ok, UniqueKeys, State#state{auditStartTime=NextStartTime}}
 %     end;
-get_source_events(#state{cycleBuffer=[]} = State, _BulkSize) ->
+get_source_events(#state{clBuffer=[]} = State, _BulkSize) ->
     {ok, sync_complete, State};
-get_source_events(#state{cycleBuffer=CycleBuffer} = State, _BulkSize) ->
-    ?Info("get_source_events result count ~p~n~p",[length(CycleBuffer), hd(CycleBuffer)]),
-    {ok, CycleBuffer, State#state{cycleBuffer=[]}}.
+get_source_events(#state{clBuffer=ClBuffer} = State, _BulkSize) ->
+    %?Info("get_source_events result count ~p~n~p",[length(ClBuffer), hd(ClBuffer)]),
+    {ok, ClBuffer, State#state{clBuffer=[]}}.
 
 - spec connect_check_dst(#state{}) -> {ok, #state{}}. % | {error, term()} | {error, term(), #state{}}
 connect_check_dst(State) -> {ok, State}.    % ToDo: Maybe implement for push destination?
@@ -291,11 +292,14 @@ do_refresh(_State, _BulkSize) -> {error, cleanup_only}. % using cleanup/refresh 
 fetch_src(Id, #state{name=Name, type=pull, apiUrl=ApiUrl, token=Token} = State) -> 
     ContactUrl = ApiUrl ++ binary_to_list(Id),
     ?JTrace("Fetching contact with url : ~s", [ContactUrl]),
+    %?Info("Fetching contact with url : ~s", [ContactUrl]),
     case exec_req(ContactUrl, Token) of
         {error, unauthorized} ->        reconnect_exec(State, fetch_src, [Id]);
         {error, ?NOT_FOUND} ->          ?NOT_FOUND;
         {error, Error} ->               {error, Error, State};
-        #{<<"id">> := _} = RemVal ->    remote_kvp(RemVal, Name);
+        #{<<"id">> := _} = RemVal ->    
+            %?Info("Fetched contact ~p   ", [RemVal]),
+            remote_kvp(RemVal, Name);
         _ ->                            ?NOT_FOUND
     end.
 
@@ -331,7 +335,7 @@ fetch_dst(Id, #state{name=Name, channel=Channel, keyPrefix=KeyPrefix, type=pull}
 insert_dst(Id, {Id, {Value,Meta}}, #state{ name=Name, channel=Channel, type=pull
                                    , keyPrefix=KeyPrefix, template=Template} = State) ->
     Key = KeyPrefix ++ [new_local_id(Id)],
-    ?Info("insert_dst ~p",[Key]),
+    %?Info("insert_dst ~p",[Key]),
     MergedValue = maps:merge(maps:merge(Template, Value), #{<<"META">> => #{Name=>Meta}}),
     MergedBin = imem_json:encode(MergedValue), 
     case dperl_dal:write_channel(Channel, Key, MergedBin) of 
@@ -367,7 +371,7 @@ insert_dst(Id, {Id, {Value,Meta}}, #state{ name=Name, channel=Channel, type=pull
 update_dst(Id, {Id, {Value,Meta}}, #state{ name=Name, channel=Channel, keyPrefix=KeyPrefix
                                          , type=pull, template=Template} = State) ->
     Key = get_local_key(Id, Name, Channel, KeyPrefix),
-    ?Info("update_dst ~p",[Key]),
+    %?Info("update_dst ~p",[Key]),
     case dperl_dal:read_channel(Channel, Key) of
         ?NOT_FOUND ->   
             ?JError("update_dst key ~p not found for remote id ~p", [Key, Id]),
@@ -418,7 +422,7 @@ update_local(Channel, Key, _OldVal, NewVal, NewMeta) ->
 delete_dst(Id, #state{ name=Name, channel=Channel, keyPrefix=KeyPrefix
                      , type=pull, template=Template} = State) ->
     Key = get_local_key(Id, Name, Channel, KeyPrefix),
-    ?Info("delete_dst ~p",[Key]),
+    %?Info("delete_dst ~p",[Key]),
     case fetch_dst(Id, State) of 
         ?NOT_FOUND ->           
             {true, state};
@@ -445,7 +449,7 @@ report_status(_Key, _Status, _State) -> no_op.
 load_dst_after_key({Id,{_,_}}, BlkCount, #state{name=Name, channel=Channel, type=pull, keyPrefix=KeyPrefix}) ->
     {ok, read_local_kvps_after_id(Channel, Name, KeyPrefix, Id, BlkCount)};
 load_dst_after_key(_Key, BlkCount, #state{name=Name, channel=Channel, type=pull, keyPrefix=KeyPrefix} = State) ->
-    ?Info("load_dst_after_key for non-matching (initial) key ~p", [_Key]),
+    %?Info("load_dst_after_key for non-matching (initial) key ~p", [_Key]),
     case read_local_kvps_after_id(Channel, Name, KeyPrefix, ?COMPARE_MIN_KEY, BlkCount) of 
         L when is_list(L) ->    {ok, L, State};
         {error, Reason} ->      {error, Reason, State}
@@ -463,27 +467,39 @@ read_local_kvps_after_id(Channel, Name, KeyPrefix, SeenId, BlkCount) ->
 
 -spec load_src_after_key(remKVP()| locKVP(), scrBatchSize(), #state{}) -> 
         {ok, remKVPs(), #state{}} | {error, term(), #state{}}.
-load_src_after_key(_CurKVP, _BlkCount, #state{type=pull, fetchUrl=finished} = State) ->
+load_src_after_key(_CurKVP, _BlkCount, #state{type=pull, fetchUrl=cached, remCache=[]} = State) ->
     {ok, [], State};
+load_src_after_key(CurKVP, BlkCount, #state{type=pull, fetchUrl=cached, remCache=RemCache} = State) ->
+    case element(1, hd(RemCache)) of 
+        SmallKey when SmallKey =< CurKVP -> 
+            {error, cannot_serve_smaller_key, State};
+        _  when length(RemCache) > BlkCount ->
+            {Serve,Keep} = lists:split(RemCache, BlkCount),   
+            {ok, Serve, State#state{remCache=Keep}};
+        _ ->
+            {ok, RemCache, State#state{remCache=[]}}
+    end;
 load_src_after_key(CurKVP, BlkCount, #state{type=pull, fetchUrl=undefined, apiUrl=ApiUrl} = State) ->
-    UrlParams = dperl_dal:url_enc_params(#{"$top" => integer_to_list(BlkCount)}),
-    ContactsUrl = lists:flatten([ApiUrl, "?", UrlParams]),
-    load_src_after_key(CurKVP, BlkCount, State#state{fetchUrl=ContactsUrl});
-load_src_after_key(CurKVP, BlkCount, #state{ name=Name, type=pull, token=Token
-                                           , fetchUrl=FetchUrl} = State) ->
+    UrlParams = dperl_dal:url_enc_params(#{"$top" => integer_to_list(BlkCount)}), % , "$select" => "id"
+    FetchUrl = lists:flatten([ApiUrl, "?", UrlParams]),
     ?JTrace("Fetching contacts with url : ~s", [FetchUrl]),
+    load_src_after_key(CurKVP, BlkCount, State#state{fetchUrl=FetchUrl, remCache=[]});
+load_src_after_key(CurKVP, BlkCount, #state{ name=Name, type=pull, token=Token
+                                           , fetchUrl=FetchUrl, remCache=RemCache} = State) ->
     case exec_req(FetchUrl, Token) of
         {error, unauthorized} ->    reconnect_exec(State, load_src_after_key, [CurKVP, BlkCount]);
         {error, Error} ->           {error, Error, State};
         #{<<"@odata.nextLink">> := NextUrl, <<"value">> := RemVals} ->
             KVPs = [remote_kvp(RemVal, Name) || RemVal <- RemVals],
             ?JTrace("Fetched contacts : ~p", [length(KVPs)]),
-            %?Info("First fetched contact : ~p", [element(1,hd(KVPs))]),
-            {ok, KVPs, State#state{fetchUrl=NextUrl}};
+            load_src_after_key( CurKVP, BlkCount, 
+                                State#state{ fetchUrl=NextUrl, remCache=[KVPs|RemCache]});
         #{<<"value">> := RemVals} ->        % may be an empty list
             KVPs = [remote_kvp(RemVal, Name) || RemVal <- RemVals],
             ?JTrace("Last fetched contacts : ~p", [length(KVPs)]),
-            {ok, KVPs, State#state{fetchUrl=finished}}
+            SortedRemKVPs = lists:keysort(1, lists:append(RemCache, KVPs)),
+            load_src_after_key( CurKVP, BlkCount, 
+                                State#state{ fetchUrl=cached, remCache=SortedRemKVPs})
     end.
 
 -spec reconnect_exec(#state{}, fun(), list()) -> 
@@ -498,7 +514,7 @@ reconnect_exec(State, Fun, Args) ->
 -spec do_cleanup(remKeys(), remKeys(), remKeys(), boolean(), #state{}) -> 
         {ok, #state{}} | {ok, finish, #state{}} . 
 do_cleanup(Deletes, Inserts, Diffs, IsFinished, #state{type=pull} = State) ->
-    NewState = State#state{cycleBuffer=Deletes++Diffs++Inserts},
+    NewState = State#state{clBuffer=Deletes++Diffs++Inserts},
     if 
         IsFinished ->
             %% deposit cleanup batch dirty results in state for sync to pick up
@@ -578,7 +594,8 @@ terminate(Reason, _State) ->
 %% use OAuth2 header with token
 -spec exec_req(string(), binary()) -> map() | {error, term()}.
 exec_req(Url, Token) ->
-    AuthHeader = [{"Authorization", "Bearer " ++ binary_to_list(Token)}],
+    AuthHeader = [ {"Authorization", "Bearer " ++ binary_to_list(Token)}
+                 , {"Prefer","IdType=\"ImmutableId\""}],
     case httpc:request(get, {Url, AuthHeader}, [], []) of
         {ok, {{_, 200, "OK"}, _, Result}} ->
             imem_json:decode(list_to_binary(Result), [return_maps]);
@@ -596,7 +613,8 @@ exec_req(Url, Token) ->
 %% use OAuth2 header with token
 -spec exec_req(string(), binary(), map(), atom()) -> ok | map() | {error, term()}.
 exec_req(Url, Token, Body, Method) ->
-    AuthHeader = [{"Authorization", "Bearer " ++ binary_to_list(Token)}],
+    AuthHeader = [ {"Authorization", "Bearer " ++ binary_to_list(Token)}
+                 , {"Prefer","IdType=\"ImmutableId\""}],
     case httpc:request(Method, 
                        {Url, AuthHeader, "application/json", imem_json:encode(Body)}, 
                        [], 
