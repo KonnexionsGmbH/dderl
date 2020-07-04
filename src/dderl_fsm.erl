@@ -1858,13 +1858,11 @@ sort_distinct_count_rows([_ | XT], [_ | YT]) -> sort_distinct_count_rows(XT, YT)
 %% --------------------------------------------------------------------
 handle_info({StmtRef,{error,Reason}}, SN, State) ->
     %?Info("dderl_fsm:handle_info from ~p ~p",[StmtRef, {error,Reason}]),
-    Fsm = {?MODULE,self()},
-    Fsm:rows({StmtRef,{error,Reason}}),
+    dderl_fsm:rows(self(), {StmtRef,{error,Reason}}),
     {next_state, SN, State};
 handle_info({StmtRef,{Rows,Completed}}, SN, State) ->
     %?Info("dderl_fsm:handle_info from ~p Rows ~p completed ~p",[StmtRef, length(Rows), Completed]),
-    Fsm = {?MODULE,self()},
-    Fsm:rows({StmtRef,Rows,Completed}),
+    dderl_fsm:rows(self(), {StmtRef,{Rows,Completed}}),
     {next_state, SN, State};
 handle_info(cmd_stack_timeout, SN, #state{stack={button, <<"tail">>, RT}}=State)
     when SN =:= tailing; SN =:= passthrough ->
