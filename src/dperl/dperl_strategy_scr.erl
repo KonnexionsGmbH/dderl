@@ -749,7 +749,7 @@ process_events([Key | Keys], Mod, State, ShouldLog, IsEqualFun, IsError) ->
         {S, D} ->                               % need to invoke is_equal()
             case IsEqualFun(Key, S, D) of
                 false ->
-                    ?Info("process_events diff detected key=~p~n~p~n~p",[Key, S, D]), 
+                    % ?Info("process_events diff detected key=~p~n~p~n~p",[Key, S, D]), 
                     execute_prov_fun("Updated", Mod, update_dst, [Key, S, State], ShouldLog, IsError);
                 true ->
                     Mod:report_status(Key, no_op, State),

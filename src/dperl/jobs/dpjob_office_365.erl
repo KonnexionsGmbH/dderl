@@ -128,6 +128,7 @@
                     , token                     :: token()          % access token binary
                     , apiUrl                    :: string()
                     , fetchUrl                  :: string()
+                    , remFolderId               :: remKey()         % user's default contact folder id
                     , remCache = []             :: remKVPs()        % filled at start of c/r cycle
                     , clBuffer = []             :: remKVPs() | remKVPs() % dirty buffer for one c/r cycle
                     , isConnected = true        :: boolean()        % fail unauthorized on first use
@@ -165,6 +166,8 @@
         , get_key_prefix/0
         , get_key_prefix/1
         , get_local_key/4
+        , exec_req/2        %% ToDo: Remove debugging export
+        , exec_req/4        %% ToDo: Remove debugging export
         ]).
 
 -spec get_auth_config() -> map().
@@ -239,7 +242,7 @@ remote_kvp(#{<<"id">>:=Id} = Value, Name) when is_map(Value) ->
 % by projecting out syncable attributes(content / meta)
 -spec local_kvp(remKey(), locVal(), jobName()) -> locKVP().
 local_kvp(Id, Value, Name) when is_map(Value) -> 
-    {Id, {maps:with(?CONTENT_ATTRIBUTES(Name), Value), maps:with(?META_ATTRIBUTES(Name), Value)}}.
+    {Id, {maps:with(?CONTENT_ATTRIBUTES(Name), Value), maps:get(Name, maps:get(<<"META">>, Value, #{}),#{})}}.
 
 -spec connect_check_src(#state{}) -> {ok,#state{}} | {error,any()} | {error,any(), #state{}}.
 connect_check_src(#state{isConnected=true} = State) ->
@@ -289,7 +292,7 @@ do_refresh(_State, _BulkSize) -> {error, cleanup_only}. % using cleanup/refresh 
 -spec fetch_src(remKey(), #state{}) -> ?NOT_FOUND | {remVal(), remMeta()}.
 % fetch_src(Key, #state{channel=Channel, type=push}) ->
 %     dperl_dal:read_channel(Channel, Key);
-fetch_src(Id, #state{name=Name, type=pull, apiUrl=ApiUrl, token=Token} = State) -> 
+fetch_src(Id, #state{name=Name, type=pull, apiUrl=ApiUrl, token=Token, remFolderId=RemFolderId} = State) -> 
     ContactUrl = ApiUrl ++ binary_to_list(Id),
     ?JTrace("Fetching contact with url : ~s", [ContactUrl]),
     %?Info("Fetching contact with url : ~s", [ContactUrl]),
@@ -297,9 +300,11 @@ fetch_src(Id, #state{name=Name, type=pull, apiUrl=ApiUrl, token=Token} = State) 
         {error, unauthorized} ->        reconnect_exec(State, fetch_src, [Id]);
         {error, ?NOT_FOUND} ->          ?NOT_FOUND;
         {error, Error} ->               {error, Error, State};
-        #{<<"id">> := _} = RemVal ->    
-            %?Info("Fetched contact ~p   ", [RemVal]),
-            remote_kvp(RemVal, Name);
+        #{<<"id">>:=_} = RemVal when RemFolderId == undefined -> 
+                                        ?Info("fetch_src unexpected RemFolderId in state"),   
+                                        remote_kvp(RemVal, Name);
+        #{<<"id">>:=_, <<"parentFolderId">>:=RemFolderId} = RemVal ->    
+                                        remote_kvp(RemVal, Name);
         _ ->                            ?NOT_FOUND
     end.
 
@@ -491,15 +496,17 @@ load_src_after_key(CurKVP, BlkCount, #state{ name=Name, type=pull, token=Token
         {error, Error} ->           {error, Error, State};
         #{<<"@odata.nextLink">> := NextUrl, <<"value">> := RemVals} ->
             KVPs = [remote_kvp(RemVal, Name) || RemVal <- RemVals],
-            ?JTrace("Fetched contacts : ~p", [length(KVPs)]),
+            #{<<"parentFolderId">>:=FolderId} = hd(RemVals),
+            ?JTrace("Fetched contacts : ~p for folder ~p", [length(KVPs), FolderId]),
             load_src_after_key( CurKVP, BlkCount, 
-                                State#state{ fetchUrl=NextUrl, remCache=[KVPs|RemCache]});
+                State#state{remFolderId=FolderId, fetchUrl=NextUrl, remCache=[KVPs|RemCache]});
         #{<<"value">> := RemVals} ->        % may be an empty list
             KVPs = [remote_kvp(RemVal, Name) || RemVal <- RemVals],
-            ?JTrace("Last fetched contacts : ~p", [length(KVPs)]),
+            #{<<"parentFolderId">>:=FolderId} = hd(RemVals),
+            ?JTrace("Last fetched contacts : ~p for folder ~p", [length(KVPs), FolderId]),
             SortedRemKVPs = lists:keysort(1, lists:append(RemCache, KVPs)),
             load_src_after_key( CurKVP, BlkCount, 
-                                State#state{ fetchUrl=cached, remCache=SortedRemKVPs})
+                State#state{remFolderId=FolderId, fetchUrl=cached, remCache=SortedRemKVPs})
     end.
 
 -spec reconnect_exec(#state{}, fun(), list()) -> 
@@ -626,7 +633,7 @@ exec_req(Url, Token, Body, Method) ->
             % update/patch result
             imem_json:decode(list_to_binary(Result), [return_maps]);
         {ok, {{_, 204, _}, _, _}} ->
-            % delete result
+            % delete or put result
             ok;
         {ok, {{_, 401, _}, _, Error}} ->
             ?JError("Unauthorized body : ~s", [Error]),
