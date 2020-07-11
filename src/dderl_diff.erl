@@ -44,8 +44,9 @@ term_diff(Sess, SessPid, LeftType, LeftValue, RightType, RightValue) ->
 get_fsmctx(Result) ->
     % <<Id:32>> = crypto:strong_rand_bytes(4),
     RowCols = get_columns(),
+    Pid = self(),
     FullMap = build_full_map(RowCols),
-    #fsmctxs{stmtRefs       = [self()]
+    #fsmctxs{stmtRefs       = [Pid]
             ,stmtTables     = [<<"term_diff">>]
             ,rowCols        = RowCols
             ,rowFun         = get_rowfun()
@@ -58,7 +59,7 @@ get_fsmctx(Result) ->
                 [fun(_Opts, _Count) ->
                     Rows = [{{}, {RowId, Left, Cmp, Right}} || {ddTermDiff, RowId, Left, Cmp, Right} <- Result],
                     % This seems hackish but we don't want to keep a process here.
-                    dderl_fsm:rows(self(), {self(), {Rows, true}})
+                    dderl_fsm:rows(self(), {Pid, {Rows, true}})
                 end]
             ,fetch_close_funs = [fun() -> ok end]
             ,stmt_close_funs  = [fun() -> ok end]
