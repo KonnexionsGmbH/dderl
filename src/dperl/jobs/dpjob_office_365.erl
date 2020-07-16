@@ -381,15 +381,16 @@ update_dst(Id, {Id, {Value,Meta}}, #state{ name=Name, channel=Channel, keyPrefix
         ?NOT_FOUND ->   
             ?JError("update_dst key ~p not found for remote id ~p", [Key, Id]),
             {true, State};
-        #{<<"META">> := OldMeta} = OldVal ->
+        #{<<"META">> := OldMeta} = OldValMeta ->
             NewMeta = maps:merge(OldMeta, #{Name => Meta}),
-            AllVal = maps:merge(Template, OldVal),
+            AllVal = maps:merge(Template, OldValMeta),
             NewVal = maps:merge(AllVal, Value),
-            case update_local(Channel, Key, OldVal, NewVal, NewMeta) of 
+            case update_local(Channel, Key, maps:without([<<"META">>], OldValMeta), 
+                              maps:without([<<"META">>], NewVal), NewMeta) of 
                 ok ->
                     {false, State};
-                {error, _Error} ->
-                    ?JError("update_dst cannot update key ~p to ~p", [Key, NewVal]),   
+                {error, Error} ->
+                    ?JError("update_dst cannot update key ~p to ~p with error ~p", [Key, NewVal, Error]),   
                     {true, State}
             end 
     end.

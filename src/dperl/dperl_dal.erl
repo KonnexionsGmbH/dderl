@@ -122,7 +122,7 @@ write_channel(Channel, Key, Val) when is_map(Val); byte_size(Val) > 0 ->
 
 -spec write_channel_no_audit(binary(), any(), any()) -> ok | {error, any()}.
 write_channel_no_audit(Channel, Key, Val) when is_map(Val); byte_size(Val) > 0 ->
-   case catch imem_dal_skvh:write(system, Channel, Key, Val) of
+   case catch imem_dal_skvh:write_no_audit(system, Channel, Key, Val) of
        Res when is_map(Res) -> ok;
        {'EXIT', Error} -> {error, Error};
        {error, Error} -> {error, Error};
