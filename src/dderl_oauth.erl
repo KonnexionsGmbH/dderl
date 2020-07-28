@@ -38,7 +38,7 @@ get_access_token(AccountId, TokenPrefix, Code, SyncMod) ->
         SyncMod:get_auth_config() % ToDo: AuthConfig may depend on JobName or TokenPrefix
     catch 
         _:E:S ->
-            ?Error("Finding AuthConfig : ~p ñ~p", [E,S]),
+            ?Error("Finding AuthConfig : ~p~n~p", [E,S]),
             {error, E}
     end,
     %?Info("get_access_token AuthConfig: ~p",[AuthConfig]),
