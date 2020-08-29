@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  db:
+    container_name: kxn_db_ora
+    environment:
+      ORACLE_PWD: oracle
+    image: konnexionsgmbh/db_19_3_ee
+    networks: 
+      - kxn_net
+    ports:
+      - "1521:1521"
+    
+  dev:
+    container_name: kxn_dev
+    image: konnexionsgmbh/kxn_dev
+    networks: 
+      - kxn_net
+    ports:
+      - "8443:8443"
+    tty: true
+
+networks:
+  kxn_net:
