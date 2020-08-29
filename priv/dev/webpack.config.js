@@ -1,9 +1,9 @@
+const HtmlWebpackPlugin = require('html-webpack-plugin');
 const path = require('path');
 const webpack = require('webpack');
 
 const PATHS = {
     app: path.join(__dirname, 'static', 'index.js'),
-    index: path.join(__dirname, 'static', 'index.html'),
     public: path.join(__dirname, '../public/dist'),
     static: path.join(__dirname, 'static')
 }
@@ -11,8 +11,6 @@ const PATHS = {
 module.exports = {
     entry: {
         app: PATHS.app,
-        // This is the only html, maybe we should just generate it.
-        index: PATHS.index,
         "babel-polyfill": "babel-polyfill",
         // Added web workers for monaco editor.
         "editor.worker": 'monaco-editor/esm/vs/editor/editor.worker.js',
@@ -44,27 +42,6 @@ module.exports = {
                 ]
             },
             {
-                // Remove this loader when the html is generated.
-                test: PATHS.index,
-                use: [
-                    {
-                        loader: 'file-loader',
-                        options: {
-                            name: '[name].[ext]'
-                        }
-                    },
-                    {
-                        loader: 'extract-loader'
-                    },
-                    {
-                        loader: 'html-loader',
-                        options: {
-                            attrs: 'img:src link:href source:src'
-                        }
-                    }
-                ]
-            },
-            {
                 test: /\.js$/,
                 loader: 'babel-loader',
                 include: PATHS.static,
@@ -76,6 +53,7 @@ module.exports = {
         ]
     },
     plugins: [
+	new HtmlWebpackPlugin(),
         new webpack.IgnorePlugin(/^((fs)|(path)|(os)|(crypto)|(source-map-support))$/, /vs(\\|\/)language(\\|\/)typescript(\\|\/)lib/)
     ]
 };

@@ -14,16 +14,9 @@ import {newSqlEditor} from "./scripts/dderl.sql";
 import {patch_jquery_ui} from "./jquery-ui-helper/helper.js";
 import * as tableSelection from './scripts/table-selection';
 
-import 'font-awesome/css/font-awesome.css';
-// Add our jquery-ui theme (smoothness) from http://jqueryui.com/download/
-import './styles/jquery-ui-smoothness/jquery-ui.css';
-
-import './styles/slick.grid.css';
-import './styles/slick.columnpicker.css';
-import './styles/dropdown.css';
-import './styles/dderl.sql.css';
-import './styles/dderl.connect.css';
-import './styles/dderl.css';
+// load other style sheets only through dderl.css
+import * as css from './styles/dderl.css';
+console.log(css);
 
 var req = require.context("./slickgrid", true, /\.js$/);
 req.keys().forEach(function(key){
