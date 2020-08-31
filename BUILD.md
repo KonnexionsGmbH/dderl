@@ -74,7 +74,7 @@ The following instructions demonstrate how to use the Docker compose script.
     
 This command creates the network `dderl_kxn_net` and the two docker containers `kxn_dev` and `kxn_db_ora`:
 
-    D:\SoftDevelopment\Projects\Konnexions\dderl>docker-compose up -d
+    ...>docker-compose up -d
     Creating network "dderl_kxn_net" with the default driver
     Creating kxn_db_ora ... done
     Creating kxn_dev    ... done
@@ -83,15 +83,14 @@ If the Docker images are not yet available, Docker compose will load them from D
      
 #### 2. Optionally the database can be set up
 
-    D:\SoftDevelopment\Projects\Konnexions\dderl>docker exec -it kxn_db_ora bash
+    ...>docker exec -it kxn_db_ora bash
     [oracle@accf872c2eae ~]$ sqlplus sys/oracle@localhost:1521/orclpdb1 as sysdba
     
     SQL*Plus: Release 19.0.0.0.0 - Production on Mon Aug 31 13:34:39 2020
     Version 19.3.0.0.0
     
     Copyright (c) 1982, 2019, Oracle.  All rights reserved.
-    
-    
+        
     Connected to:
     Oracle Database 19c Enterprise Edition Release 19.0.0.0.0 - Production
     Version 19.3.0.0.0
@@ -126,9 +125,77 @@ If the Docker images are not yet available, Docker compose will load them from D
     [oracle@accf872c2eae ~]$ exit
     exit
     
-    D:\SoftDevelopment\Projects\Konnexions\dderl>    
+    ...>    
 
 #### 3. Building DDErl
 
+Enter the Konnexions development container:
 
+    ...>docker exec -it kxn_dev bash
+    root@7789897326da:/#    
 
+First you need to download the DDErl repository from GitHub:
+
+    root@7789897326da:/# git clone https://github.com/KonnexionsGmbH/dderl
+    Cloning into 'dderl'...
+    Username for 'https://github.com': walter-weinmann
+    Password for 'https://walter-weinmann@github.com':
+    remote: Enumerating objects: 318, done.
+    remote: Counting objects: 100% (318/318), done.
+    remote: Compressing objects: 100% (226/226), done.
+    remote: Total 20351 (delta 210), reused 172 (delta 90), pack-reused 20033
+    Receiving objects: 100% (20351/20351), 20.79 MiB | 13.26 MiB/s, done.
+    Resolving deltas: 100% (14232/14232), done.
+    root@7789897326da:/# cd dderl
+    root@7789897326da:/dderl#
+
+Then the dependencies of DDErl have to be satisfied:
+
+    root@7789897326da:/dderl# cd priv/dev
+    root@7789897326da:/dderl/priv/dev# yarn install-build-prod
+    yarn run v1.22.4
+    $ yarn install && yarn build-prod
+    [1/4] Resolving packages...
+    [2/4] Fetching packages...
+    info fsevents@1.2.9: The platform "linux" is incompatible with this module.
+    info "fsevents@1.2.9" is an optional dependency and failed compatibility check. Excluding it from installation.
+    [3/4] Linking dependencies...
+    [4/4] Building fresh packages...
+    warning Your current version of Yarn is out of date. The latest version is "1.22.5", while you're on "1.22.4".
+    info To upgrade, run the following command:
+    $ sudo apt-get update && sudo apt-get install yarn
+    $ yarn lint && yarn clean && webpack -p
+    $ jshint --verbose static/index.js static/scripts static/dashboard static/dialogs static/graph static/slickgrid
+    $ rimraf ../public/dist
+    Hash: f7ac1b231bfa408ab853
+    Version: webpack 3.10.0
+    Time: 83638ms
+                                                        Asset       Size  Chunks                    Chunk Names
+                           ui-icons_222222_256x240.000cda.png    3.03 kB          [emitted]
+                           ui-icons_454545_256x240.6448e8.png    3.03 kB          [emitted]
+    ...                    
+                                         editor.worker.js.map     920 kB      59  [emitted]         editor.worker
+                                                 index.js.map    6.11 kB      60  [emitted]         index
+      [44] (webpack)/buildin/global.js 509 bytes {53} {54} {55} {56} {57} {58} {59} [built]
+      [76] ./static/dialogs/dialogs.js 7.12 kB {53} [built]
+      [77] ./static/scripts/dderl.js 27.5 kB {53} [built]
+     [140] ./static/jquery-ui-helper/helper.js 1.3 kB {53} [built]
+     [271] ./static/scripts/login.js 14.5 kB {53} [built]
+     [313] ./static/scripts/table-selection.js 798 bytes {53} [built]
+     [354] ./static/scripts/connect.js 29.7 kB {53} [built]
+     [485] ./static/scripts/dderl.sql.js 48.7 kB {53} [built]
+     [589] ./static/index.js 3.93 kB {53} [built]
+    [1371] ./static/styles/jquery-ui-smoothness/jquery-ui.css 1.05 kB {53} [built]
+    [1379] ./static/styles/slick.grid.css 1.04 kB {53} [built]
+    [1385] ./static/styles/slick.columnpicker.css 1.06 kB {53} [built]
+    [1387] ./static/styles/dropdown.css 1.03 kB {53} [built]
+    [1389] ./static/styles/dderl.sql.css 1.03 kB {53} [built]
+    [1420] ./static/index.html 56 bytes {60} [built]
+        + 1724 hidden modules
+    Done in 133.18s.
+    root@7789897326da:/dderl/priv/dev#
+
+Now you can either execute one of the commands from section 2.1 point 4 or start DDErl directly with `rebar3 shell`:
+
+cd ../..
+rebar3 shell
