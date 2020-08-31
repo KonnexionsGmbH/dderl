@@ -1,14 +1,20 @@
 DDErl: Data Discovery Tool.
 =====
 
-### Build
-1. Build backend and frontend `rebar3 as ui compile`
-1. Build backend only `rebar3 compile`
-1. Build frontend only `bash ./build_fe.sh`
-### Start Console
-1. `rebar3 shell` or `ESCRIPT_EMULATOR=werl rebar3 shell` (for GUI in windows) or `ERL_FLAGS="-proto_dist imem_inet_tcp" rebar3 shell` (to start with imem_inet_tcp as proto_dist)
-1. go to https://127.0.0.1:8443/dderl in your browser
-### Features
+![Travis (.com)](https://img.shields.io/travis/com/KonnexionsGmbH/dderl.svg?branch=master)
+![GitHub release](https://img.shields.io/github/release/KonnexionsGmbH/dderl.svg)
+![GitHub Release Date](https://img.shields.io/github/release-date/KonnexionsGmbH/dderl.svg)
+![GitHub commits since latest release](https://img.shields.io/github/commits-since/KonnexionsGmbH/dderl/3.9.7.svg)
+----
+
+### Table of Contents
+
+**[Features](#features)**<br>
+**[Start Console](#start_console)**<br>
+**[Certificates](#certificates)**<br>
+**[Building DDErl](Build.md)**<br>
+
+### <a name="features"></a> Features
 1. Browse mnesia and oracle tables in the browser
 1. Add and update data
 1. Import and Export data
@@ -28,7 +34,11 @@ DDErl: Data Discovery Tool.
 1. Connect to other imem server over TCP with SSL
 1. CSV file parsing
 
-### Certificates
+### <a name="start_console"></a> Start Console
+1. `rebar3 shell` or `ESCRIPT_EMULATOR=werl rebar3 shell` (for GUI in windows) or `ERL_FLAGS="-proto_dist imem_inet_tcp" rebar3 shell` (to start with imem_inet_tcp as proto_dist)
+1. go to https://127.0.0.1:8443/dderl in your browser
+
+### <a name="certificates"></a> Certificates
 DDErl runs on SSL. A default certificate/key pair is [supplied](https://bitbucket.org/konnexions/dderl/src/master/priv/certs/). This, however can be changed either by replacing these files at installation or modifying configuration in `ddConfig` table (`[{dderl,dderl,dderlSslOpts}]`). A sample configuration is given below:
 ```erlang
 [{cert,<<48,...,107>>},
@@ -47,4 +57,3 @@ To convert a PEM crt/key files to DER (accepted by erlang SSL binary certificate
 > public_key:pem_decode(PemKey).              
 [{'RSAPrivateKey',<<48,130,2,92,2,1,0,2,129,129,0,160,95,...>>,not_encrypted}]
 ```
-
