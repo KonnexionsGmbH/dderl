@@ -48,7 +48,7 @@ This can be used as an easily customizable template.
     cd priv/dev
     yarn install-build-prod
 
-#### 4. Build
+#### 4. Build alternatively
 
 ##### 4.1 either backend and frontend:
 
@@ -64,4 +64,21 @@ This can be used as an easily customizable template.
 
 ## <a name="building_using_docker_containers"></a> 2.2 Building Using Docker Containers
 
-xxxx
+The use of Konnexions development image makes the build process independent of the host operating system.
+The only requirement is the installation of Docker Desktop and possibly Docker Compose (Unix operating systems).
+The following instructions demonstrate how to use the Docker compose script. 
+
+#### 1. Start Docker compose in the DDErl root directory
+
+    docker-compose up -d
+    
+This command creates the network `dderl_kxn_net` and the two docker containers `kxn_dev` and `kxn_db_ora`:
+
+    D:\SoftDevelopment\Projects\Konnexions\dderl>docker-compose up -d
+    Creating network "dderl_kxn_net" with the default driver
+    Creating kxn_db_ora ... done
+    Creating kxn_dev    ... done
+
+If the Docker images are not yet available, Docker compose will load them from DockerHub.
+     
+
