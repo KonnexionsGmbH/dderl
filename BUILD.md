@@ -30,32 +30,30 @@ The following software components are required in addition to a Unix operating s
 
 #### 1. Download the DDErl repository from GitHub:
 
-`git clone https://github.com/KonnexionsGmbH/dderl `
+    git clone https://github.com/KonnexionsGmbH/dderl`
 
 #### 2. Change to the DDErl directory
 
-`cd dderl`
+    cd dderl
 
 #### 3. Install all the dependencies for DDErl:
 
-`
-cd priv/dev
-yarn install-build-prod
-`
+    cd priv/dev
+    yarn install-build-prod
 
 #### 4. Build
 
 - either backend and frontend:
 
-`rebar3 as ui compile`
+    rebar3 as ui compile
 
 - or backend only:
 
-`rebar3 compile`
+    rebar3 compile
 
 - or frontend only:
 
-`bash ./build_fe.sh`
+    bash ./build_fe.sh
 
 ## <a name="on_operating_system_level"></a> 2.1 On Operating System Level
 
