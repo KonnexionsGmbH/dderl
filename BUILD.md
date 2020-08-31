@@ -132,13 +132,13 @@ If the Docker images are not yet available, Docker compose will load them from D
 
 #### Enter the Konnexions development container:
 
-    ...>docker exec -it kxn_dev bash
+    **...>docker exec -it kxn_dev bash**
     
     root@7789897326da:/#    
 
 #### First you need to download the DDErl repository from GitHub:
 
-    root@7789897326da:/# git clone https://github.com/KonnexionsGmbH/dderl
+    **root@7789897326da:/# git clone https://github.com/KonnexionsGmbH/dderl**
     
     Cloning into 'dderl'...
     Username for 'https://github.com': walter-weinmann
@@ -154,8 +154,8 @@ If the Docker images are not yet available, Docker compose will load them from D
 
 #### Then the dependencies of DDErl have to be satisfied:
 
-    root@7789897326da:/dderl# cd priv/dev
-    root@7789897326da:/dderl/priv/dev# yarn install-build-prod
+    **root@7789897326da:/dderl# cd priv/dev
+    root@7789897326da:/dderl/priv/dev# yarn install-build-prod**
     
     yarn run v1.22.4
     $ yarn install && yarn build-prod
@@ -201,8 +201,8 @@ If the Docker images are not yet available, Docker compose will load them from D
 
 #### Now you can either execute one of the commands from section 2.1 point 4 or start DDErl directly with `rebar3 shell`:
 
-    root@7789897326da:/dderl/priv/dev# cd ../..
-    root@7789897326da:/dderl# rebar3 shell
+    **root@7789897326da:/dderl/priv/dev# cd ../..
+    root@7789897326da:/dderl# rebar3 shell`**
     
     ===> Fetching rebar3_hex v6.9.6
     ===> Downloaded package, caching at /root/.cache/rebar3/hex/hexpm/packages/rebar3_hex-6.9.6.tar
