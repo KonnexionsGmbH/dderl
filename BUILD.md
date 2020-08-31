@@ -81,4 +81,54 @@ This command creates the network `dderl_kxn_net` and the two docker containers `
 
 If the Docker images are not yet available, Docker compose will load them from DockerHub.
      
+#### 2. Optionally the database can be set up
+
+    D:\SoftDevelopment\Projects\Konnexions\dderl>docker exec -it kxn_db_ora bash
+    [oracle@accf872c2eae ~]$ sqlplus sys/oracle@localhost:1521/orclpdb1 as sysdba
+    
+    SQL*Plus: Release 19.0.0.0.0 - Production on Mon Aug 31 13:34:39 2020
+    Version 19.3.0.0.0
+    
+    Copyright (c) 1982, 2019, Oracle.  All rights reserved.
+    
+    
+    Connected to:
+    Oracle Database 19c Enterprise Edition Release 19.0.0.0.0 - Production
+    Version 19.3.0.0.0
+    
+    SQL> create user scott identified by tiger;
+    
+    User created.
+    
+    SQL> grant alter system to scott;
+    grant create session to scott;
+    grant unlimited tablespace to scott;
+    grant create table to scott;
+    grant create view to scott;
+    
+    Grant succeeded.
+    
+    SQL>
+    Grant succeeded.
+    
+    SQL>
+    Grant succeeded.
+    
+    SQL>
+    Grant succeeded.
+    
+    SQL>
+    Grant succeeded.
+    
+    SQL> exit
+    Disconnected from Oracle Database 19c Enterprise Edition Release 19.0.0.0.0 - Production
+    Version 19.3.0.0.0
+    [oracle@accf872c2eae ~]$ exit
+    exit
+    
+    D:\SoftDevelopment\Projects\Konnexions\dderl>    
+
+#### 3. Building DDErl
+
+
 
