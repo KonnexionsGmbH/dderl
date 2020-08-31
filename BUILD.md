@@ -1,7 +1,7 @@
 Buidling DDErl.
 =====
 ``
-### Table of Contents
+## Table of Contents
 
 **[1. Prerequisites](#prerequisites)**<br>
 **[2. Building DDErl](#buildinf_dderl)**<br>
@@ -35,30 +35,30 @@ This can be used as an easily customizable template.
 
 ## <a name="building_on_operating_system_level"></a> 2.1 Building On Operating System Level
 
-#### 1. Download the DDErl repository from GitHub:
+### 1. Download the DDErl repository from GitHub:
 
     git clone https://github.com/KonnexionsGmbH/dderl`
 
-#### 2. Change to the DDErl directory
+### 2. Change to the DDErl directory
 
     cd dderl
 
-#### 3. Install all the dependencies for DDErl:
+### 3. Install all the dependencies for DDErl:
 
     cd priv/dev
     yarn install-build-prod
 
-#### 4. Build alternatively
+### 4. Build alternatively
 
-##### 4.1 either backend and frontend:
+#### 4.1 either backend and frontend:
 
     rebar3 as ui compile
 
-##### 4.2 or backend only:
+#### 4.2 or backend only:
 
     rebar3 compile
 
-##### 4.3 or frontend only:
+#### 4.3 or frontend only:
 
     bash ./build_fe.sh
 
@@ -68,7 +68,7 @@ The use of Konnexions development image makes the build process independent of t
 The only requirement is the installation of Docker Desktop and possibly Docker Compose (Unix operating systems).
 The following instructions demonstrate how to use the Docker compose script. 
 
-#### 1. Start Docker compose in the DDErl root directory
+### 1. Start Docker compose in the DDErl root directory
 
     docker-compose up -d
     
@@ -81,7 +81,7 @@ This command creates the network `dderl_kxn_net` and the two docker containers `
 
 If the Docker images are not yet available, Docker compose will load them from DockerHub.
      
-#### 2. Optionally the database can be set up
+### 2. Optionally the database can be set up
 
     ...>docker exec -it kxn_db_ora bash
     [oracle@accf872c2eae ~]$ sqlplus sys/oracle@localhost:1521/orclpdb1 as sysdba
@@ -127,14 +127,14 @@ If the Docker images are not yet available, Docker compose will load them from D
     
     ...>    
 
-#### 3. Building DDErl
+### 3. Building DDErl
 
-Enter the Konnexions development container:
+#### Enter the Konnexions development container:
 
     ...>docker exec -it kxn_dev bash
     root@7789897326da:/#    
 
-First you need to download the DDErl repository from GitHub:
+#### First you need to download the DDErl repository from GitHub:
 
     root@7789897326da:/# git clone https://github.com/KonnexionsGmbH/dderl
     Cloning into 'dderl'...
@@ -149,7 +149,7 @@ First you need to download the DDErl repository from GitHub:
     root@7789897326da:/# cd dderl
     root@7789897326da:/dderl#
 
-Then the dependencies of DDErl have to be satisfied:
+#### Then the dependencies of DDErl have to be satisfied:
 
     root@7789897326da:/dderl# cd priv/dev
     root@7789897326da:/dderl/priv/dev# yarn install-build-prod
@@ -195,7 +195,31 @@ Then the dependencies of DDErl have to be satisfied:
     Done in 133.18s.
     root@7789897326da:/dderl/priv/dev#
 
-Now you can either execute one of the commands from section 2.1 point 4 or start DDErl directly with `rebar3 shell`:
+#### Now you can either execute one of the commands from section 2.1 point 4 or start DDErl directly with `rebar3 shell`:
 
-cd ../..
-rebar3 shell
+    root@7789897326da:/dderl/priv/dev# cd ../..
+    root@7789897326da:/dderl# rebar3 shell
+    ===> Fetching rebar3_hex v6.9.6
+    ===> Downloaded package, caching at /root/.cache/rebar3/hex/hexpm/packages/rebar3_hex-6.9.6.tar
+    ===> Fetching hex_core v0.6.9
+    ===> Downloaded package, caching at /root/.cache/rebar3/hex/hexpm/packages/hex_core-0.6.9.tar
+    ===> Fetching verl v1.0.2
+    ===> Downloaded package, caching at /root/.cache/rebar3/hex/hexpm/packages/verl-1.0.2.tar
+    ===> Compiling verl
+    ===> Compiling hex_core
+    ===> Compiling rebar3_hex
+    ...
+    ===> Booted oranif
+    ===> Booted prometheus
+    ===> Booted dderl
+    2020-08-31 15:58:42.591 [warning] [<0.5964.0>@dperl_cp:log_nodes_status:286] [dderl@127.0.0.1] job : Node added
+    2020-08-31 15:58:46.592 [warning] [<0.5983.0>@dperl_cp:log_nodes_status:286] [dderl@127.0.0.1] service : Node added
+    2020-08-31 15:58:49.669 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddView
+    2020-08-31 15:58:49.701 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddCmd
+    2020-08-31 15:58:49.746 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddAdapter
+    2020-08-31 15:58:49.806 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddConfig
+    2020-08-31 15:58:49.854 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddTable
+    2020-08-31 15:58:49.888 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddAlias
+    2020-08-31 15:59:10.180 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddConfig
+
+#### Finally DDErl is ready and can be  operated via a Browser
