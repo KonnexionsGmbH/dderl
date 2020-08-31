@@ -75,6 +75,7 @@ The following instructions demonstrate how to use the Docker compose script.
 This command creates the network `dderl_kxn_net` and the two docker containers `kxn_dev` and `kxn_db_ora`:
 
     ...>docker-compose up -d
+    
     Creating network "dderl_kxn_net" with the default driver
     Creating kxn_db_ora ... done
     Creating kxn_dev    ... done
@@ -132,11 +133,13 @@ If the Docker images are not yet available, Docker compose will load them from D
 #### Enter the Konnexions development container:
 
     ...>docker exec -it kxn_dev bash
+    
     root@7789897326da:/#    
 
 #### First you need to download the DDErl repository from GitHub:
 
     root@7789897326da:/# git clone https://github.com/KonnexionsGmbH/dderl
+    
     Cloning into 'dderl'...
     Username for 'https://github.com': walter-weinmann
     Password for 'https://walter-weinmann@github.com':
@@ -153,6 +156,7 @@ If the Docker images are not yet available, Docker compose will load them from D
 
     root@7789897326da:/dderl# cd priv/dev
     root@7789897326da:/dderl/priv/dev# yarn install-build-prod
+    
     yarn run v1.22.4
     $ yarn install && yarn build-prod
     [1/4] Resolving packages...
@@ -199,6 +203,7 @@ If the Docker images are not yet available, Docker compose will load them from D
 
     root@7789897326da:/dderl/priv/dev# cd ../..
     root@7789897326da:/dderl# rebar3 shell
+    
     ===> Fetching rebar3_hex v6.9.6
     ===> Downloaded package, caching at /root/.cache/rebar3/hex/hexpm/packages/rebar3_hex-6.9.6.tar
     ===> Fetching hex_core v0.6.9
