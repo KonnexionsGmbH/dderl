@@ -7,14 +7,17 @@ DDErl: Data Discovery Tool.
 ![GitHub commits since latest release](https://img.shields.io/github/commits-since/KonnexionsGmbH/dderl/3.9.7.svg)
 ----
 
-### Table of Contents
+#### Table of Contents
 
 **[Features](#features)**<br>
 **[Start Console](#start_console)**<br>
 **[Certificates](#certificates)**<br>
-**[Building DDErl](Build.md)**<br>
+**[Building DDErl](BUILD.md)**<br>
 
-### <a name="features"></a> Features
+----
+
+## <a name="features"></a> Features
+
 1. Browse mnesia and oracle tables in the browser
 1. Add and update data
 1. Import and Export data
@@ -34,11 +37,13 @@ DDErl: Data Discovery Tool.
 1. Connect to other imem server over TCP with SSL
 1. CSV file parsing
 
-### <a name="start_console"></a> Start Console
+## <a name="start_console"></a> Start Console
+
 1. `rebar3 shell` or `ESCRIPT_EMULATOR=werl rebar3 shell` (for GUI in windows) or `ERL_FLAGS="-proto_dist imem_inet_tcp" rebar3 shell` (to start with imem_inet_tcp as proto_dist)
 1. go to https://127.0.0.1:8443/dderl in your browser
 
-### <a name="certificates"></a> Certificates
+## <a name="certificates"></a> Certificates
+
 DDErl runs on SSL. A default certificate/key pair is [supplied](https://bitbucket.org/konnexions/dderl/src/master/priv/certs/). This, however can be changed either by replacing these files at installation or modifying configuration in `ddConfig` table (`[{dderl,dderl,dderlSslOpts}]`). A sample configuration is given below:
 ```erlang
 [{cert,<<48,...,107>>},
