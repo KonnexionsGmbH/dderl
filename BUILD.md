@@ -222,4 +222,4 @@ If the Docker images are not yet available, Docker compose will load them from D
     2020-08-31 15:58:49.888 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddAlias
     2020-08-31 15:59:10.180 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddConfig
 
-#### Finally DDErl is ready and can be  operated via a Browser
+#### Finally DDErl is ready and can be  operated via a Browser !!!
