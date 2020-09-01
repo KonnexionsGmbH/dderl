@@ -48,7 +48,3 @@ To convert a PEM crt/key files to DER (accepted by erlang SSL binary certificate
 [{'RSAPrivateKey',<<48,130,2,92,2,1,0,2,129,129,0,160,95,...>>,not_encrypted}]
 ```
 
-### Using the Docker Image from DockerHub
-
-On DockerHub an image is available for the further development of dderl. For details, the corresponding documentation can be found [here](https://hub.docker.com/repository/docker/konnexionsgmbh/dderl_dev).
-
