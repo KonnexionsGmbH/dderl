@@ -70,8 +70,6 @@ The following instructions demonstrate how to use the Docker compose script.
 
 ### 1. Start Docker compose in the DDErl root directory
 
-    docker-compose up -d
-    
 This command creates the network `dderl_kxn_net` and the two docker containers `kxn_dev` and `kxn_db_ora`:
 
     docker-compose up -d
@@ -140,6 +138,14 @@ Sample database setup:
 Sample output:    
     
     root@7789897326da:/#    
+    
+Inside the  development container `kxn_dev` the database container `kxn_db_ora` can be addressed with the `kxn_db_ora` as hostname:  
+
+    root@7789897326da:/# ping kxn_db_ora
+    PING kxn_db_ora (172.19.0.2) 56(84) bytes of data.
+    64 bytes from kxn_db_ora.dderl_kxn_net (172.19.0.2): icmp_seq=1 ttl=64 time=0.084 ms
+    64 bytes from kxn_db_ora.dderl_kxn_net (172.19.0.2): icmp_seq=2 ttl=64 time=0.161 ms
+    64 bytes from kxn_db_ora.dderl_kxn_net (172.19.0.2): icmp_seq=3 ttl=64 time=0.069 ms 
 
 #### 3.2 First you need to download the DDErl repository from GitHub:
 
@@ -238,4 +244,13 @@ Sample output:
     2020-08-31 15:58:49.888 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddAlias
     2020-08-31 15:59:10.180 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddConfig
 
-#### 3.5 Finally DDErl is ready and can be operated via a Browser !!!
+#### 3.5 Finally DDErl is ready and can be operated via a Browser
+
+![](./priv/BUILD_images/Login.png)
+
+User: `system`
+Password: `change_on_install`
+
+![](./priv/BUILD_images/Connect.png)
+
+![](./priv/BUILD_images/Result.png)
