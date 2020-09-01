@@ -35,30 +35,30 @@ This can be used as an easily customizable template.
 
 ## <a name="building_on_operating_system_level"></a> 2.1 Building On Operating System Level
 
-### 1. Download the DDErl repository from GitHub:
+### 2.1.1 Download the DDErl repository from GitHub:
 
     git clone https://github.com/KonnexionsGmbH/dderl`
 
-### 2. Change to the DDErl directory
+### 2.1.2 Change to the DDErl directory
 
     cd dderl
 
-### 3. Install all the dependencies for DDErl:
+### 2.1.3 Install all the dependencies for DDErl:
 
     cd priv/dev
     yarn install-build-prod
 
-### 4. Build alternatively
+### 2.1.4 Build alternatively
 
-#### 4.1 either backend and frontend:
+#### either backend and frontend:
 
     rebar3 as ui compile
 
-#### 4.2 or backend only:
+#### or backend only:
 
     rebar3 compile
 
-#### 4.3 or frontend only:
+#### or frontend only:
 
     bash ./build_fe.sh
 
@@ -68,7 +68,7 @@ The use of Konnexions development image makes the build process independent of t
 The only requirement is the installation of Docker Desktop and possibly Docker Compose (Unix operating systems).
 The following instructions demonstrate how to use the Docker compose script. 
 
-### 1. Start Docker compose in the DDErl root directory
+### 2.2.1. Start Docker compose in the DDErl root directory
 
 This command creates the network `dderl_kxn_net` and the two docker containers `kxn_dev` and `kxn_db_ora`:
 
@@ -82,7 +82,7 @@ Sample output:
 
 If the Docker images are not yet available, Docker compose will load them from DockerHub.
      
-### 2. Optionally the database can be set up
+### 2.2.2. Optionally the database can be set up
 
     docker exec -it kxn_db_ora bash
     
@@ -129,9 +129,9 @@ Sample database setup:
     [oracle@accf872c2eae ~]$ exit
     exit
 
-### 3. Building DDErl
+### 2.2.3. Building DDErl
 
-#### 3.1 Enter the Konnexions development container:
+#### 2.2.3.1 Enter the Konnexions development container:
 
     docker exec -it kxn_dev bash
     
@@ -147,7 +147,7 @@ Inside the  development container `kxn_dev` the database container `kxn_db_ora` 
     64 bytes from kxn_db_ora.dderl_kxn_net (172.19.0.2): icmp_seq=2 ttl=64 time=0.161 ms
     64 bytes from kxn_db_ora.dderl_kxn_net (172.19.0.2): icmp_seq=3 ttl=64 time=0.069 ms 
 
-#### 3.2 First you need to download the DDErl repository from GitHub:
+#### 2.2.3.2 First you need to download the DDErl repository from GitHub:
 
     git clone https://github.com/KonnexionsGmbH/dderl
     
@@ -165,7 +165,7 @@ Sample output:
     root@7789897326da:/# cd dderl
     root@7789897326da:/dderl#
 
-#### 3.3 Then the dependencies of DDErl have to be satisfied:
+#### 2.2.3.3 Then the dependencies of DDErl have to be satisfied:
 
     cd priv/dev
     yarn install-build-prod
@@ -214,7 +214,7 @@ Sample output:
     Done in 133.18s.
     root@7789897326da:/dderl/priv/dev#
 
-#### 3.4 Now you can either execute one of the commands from section 2.1 point 4 or start DDErl directly with `rebar3 shell`:
+#### 2.2.3.4 Now you can either execute one of the commands from section 2.1 point 4 or start DDErl directly with `rebar3 shell`:
 
     cd ../..
     rebar3 shell
@@ -244,18 +244,18 @@ Sample output:
     2020-08-31 15:58:49.888 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddAlias
     2020-08-31 15:59:10.180 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddConfig
 
-#### 3.5 Finally DDErl is ready and can be operated via a Browser
+#### 2.2.3.5 Finally DDErl is ready and can be operated via a Browser
 
-**Login screen:**
+##### Login screen:
 
 ![](priv/.BUILD_images/Login.png)
 
 User: `system` Password: `change_on_install`
 
-**Database connection:**
+##### Database connection:
 
 ![](priv/.BUILD_images/Connect.png)
 
-**Start browsing:**
+##### Start browsing:
 
 ![](priv/.BUILD_images/Result.png)
