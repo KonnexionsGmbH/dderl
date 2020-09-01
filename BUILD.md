@@ -133,7 +133,7 @@ If the Docker images are not yet available, Docker compose will load them from D
 
 ### 3. Building DDErl
 
-#### Enter the Konnexions development container:
+#### 3.1 Enter the Konnexions development container:
 
     docker exec -it kxn_dev bash
     
@@ -141,7 +141,7 @@ If the Docker images are not yet available, Docker compose will load them from D
     
     root@7789897326da:/#    
 
-#### First you need to download the DDErl repository from GitHub:
+#### 3.2 First you need to download the DDErl repository from GitHub:
 
     git clone https://github.com/KonnexionsGmbH/dderl
     
@@ -159,7 +159,7 @@ If the Docker images are not yet available, Docker compose will load them from D
     root@7789897326da:/# cd dderl
     root@7789897326da:/dderl#
 
-#### Then the dependencies of DDErl have to be satisfied:
+#### 3.3 Then the dependencies of DDErl have to be satisfied:
 
     cd priv/dev
     yarn install-build-prod
@@ -208,7 +208,7 @@ If the Docker images are not yet available, Docker compose will load them from D
     Done in 133.18s.
     root@7789897326da:/dderl/priv/dev#
 
-#### Now you can either execute one of the commands from section 2.1 point 4 or start DDErl directly with `rebar3 shell`:
+#### 3.4 Now you can either execute one of the commands from section 2.1 point 4 or start DDErl directly with `rebar3 shell`:
 
     cd ../..
     rebar3 shell
@@ -238,4 +238,4 @@ If the Docker images are not yet available, Docker compose will load them from D
     2020-08-31 15:58:49.888 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddAlias
     2020-08-31 15:59:10.180 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddConfig
 
-#### Finally DDErl is ready and can be  operated via a Browser !!!
+#### 3.5 Finally DDErl is ready and can be operated via a Browser !!!
