@@ -76,6 +76,8 @@ This command creates the network `dderl_kxn_net` and the two docker containers `
 
     docker-compose up -d
     
+**Output example:**    
+    
     Creating network "dderl_kxn_net" with the default driver
     Creating kxn_db_ora ... done
     Creating kxn_dev    ... done
@@ -85,6 +87,8 @@ If the Docker images are not yet available, Docker compose will load them from D
 ### 2. Optionally the database can be set up
 
     docker exec -it kxn_db_ora bash
+    
+**Database setup example:**    
     
     [oracle@accf872c2eae ~]$ sqlplus sys/oracle@localhost:1521/orclpdb1 as sysdba
     
@@ -133,11 +137,15 @@ If the Docker images are not yet available, Docker compose will load them from D
 
     docker exec -it kxn_dev bash
     
+**Output example:**    
+    
     root@7789897326da:/#    
 
 #### First you need to download the DDErl repository from GitHub:
 
     git clone https://github.com/KonnexionsGmbH/dderl
+    
+**Output example:**    
     
     Cloning into 'dderl'...
     Username for 'https://github.com': walter-weinmann
@@ -155,6 +163,8 @@ If the Docker images are not yet available, Docker compose will load them from D
 
     cd priv/dev
     yarn install-build-prod
+    
+**Output example:**    
     
     yarn run v1.22.4
     $ yarn install && yarn build-prod
@@ -202,6 +212,8 @@ If the Docker images are not yet available, Docker compose will load them from D
 
     cd ../..
     rebar3 shell
+    
+**Output example:**    
     
     ===> Fetching rebar3_hex v6.9.6
     ===> Downloaded package, caching at /root/.cache/rebar3/hex/hexpm/packages/rebar3_hex-6.9.6.tar
