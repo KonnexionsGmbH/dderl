@@ -246,11 +246,11 @@ Sample output:
 
 #### 3.5 Finally DDErl is ready and can be operated via a Browser
 
-![](./priv/BUILD_images/Login.png)
+![](/priv/BUILD_images/Login.png)
 
 User: `system`
 Password: `change_on_install`
 
-![](./priv/BUILD_images/Connect.png)
+![](/priv/BUILD_images/Connect.png)
 
-![](./priv/BUILD_images/Result.png)
+![](/priv/BUILD_images/Result.png)
