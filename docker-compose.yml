@@ -5,7 +5,7 @@ services:
     container_name: kxn_db_ora
     environment:
       ORACLE_PWD: oracle
-    image: konnexionsgmbh/db_19_3_ee
+    image: konnexionsgmbh/db_19_3_ee:latest
     networks: 
       - kxn_net
     ports:
@@ -13,7 +13,7 @@ services:
     
   dev:
     container_name: kxn_dev
-    image: konnexionsgmbh/kxn_dev
+    image: konnexionsgmbh/kxn_dev:latest
     networks: 
       - kxn_net
     ports:

@@ -76,9 +76,7 @@ This command creates the network `dderl_kxn_net` and the two docker containers `
     
 Sample output:    
     
-    Creating network "dderl_kxn_net" with the default driver
-    Creating kxn_db_ora ... done
-    Creating kxn_dev    ... done
+![](priv/.BUILD_images/compose_up.png)
 
 If the Docker images are not yet available, Docker compose will load them from DockerHub.
      
@@ -87,6 +85,8 @@ If the Docker images are not yet available, Docker compose will load them from D
     docker exec -it kxn_db_ora bash
     
 Sample database setup:    
+    
+    sqlplus sys/oracle@localhost:1521/orclpdb1 as sysdba
     
     [oracle@accf872c2eae ~]$ sqlplus sys/oracle@localhost:1521/orclpdb1 as sysdba
     
@@ -137,112 +137,47 @@ Sample database setup:
     
 Sample output:    
     
-    root@7789897326da:/#    
-    
+![](priv/.BUILD_images/docker_exec.png)    
+
 Inside the  development container `kxn_dev` the database container `kxn_db_ora` can be addressed with the `kxn_db_ora` as hostname:  
 
-    root@7789897326da:/# ping kxn_db_ora
-    PING kxn_db_ora (172.19.0.2) 56(84) bytes of data.
-    64 bytes from kxn_db_ora.dderl_kxn_net (172.19.0.2): icmp_seq=1 ttl=64 time=0.084 ms
-    64 bytes from kxn_db_ora.dderl_kxn_net (172.19.0.2): icmp_seq=2 ttl=64 time=0.161 ms
-    64 bytes from kxn_db_ora.dderl_kxn_net (172.19.0.2): icmp_seq=3 ttl=64 time=0.069 ms 
+    ping kxn_db_ora
+
+![](priv/.BUILD_images/ping.png)
 
 #### 2.2.3.2 First you need to download the DDErl repository from GitHub:
 
     git clone https://github.com/KonnexionsGmbH/dderl
     
-Sample output:    
-    
-    Cloning into 'dderl'...
-    Username for 'https://github.com': walter-weinmann
-    Password for 'https://walter-weinmann@github.com':
-    remote: Enumerating objects: 318, done.
-    remote: Counting objects: 100% (318/318), done.
-    remote: Compressing objects: 100% (226/226), done.
-    remote: Total 20351 (delta 210), reused 172 (delta 90), pack-reused 20033
-    Receiving objects: 100% (20351/20351), 20.79 MiB | 13.26 MiB/s, done.
-    Resolving deltas: 100% (14232/14232), done.
-    root@7789897326da:/# cd dderl
-    root@7789897326da:/dderl#
+Sample output:   
+ 
+![](priv/.BUILD_images/git_clone.png)
 
 #### 2.2.3.3 Then the dependencies of DDErl have to be satisfied:
 
     cd priv/dev
     yarn install-build-prod
     
-Sample output:    
+Sample output - start:    
     
-    yarn run v1.22.4
-    $ yarn install && yarn build-prod
-    [1/4] Resolving packages...
-    [2/4] Fetching packages...
-    info fsevents@1.2.9: The platform "linux" is incompatible with this module.
-    info "fsevents@1.2.9" is an optional dependency and failed compatibility check. Excluding it from installation.
-    [3/4] Linking dependencies...
-    [4/4] Building fresh packages...
-    warning Your current version of Yarn is out of date. The latest version is "1.22.5", while you're on "1.22.4".
-    info To upgrade, run the following command:
-    $ sudo apt-get update && sudo apt-get install yarn
-    $ yarn lint && yarn clean && webpack -p
-    $ jshint --verbose static/index.js static/scripts static/dashboard static/dialogs static/graph static/slickgrid
-    $ rimraf ../public/dist
-    Hash: f7ac1b231bfa408ab853
-    Version: webpack 3.10.0
-    Time: 83638ms
-                                                        Asset       Size  Chunks                    Chunk Names
-                           ui-icons_222222_256x240.000cda.png    3.03 kB          [emitted]
-                           ui-icons_454545_256x240.6448e8.png    3.03 kB          [emitted]
-    ...                    
-                                         editor.worker.js.map     920 kB      59  [emitted]         editor.worker
-                                                 index.js.map    6.11 kB      60  [emitted]         index
-      [44] (webpack)/buildin/global.js 509 bytes {53} {54} {55} {56} {57} {58} {59} [built]
-      [76] ./static/dialogs/dialogs.js 7.12 kB {53} [built]
-      [77] ./static/scripts/dderl.js 27.5 kB {53} [built]
-     [140] ./static/jquery-ui-helper/helper.js 1.3 kB {53} [built]
-     [271] ./static/scripts/login.js 14.5 kB {53} [built]
-     [313] ./static/scripts/table-selection.js 798 bytes {53} [built]
-     [354] ./static/scripts/connect.js 29.7 kB {53} [built]
-     [485] ./static/scripts/dderl.sql.js 48.7 kB {53} [built]
-     [589] ./static/index.js 3.93 kB {53} [built]
-    [1371] ./static/styles/jquery-ui-smoothness/jquery-ui.css 1.05 kB {53} [built]
-    [1379] ./static/styles/slick.grid.css 1.04 kB {53} [built]
-    [1385] ./static/styles/slick.columnpicker.css 1.06 kB {53} [built]
-    [1387] ./static/styles/dropdown.css 1.03 kB {53} [built]
-    [1389] ./static/styles/dderl.sql.css 1.03 kB {53} [built]
-    [1420] ./static/index.html 56 bytes {60} [built]
-        + 1724 hidden modules
-    Done in 133.18s.
-    root@7789897326da:/dderl/priv/dev#
+![](priv/.BUILD_images/yarn_start.png)    
+    
+Sample output - end:    
+    
+![](priv/.BUILD_images/yarn_end.png)
 
 #### 2.2.3.4 Now you can either execute one of the commands from section 2.1 point 4 or start DDErl directly with `rebar3 shell`:
 
     cd ../..
     rebar3 shell
     
-Sample output:    
+Sample output - start:    
     
-    ===> Fetching rebar3_hex v6.9.6
-    ===> Downloaded package, caching at /root/.cache/rebar3/hex/hexpm/packages/rebar3_hex-6.9.6.tar
-    ===> Fetching hex_core v0.6.9
-    ===> Downloaded package, caching at /root/.cache/rebar3/hex/hexpm/packages/hex_core-0.6.9.tar
-    ===> Fetching verl v1.0.2
-    ===> Downloaded package, caching at /root/.cache/rebar3/hex/hexpm/packages/verl-1.0.2.tar
-    ===> Compiling verl
-    ===> Compiling hex_core
-    ===> Compiling rebar3_hex
-    ...
-    ===> Booted oranif
-    ===> Booted prometheus
-    ===> Booted dderl
-    2020-08-31 15:58:42.591 [warning] [<0.5964.0>@dperl_cp:log_nodes_status:286] [dderl@127.0.0.1] job : Node added
-    2020-08-31 15:58:46.592 [warning] [<0.5983.0>@dperl_cp:log_nodes_status:286] [dderl@127.0.0.1] service : Node added
-    2020-08-31 15:58:49.669 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddView
-    2020-08-31 15:58:49.701 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddCmd
-    2020-08-31 15:58:49.746 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddAdapter
-    2020-08-31 15:58:49.806 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddConfig
-    2020-08-31 15:58:49.854 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddTable
-    2020-08-31 15:58:49.888 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddAlias
-    2020-08-31 15:59:10.180 [info] [imem<0.5606.0>@imem_snap:snap_log:928] snapshot created for ddConfig
+![](priv/.BUILD_images/rebar3_shell_start.png)
+
+Sample output - end:    
+    
+![](priv/.BUILD_images/rebar3_shell_end.png)
 
 #### 2.2.3.5 Finally DDErl is ready and can be operated via a Browser
 
