@@ -74,7 +74,7 @@ This command creates the network `dderl_kxn_net` and the two docker containers `
 
     docker-compose up -d
     
-Sample output:    
+**Sample output:**    
     
 ![](priv/.BUILD_images/compose_up.png)
 
@@ -84,7 +84,7 @@ If the Docker images are not yet available, Docker compose will load them from D
 
     docker exec -it kxn_db_ora bash
     
-Sample database setup:    
+**Sample database setup:**    
     
     sqlplus sys/oracle@localhost:1521/orclpdb1 as sysdba
     
@@ -135,7 +135,7 @@ Sample database setup:
 
     docker exec -it kxn_dev bash
     
-Sample output:    
+**Sample output:**    
     
 ![](priv/.BUILD_images/docker_exec.png)    
 
@@ -149,7 +149,7 @@ Inside the  development container `kxn_dev` the database container `kxn_db_ora` 
 
     git clone https://github.com/KonnexionsGmbH/dderl
     
-Sample output:   
+**Sample output:**   
  
 ![](priv/.BUILD_images/git_clone.png)
 
@@ -158,11 +158,11 @@ Sample output:
     cd priv/dev
     yarn install-build-prod
     
-Sample output - start:    
+**Sample output - start:**    
     
 ![](priv/.BUILD_images/yarn_start.png)    
     
-Sample output - end:    
+**Sample output - end:**    
     
 ![](priv/.BUILD_images/yarn_end.png)
 
@@ -171,11 +171,11 @@ Sample output - end:
     cd ../..
     rebar3 shell
     
-Sample output - start:    
+**Sample output - start:**    
     
 ![](priv/.BUILD_images/rebar3_shell_start.png)
 
-Sample output - end:    
+**Sample output - end:**    
     
 ![](priv/.BUILD_images/rebar3_shell_end.png)
 
