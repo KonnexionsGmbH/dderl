@@ -96,12 +96,9 @@ If the Docker images are not yet available, Docker compose will load them from D
     grant unlimited tablespace to scott;
     grant create table to scott;
     grant create view to scott;
-
-![](priv/.BUILD_images/sqlplus_2.png)
-    
     exit
-    
-![](priv/.BUILD_images/sqlplus_3.png)
+
+![](priv/.BUILD_images/sqlplus_2.png) 
 
 ### 2.2.3. Building DDErl
 
@@ -122,6 +119,7 @@ Inside the  development container `kxn_dev` the database container `kxn_db_ora` 
 #### 2.2.3.2 First you need to download the DDErl repository from GitHub:
 
     git clone https://github.com/KonnexionsGmbH/dderl
+    cd dderl
     
 **Sample output:**   
  
@@ -129,8 +127,7 @@ Inside the  development container `kxn_dev` the database container `kxn_db_ora` 
 
 #### 2.2.3.3 Then the dependencies of DDErl have to be satisfied:
 
-    cd priv/dev
-    yarn install-build-prod
+    ./build_fe.sh
     
 **Sample output - start:**    
     
@@ -142,7 +139,6 @@ Inside the  development container `kxn_dev` the database container `kxn_db_ora` 
 
 #### 2.2.3.4 Now you can either execute one of the commands from section 2.1 point 4 or start DDErl directly with `rebar3 shell`:
 
-    cd ../..
     rebar3 shell
     
 **Sample output - start:**    
