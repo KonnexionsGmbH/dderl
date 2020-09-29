@@ -70,7 +70,7 @@ The following instructions demonstrate how to use the Docker compose script.
 
 ### 2.2.1. Building DDErl with Dockrer Compose in the DDErl root directory
 
-This command creates the network `dderl_kxn_net` and the two docker containers `kxn_dev` and `kxn_db_ora`:
+This command installs an executable DDErl:
 
     docker-compose up -d
     
@@ -78,8 +78,15 @@ This command creates the network `dderl_kxn_net` and the two docker containers `
     
 ![](priv/.BUILD_images/compose_up.png)
 
-If the Docker images are not yet available, Docker compose will load them from DockerHub.
-     
+The following processing steps are performed:
+1. If not already there, download the Oracle database image and create the container `kxn_db_ora` with an Oracle database (currently 19c).
+1. If not yet available, download the Konnexion development image and create the corresponding container `kxn_dev`.
+1. Both containers are assigned to network `dderl_kxn_net`.- 
+1. After the database is ready, the schema `scott` is created with the password `tiger`. 
+1. The repository `https://github.com/KonnexionsGmbH/dderl` is downloaded from Github.
+1. The frontend to `DDErl` is created.
+1. `DDErl` is compiled and started
+   
 ### 2.2.2. Building DDErl manually
 
 #### 2.2.2.1 Enter the Konnexions development container:
