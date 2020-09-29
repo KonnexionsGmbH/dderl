@@ -68,7 +68,7 @@ The use of Konnexions development image makes the build process independent of t
 The only requirement is the installation of Docker Desktop and possibly Docker Compose (Unix operating systems).
 The following instructions demonstrate how to use the Docker compose script. 
 
-### 2.2.1. Start Docker compose in the DDErl root directory
+### 2.2.1. Building DDErl with Dockrer Compose in the DDErl root directory
 
 This command creates the network `dderl_kxn_net` and the two docker containers `kxn_dev` and `kxn_db_ora`:
 
@@ -80,11 +80,23 @@ This command creates the network `dderl_kxn_net` and the two docker containers `
 
 If the Docker images are not yet available, Docker compose will load them from DockerHub.
      
-### 2.2.2. Optionally the database can be set up
+### 2.2.2. Building DDErl manually
 
-    docker exec -it kxn_db_ora bash
+#### 2.2.2.1 Enter the Konnexions development container:
+
+    docker exec -it kxn_dev bash
     
-**Sample database setup:**    
+**Sample output:**    
+    
+![](priv/.BUILD_images/docker_exec.png)    
+
+Inside the  development container `kxn_dev` the database container `kxn_db_ora` can be addressed with the `kxn_db_ora` as hostname:  
+
+    ping kxn_db_ora
+
+![](priv/.BUILD_images/ping.png)
+
+#### 2.2.2.2 Optionally the database can be set up
     
     sqlplus sys/oracle@kxn_db_ora:1521/orclpdb1 as sysdba
     
@@ -100,23 +112,7 @@ If the Docker images are not yet available, Docker compose will load them from D
 
 ![](priv/.BUILD_images/sqlplus_2.png) 
 
-### 2.2.3. Building DDErl
-
-#### 2.2.3.1 Enter the Konnexions development container:
-
-    docker exec -it kxn_dev bash
-    
-**Sample output:**    
-    
-![](priv/.BUILD_images/docker_exec.png)    
-
-Inside the  development container `kxn_dev` the database container `kxn_db_ora` can be addressed with the `kxn_db_ora` as hostname:  
-
-    ping kxn_db_ora
-
-![](priv/.BUILD_images/ping.png)
-
-#### 2.2.3.2 First you need to download the DDErl repository from GitHub:
+#### 2.2.2.3 Next you need to download the DDErl repository from GitHub:
 
     git clone https://github.com/KonnexionsGmbH/dderl
     cd dderl
@@ -125,7 +121,7 @@ Inside the  development container `kxn_dev` the database container `kxn_db_ora` 
  
 ![](priv/.BUILD_images/git_clone.png)
 
-#### 2.2.3.3 Then the dependencies of DDErl have to be satisfied:
+#### 2.2.2.4 Then the dependencies of DDErl have to be satisfied:
 
     ./build_fe.sh
     
@@ -137,7 +133,7 @@ Inside the  development container `kxn_dev` the database container `kxn_db_ora` 
     
 ![](priv/.BUILD_images/yarn_end.png)
 
-#### 2.2.3.4 Now you can either execute one of the commands from section 2.1 point 4 or start DDErl directly with `rebar3 shell`:
+#### 2.2.2.5 Now you can either execute one of the commands from section 2.1 point 4 or start DDErl directly with `rebar3 shell`:
 
     rebar3 shell
     
@@ -149,15 +145,23 @@ Inside the  development container `kxn_dev` the database container `kxn_db_ora` 
     
 ![](priv/.BUILD_images/rebar3_shell_end.png)
 
-#### 2.2.3.5 Finally DDErl is ready and can be operated via a Browser
+### 2.2.3 Finally DDErl is ready and can be operated via a Browser
 
-##### Login screen:
+#### Login screen:
 
 ![](priv/.BUILD_images/Login.png)
 
 User: `system` Password: `change_on_install`
 
-##### Database connection:
+#### Database connection:
+
+|           |                  |
+| ---       | ---              |
+| Service   | **`orclpdb1`**   |
+| Host / IP | **`kxn_db_ora`** |
+| Port      | **`1521`**       |
+| User      | **`scott`**      |
+| Password  | **`tiger`**      |
 
 ![](priv/.BUILD_images/Connect.png)
 
