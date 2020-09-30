@@ -13,12 +13,9 @@ services:
     
   dev:
     command: /bin/bash -c "
-      while [ `docker inspect -f {{.State.Health.Status}} kxn_db_ora` != 'healthy' ]; do docker ps --filter 'name=kxn_db_ora'; sleep 60; done
-      && sqlplus sys/oracle@kxn_db_ora:1521/orclpdb1 as sysdba @/usr/bin/run_db_setup.sql
-      && git clone https://walter-weinmann:6151c6a8fb817c50c88856d02c14d7a3bfea8557@github.com/KonnexionsGmbH/dderl.git
-      && cd dderl
-      && ./build_fe.sh
-      && rebar3 shell
+      while [ `docker inspect -f {{.State.Health.Status}} kxn_db_ora` != 'healthy' ]; do docker ps --filter 'name=kxn_db_ora'; sleep 30; done
+      && sqlplus sys/oracle@kxn_db_ora:1521/orclpdb1 as sysdba @/usr/opt/dderl/run_db_setup.sql
+      && ./usr/opt/dderl/run_application_setup.sh
       "
     container_name: kxn_dev
     depends_on:
@@ -31,6 +28,7 @@ services:
     tty: true
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+#     - ./Transfer:/Transfer                           # Example: (create and) use the directory `Transfer`
 
 networks:
   kxn_net:
