@@ -43,7 +43,7 @@ This can be used as an easily customizable template.
 
     cd dderl
 
-### 2.1.3 Install all the dependencies for DDErl:
+### 2.1.3 Create the frontend to `DDErl`:
 
     cd priv/dev
     yarn install-build-prod
@@ -68,7 +68,7 @@ The use of Konnexions development image makes the build process independent of t
 The only requirement is the installation of Docker Desktop and possibly Docker Compose (Unix operating systems).
 The following instructions demonstrate how to use the Docker compose script. 
 
-### 2.2.1. Building DDErl with Dockrer Compose in the DDErl root directory
+### 2.2.1. Building DDErl with Docker Compose in the DDErl root directory
 
 This command installs an executable DDErl:
 
@@ -128,7 +128,7 @@ Inside the  development container `kxn_dev` the database container `kxn_db_ora` 
  
 ![](priv/.BUILD_images/git_clone.png)
 
-#### 2.2.2.4 Then the dependencies of DDErl have to be satisfied:
+#### 2.2.2.4 Then the frontend to `DDErl` has to be created:
 
     ./build_fe.sh
     
