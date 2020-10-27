@@ -80,12 +80,12 @@ This command installs an executable DDErl:
 
 The following processing steps are performed:
 1. If not already there, download the Oracle database image and create the container `kxn_db_ora` with an Oracle database (currently 19c).
-1. If not yet available, download the Konnexion development image and create the corresponding container `kxn_dev`.
-1. Both containers are assigned to network `dderl_kxn_net`.- 
-1. After the database is ready, the schema `scott` is created with the password `tiger`. 
-1. The repository `https://github.com/KonnexionsGmbH/dderl` is downloaded from Github.
-1. The frontend to `DDErl` is created.
-1. `DDErl` is compiled and started
+2. If not yet available, download the Konnexion development image and create the corresponding container `kxn_dev`.
+3. Both containers are assigned to network `dderl_kxn_net`.
+4. After the database is ready, the schema `scott` is created with the password `regit` (only with a new database container). 
+5. The repository `https://github.com/KonnexionsGmbH/dderl` is downloaded from Github (only with a new development container).
+6. The frontend to `DDErl` is created (only with a new development container).
+7. `DDErl` is compiled and started.
    
 ### 2.2.2. Building DDErl manually
 
@@ -109,7 +109,7 @@ Inside the  development container `kxn_dev` the database container `kxn_db_ora` 
     
 ![](priv/.BUILD_images/sqlplus_1.png)
     
-    create user scott identified by tiger;
+    create user scott identified by regit;
     grant alter system to scott;
     grant create session to scott;
     grant unlimited tablespace to scott;
@@ -168,7 +168,7 @@ User: `system` Password: `change_on_install`
 | Host / IP | **`kxn_db_ora`** |
 | Port      | **`1521`**       |
 | User      | **`scott`**      |
-| Password  | **`tiger`**      |
+| Password  | **`regit`**      |
 
 ![](priv/.BUILD_images/Connect.png)
 
