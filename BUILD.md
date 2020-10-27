@@ -43,7 +43,7 @@ This can be used as an easily customizable template.
 
     cd dderl
 
-### 2.1.3 Install all the dependencies for DDErl:
+### 2.1.3 Create the frontend to `DDErl`:
 
     cd priv/dev
     yarn install-build-prod
@@ -68,9 +68,9 @@ The use of Konnexions development image makes the build process independent of t
 The only requirement is the installation of Docker Desktop and possibly Docker Compose (Unix operating systems).
 The following instructions demonstrate how to use the Docker compose script. 
 
-### 2.2.1. Start Docker compose in the DDErl root directory
+### 2.2.1. Building DDErl with Docker Compose in the DDErl root directory
 
-This command creates the network `dderl_kxn_net` and the two docker containers `kxn_dev` and `kxn_db_ora`:
+This command installs an executable DDErl:
 
     docker-compose up -d
     
@@ -78,34 +78,18 @@ This command creates the network `dderl_kxn_net` and the two docker containers `
     
 ![](priv/.BUILD_images/compose_up.png)
 
-If the Docker images are not yet available, Docker compose will load them from DockerHub.
-     
-### 2.2.2. Optionally the database can be set up
+The following processing steps are performed:
+1. If not already there, download the Oracle database image and create the container `kxn_db_ora` with an Oracle database (currently 19c).
+2. If not yet available, download the Konnexion development image and create the corresponding container `kxn_dev`.
+3. Both containers are assigned to network `dderl_kxn_net`.
+4. After the database is ready, the schema `scott` is created with the password `regit` (only with a new database container). 
+5. The repository `https://github.com/KonnexionsGmbH/dderl` is downloaded from Github (only with a new development container).
+6. The frontend to `DDErl` is created (only with a new development container).
+7. `DDErl` is compiled and started.
+   
+### 2.2.2. Building DDErl manually
 
-    docker exec -it kxn_db_ora bash
-    
-**Sample database setup:**    
-    
-    sqlplus sys/oracle@kxn_db_ora:1521/orclpdb1 as sysdba
-    
-![](priv/.BUILD_images/sqlplus_1.png)
-    
-    create user scott identified by tiger;
-    grant alter system to scott;
-    grant create session to scott;
-    grant unlimited tablespace to scott;
-    grant create table to scott;
-    grant create view to scott;
-
-![](priv/.BUILD_images/sqlplus_2.png)
-    
-    exit
-    
-![](priv/.BUILD_images/sqlplus_3.png)
-
-### 2.2.3. Building DDErl
-
-#### 2.2.3.1 Enter the Konnexions development container:
+#### 2.2.2.1 Enter the Konnexions development container:
 
     docker exec -it kxn_dev bash
     
@@ -119,18 +103,34 @@ Inside the  development container `kxn_dev` the database container `kxn_db_ora` 
 
 ![](priv/.BUILD_images/ping.png)
 
-#### 2.2.3.2 First you need to download the DDErl repository from GitHub:
+#### 2.2.2.2 Optionally the database can be set up
+    
+    sqlplus sys/oracle@kxn_db_ora:1521/orclpdb1 as sysdba
+    
+![](priv/.BUILD_images/sqlplus_1.png)
+    
+    create user scott identified by regit;
+    grant alter system to scott;
+    grant create session to scott;
+    grant unlimited tablespace to scott;
+    grant create table to scott;
+    grant create view to scott;
+    exit
+
+![](priv/.BUILD_images/sqlplus_2.png) 
+
+#### 2.2.2.3 Next you need to download the DDErl repository from GitHub:
 
     git clone https://github.com/KonnexionsGmbH/dderl
+    cd dderl
     
 **Sample output:**   
  
 ![](priv/.BUILD_images/git_clone.png)
 
-#### 2.2.3.3 Then the dependencies of DDErl have to be satisfied:
+#### 2.2.2.4 Then the frontend to `DDErl` has to be created:
 
-    cd priv/dev
-    yarn install-build-prod
+    ./build_fe.sh
     
 **Sample output - start:**    
     
@@ -140,9 +140,8 @@ Inside the  development container `kxn_dev` the database container `kxn_db_ora` 
     
 ![](priv/.BUILD_images/yarn_end.png)
 
-#### 2.2.3.4 Now you can either execute one of the commands from section 2.1 point 4 or start DDErl directly with `rebar3 shell`:
+#### 2.2.2.5 Now you can either execute one of the commands from section 2.1 point 4 or start DDErl directly with `rebar3 shell`:
 
-    cd ../..
     rebar3 shell
     
 **Sample output - start:**    
@@ -153,15 +152,23 @@ Inside the  development container `kxn_dev` the database container `kxn_db_ora` 
     
 ![](priv/.BUILD_images/rebar3_shell_end.png)
 
-#### 2.2.3.5 Finally DDErl is ready and can be operated via a Browser
+### 2.2.3 Finally DDErl is ready and can be operated via a Browser
 
-##### Login screen:
+#### Login screen:
 
 ![](priv/.BUILD_images/Login.png)
 
 User: `system` Password: `change_on_install`
 
-##### Database connection:
+#### Database connection:
+
+|           |                  |
+| ---       | ---              |
+| Service   | **`orclpdb1`**   |
+| Host / IP | **`kxn_db_ora`** |
+| Port      | **`1521`**       |
+| User      | **`scott`**      |
+| Password  | **`regit`**      |
 
 ![](priv/.BUILD_images/Connect.png)
 
