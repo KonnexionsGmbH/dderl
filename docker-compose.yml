@@ -2,27 +2,27 @@ version: '3.8'
 
 services:
   db:
-    container_name: kxn_db_ora
+    container_name: dderl_db_ora
     environment:
       ORACLE_PWD: oracle
     image: konnexionsgmbh/db_19_3_ee:latest
     networks:
-      - kxn_net
+      - dderl_net
     ports:
       - "1521:1521"
     
   dev:
     command: /bin/bash -c "
-      while [ `docker inspect -f {{.State.Health.Status}} kxn_db_ora` != 'healthy' ]; do docker ps --filter 'name=kxn_db_ora'; sleep 30; done
-      && sqlplus sys/oracle@kxn_db_ora:1521/orclpdb1 as sysdba @/usr/opt/dderl/run_db_setup.sql
+      while [ `docker inspect -f {{.State.Health.Status}} dderl_db_ora` != 'healthy' ]; do docker ps --filter 'name=dderl_db_ora'; sleep 30; done
+      && sqlplus sys/oracle@dderl_db_ora:1521/orclpdb1 as sysdba @/usr/opt/dderl/run_db_setup.sql
       && ./usr/opt/dderl/run_application_setup.sh
       "
-    container_name: kxn_dev
+    container_name: dderl_dev
     depends_on:
       - db
-    image: konnexionsgmbh/kxn_dev:latest
+    image: konnexionsgmbh/dderl_dev:latest
     networks:
-      - kxn_net
+      - dderl_net
     ports:
       - "8443:8443"
     tty: true
@@ -31,4 +31,4 @@ services:
 #     - ./Transfer:/Transfer                           # Example: (create and) use the directory `Transfer`
 
 networks:
-  kxn_net:
+  dderl_net:

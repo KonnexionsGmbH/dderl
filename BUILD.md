@@ -17,14 +17,14 @@ All instructions have been tested with Ubuntu 20.04 (Focal Fossa).
 
 The following software components are required in addition to a Unix operating system:
 
-| Component | From Version  | Source                                                   |
-| --------- | ------------- | -------------------------------------------------------- |
-| Erlang    | OTP 23.0      | https://www.erlang-solutions.com/resources/download.html |
-| gcc       | 9.3.0         | https://gcc.gnu.org/                                     |
-| git       | 2.28.0        | https://git-scm.com/                                     | 
-| GNU make  | 4.2.1         | https://www.gnu.org/software/make/                       |
-| rebar3    | V3.13.2       | https://www.rebar3.org/                                  |
-| Yarn      | 1.22.5        | https://yarnpkg.com                                      |
+| Component | From Version  | Source                                             |
+| --------- | ------------- | ---------------------------------------------------|
+| Erlang    | 23.3.1        | https://erlang.org/download/otp_versions_tree.html |
+| gcc       | 10.2.0        | https://gcc.gnu.org/                               |
+| git       | 2.31.1        | https://git-scm.com/                               | 
+| GNU make  | 4.3           | https://www.gnu.org/software/make/                 |
+| rebar3    | V3.14.3       | https://www.rebar3.org/                            |
+| Yarn      | 1.22.10       | https://github.com/yarnpkg/yarn                    |
 
 ## <a name="buildinf_dderl"></a> 2. Building DDErl
 
