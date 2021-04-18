@@ -35,15 +35,15 @@ This can be used as an easily customizable template.
 
 ## <a name="building_on_operating_system_level"></a> 2.1 Building On Operating System Level
 
-### 2.1.1 Download the DDErl repository from GitHub:
+### 2.1.1 Download the DDErl repository from GitHub
 
-    git clone https://github.com/KonnexionsGmbH/dderl`
+    git clone https://github.com/KonnexionsGmbH/dderl
 
 ### 2.1.2 Change to the DDErl directory
 
     cd dderl
 
-### 2.1.3 Create the frontend to `DDErl`:
+### 2.1.3 Create the frontend to `DDErl`
 
     cd priv/dev
     yarn install-build-prod
@@ -91,15 +91,15 @@ The following processing steps are performed:
 
 #### 2.2.2.1 Start the Oracle database container:
 
-- if the network is not yet existing:
+##### if the network is not yet existing:
 
     docker network create dderl_default
 
-- if the oracle database container is not yet existing:
+##### if the oracle database container is not yet existing:
 
     docker create --shm-size 1G --name dderl_db_ora --network dderl_default -p 1521:1521/tcp -e ORACLE_PWD=oracle konnexionsgmbh/db_19_3_ee
 
-- start the Oracle database container:
+##### start the Oracle database container:
 
     docker start dderl_db_ora
 
@@ -107,17 +107,17 @@ The following processing steps are performed:
 
 ![](priv/.BUILD_images/start_oracle_db.png)
 
-#### 2.2.2.2 Start and enter the DDErl development container:
+#### 2.2.2.2 Start and enter the DDErl development container
 
-- if the DDErl development container is not yet existing:
+##### if the DDErl development container is not yet existing:
 
     docker create --name dderl_dev --network dderl_default -p 8443:8443 -t konnexionsgmbh/dderl_dev:latest
 
-- start the DDErl development container:
+##### start the DDErl development container:
 
     docker start dderl_dev
 
-- enter the DDErl development container:
+##### enter the DDErl development container:
 
     docker exec -it dderl_dev bash
     
@@ -147,7 +147,7 @@ Inside the  development container `dderl_dev` the database container `dderl_db_o
 
 ![](priv/.BUILD_images/sqlplus_2.png) 
 
-#### 2.2.2.4 Next you need to download the DDErl repository from GitHub:
+#### 2.2.2.4 Next you need to download the DDErl repository from GitHub
 
     git clone https://github.com/KonnexionsGmbH/dderl
     cd dderl
@@ -156,7 +156,7 @@ Inside the  development container `dderl_dev` the database container `dderl_db_o
  
 ![](priv/.BUILD_images/git_clone.png)
 
-#### 2.2.2.5 Then the frontend to `DDErl` has to be created:
+#### 2.2.2.5 Then the frontend to `DDErl` has to be created
 
     ./build_fe.sh
     
@@ -168,7 +168,7 @@ Inside the  development container `dderl_dev` the database container `dderl_db_o
     
 ![](priv/.BUILD_images/yarn_end.png)
 
-#### 2.2.2.6 Now you can either execute one of the commands from section 2.1 point 4 or start DDErl directly with `rebar3 shell`:
+#### 2.2.2.6 Now you can either execute one of the commands from section 2.1 point 4 or start DDErl directly with `rebar3 shell`
 
     rebar3 shell
     
