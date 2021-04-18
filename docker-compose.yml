@@ -6,8 +6,6 @@ services:
     environment:
       ORACLE_PWD: oracle
     image: konnexionsgmbh/db_19_3_ee:latest
-    networks:
-      - dev_net
     ports:
       - "1521:1521"
     
@@ -24,14 +22,9 @@ services:
     depends_on:
       - db
     image: konnexionsgmbh/dderl_dev:latest
-    networks:
-      - dev_net
     ports:
       - "8443:8443"
     tty: true
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 #     - ./Transfer:/Transfer                           # Example: (create and) use the directory `Transfer`
-
-networks:
-  dev_net:

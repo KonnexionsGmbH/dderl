@@ -28,9 +28,9 @@ The following software components are required in addition to a Unix operating s
 
 ## <a name="buildinf_dderl"></a> 2. Building DDErl
 
-The build process can either be done directly on the operating system level or based on the Konnexions development image.
+The build process can either be done directly on the operating system level or based on the DDErl development image.
 For the former, all the software components mentioned under section 1 must be installed, for the latter they are already pre-installed in the image.
-In addition, a Docker compose script is available that combines the Konnexions development image with an empty Oracle database. 
+In addition, a Docker compose script is available that combines the DDErl development image with an empty Oracle database. 
 This can be used as an easily customizable template.
 
 ## <a name="building_on_operating_system_level"></a> 2.1 Building On Operating System Level
@@ -64,7 +64,7 @@ This can be used as an easily customizable template.
 
 ## <a name="building_using_docker_containers"></a> 2.2 Building Using Docker Containers
 
-The use of Konnexions development image makes the build process independent of the host operating system.
+The use of DDErl development image makes the build process independent of the host operating system.
 The only requirement is the installation of Docker Desktop and possibly Docker Compose (Unix operating systems).
 The following instructions demonstrate how to use the Docker compose script. 
 
@@ -81,7 +81,7 @@ This command installs an executable DDErl:
 The following processing steps are performed:
 1. If not already there, download the Oracle database image and create the container `dderl_db_ora` with an Oracle database (currently 19c).
 2. If not yet available, download the Konnexion development image and create the corresponding container `dderl_dev`.
-3. Both containers are assigned to network `dderl_dev_net`.
+3. Both containers are assigned to network `dderl_default`.
 4. After the database is ready, the schema `scott` is created with the password `regit` (only with a new database container). 
 5. The repository `https://github.com/KonnexionsGmbH/dderl` is downloaded from Github (only with a new development container).
 6. The frontend to `DDErl` is created (only with a new development container).
@@ -89,7 +89,35 @@ The following processing steps are performed:
    
 ### 2.2.2. Building DDErl manually
 
-#### 2.2.2.1 Enter the Konnexions development container:
+#### 2.2.2.1 Start the Oracle database container:
+
+- if the network is not yet existing:
+
+    docker network create dderl_default
+
+- if the oracle database container is not yet existing:
+
+    docker create --shm-size 1G --name dderl_db_ora --network dderl_default -p 1521:1521/tcp -e ORACLE_PWD=oracle konnexionsgmbh/db_19_3_ee
+
+- start the Oracle database container:
+
+    docker start dderl_db_ora
+
+**Sample output:**
+
+![](priv/.BUILD_images/start_oracle_db.png)
+
+#### 2.2.2.2 Start and enter the DDErl development container:
+
+- if the DDErl development container is not yet existing:
+
+    docker create --name dderl_dev --network dderl_default -p 8443:8443 -t konnexionsgmbh/dderl_dev:latest
+
+- start the DDErl development container:
+
+    docker start dderl_dev
+
+- enter the DDErl development container:
 
     docker exec -it dderl_dev bash
     
@@ -103,7 +131,7 @@ Inside the  development container `dderl_dev` the database container `dderl_db_o
 
 ![](priv/.BUILD_images/ping.png)
 
-#### 2.2.2.2 Optionally the database can be set up
+#### 2.2.2.3 Optionally the database can be set up
     
     sqlplus sys/oracle@dderl_db_ora:1521/orclpdb1 as sysdba
     
@@ -119,7 +147,7 @@ Inside the  development container `dderl_dev` the database container `dderl_db_o
 
 ![](priv/.BUILD_images/sqlplus_2.png) 
 
-#### 2.2.2.3 Next you need to download the DDErl repository from GitHub:
+#### 2.2.2.4 Next you need to download the DDErl repository from GitHub:
 
     git clone https://github.com/KonnexionsGmbH/dderl
     cd dderl
@@ -128,7 +156,7 @@ Inside the  development container `dderl_dev` the database container `dderl_db_o
  
 ![](priv/.BUILD_images/git_clone.png)
 
-#### 2.2.2.4 Then the frontend to `DDErl` has to be created:
+#### 2.2.2.5 Then the frontend to `DDErl` has to be created:
 
     ./build_fe.sh
     
@@ -140,7 +168,7 @@ Inside the  development container `dderl_dev` the database container `dderl_db_o
     
 ![](priv/.BUILD_images/yarn_end.png)
 
-#### 2.2.2.5 Now you can either execute one of the commands from section 2.1 point 4 or start DDErl directly with `rebar3 shell`:
+#### 2.2.2.6 Now you can either execute one of the commands from section 2.1 point 4 or start DDErl directly with `rebar3 shell`:
 
     rebar3 shell
     
