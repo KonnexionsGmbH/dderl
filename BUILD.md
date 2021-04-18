@@ -50,7 +50,7 @@ This can be used as an easily customizable template.
 
 ### 2.1.4 Build alternatively
 
-#### either backend and frontend:
+#### Either backend and frontend:
 
     rebar3 as ui compile
 
@@ -91,15 +91,15 @@ The following processing steps are performed:
 
 #### 2.2.2.1 Start the Oracle database container:
 
-##### if the network is not yet existing:
+##### If the network is not yet existing:
 
     docker network create dderl_default
 
-##### if the oracle database container is not yet existing:
+##### If the oracle database container is not yet existing:
 
     docker create --shm-size 1G --name dderl_db_ora --network dderl_default -p 1521:1521/tcp -e ORACLE_PWD=oracle konnexionsgmbh/db_19_3_ee
 
-##### start the Oracle database container:
+##### Start the Oracle database container:
 
     docker start dderl_db_ora
 
@@ -109,15 +109,15 @@ The following processing steps are performed:
 
 #### 2.2.2.2 Start and enter the DDErl development container
 
-##### if the DDErl development container is not yet existing:
+##### If the DDErl development container is not yet existing:
 
     docker create --name dderl_dev --network dderl_default -p 8443:8443 -t konnexionsgmbh/dderl_dev:latest
 
-##### start the DDErl development container:
+##### Start the DDErl development container:
 
     docker start dderl_dev
 
-##### enter the DDErl development container:
+##### Enter the DDErl development container:
 
     docker exec -it dderl_dev bash
     
