@@ -79,9 +79,9 @@ This command installs an executable DDErl:
 ![](priv/.BUILD_images/compose_up.png)
 
 The following processing steps are performed:
-1. If not already there, download the Oracle database image and create the container `kxn_db_ora` with an Oracle database (currently 19c).
-2. If not yet available, download the Konnexion development image and create the corresponding container `kxn_dev`.
-3. Both containers are assigned to network `dderl_kxn_net`.
+1. If not already there, download the Oracle database image and create the container `dderl_db_ora` with an Oracle database (currently 19c).
+2. If not yet available, download the Konnexion development image and create the corresponding container `dderl_dev`.
+3. Both containers are assigned to network `dderl_dev_net`.
 4. After the database is ready, the schema `scott` is created with the password `regit` (only with a new database container). 
 5. The repository `https://github.com/KonnexionsGmbH/dderl` is downloaded from Github (only with a new development container).
 6. The frontend to `DDErl` is created (only with a new development container).
@@ -91,21 +91,21 @@ The following processing steps are performed:
 
 #### 2.2.2.1 Enter the Konnexions development container:
 
-    docker exec -it kxn_dev bash
+    docker exec -it dderl_dev bash
     
 **Sample output:**    
     
 ![](priv/.BUILD_images/docker_exec.png)    
 
-Inside the  development container `kxn_dev` the database container `kxn_db_ora` can be addressed with the `kxn_db_ora` as hostname:  
+Inside the  development container `dderl_dev` the database container `dderl_db_ora` can be addressed with the `dderl_db_ora` as hostname:  
 
-    ping kxn_db_ora
+    ping dderl_db_ora
 
 ![](priv/.BUILD_images/ping.png)
 
 #### 2.2.2.2 Optionally the database can be set up
     
-    sqlplus sys/oracle@kxn_db_ora:1521/orclpdb1 as sysdba
+    sqlplus sys/oracle@dderl_db_ora:1521/orclpdb1 as sysdba
     
 ![](priv/.BUILD_images/sqlplus_1.png)
     
@@ -162,13 +162,13 @@ User: `system` Password: `change_on_install`
 
 #### Database connection:
 
-|           |                  |
-| ---       | ---              |
-| Service   | **`orclpdb1`**   |
-| Host / IP | **`kxn_db_ora`** |
-| Port      | **`1521`**       |
-| User      | **`scott`**      |
-| Password  | **`regit`**      |
+|           |                     |
+| ---       | ---                 |
+| Service   | **`orclpdb1`**      |
+| Host / IP | **`ddeerl_db_ora`** |
+| Port      | **`1521`**          |
+| User      | **`scott`**         |
+| Password  | **`regit`**         |
 
 ![](priv/.BUILD_images/Connect.png)
 
