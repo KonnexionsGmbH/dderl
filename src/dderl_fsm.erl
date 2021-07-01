@@ -7,7 +7,7 @@
 
 -include("dderl.hrl").
 -include("gres.hrl").
--include_lib("imem/include/imem_sql.hrl").
+-include_lib("imem/src/imem_sql.hrl").
 
 -ifndef(NoFilter).
 %% TODO driver should translate for the same effect

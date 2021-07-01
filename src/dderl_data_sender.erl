@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 
 -include("dderl.hrl").
--include_lib("imem/include/imem_meta.hrl"). %% Included for config access
+-include_lib("imem/src/imem_meta.hrl"). %% Included for config access
 
 -export([start_link/3
         ,connect/2
