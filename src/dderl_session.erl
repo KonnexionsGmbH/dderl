@@ -44,6 +44,7 @@
           , lock_state  = unlocked      :: unlocked | locked | screensaver
           , xsrf_token  = <<>>          :: binary()
           , is_proxy    = false         :: boolean()
+          , fido2_challenge             :: map()
          }).
 
 %% Helper functions
@@ -246,6 +247,33 @@ process_call({[<<"ping">>], _ReqData}, _Adapter, From, {SrcIp,_},
             reply(From, #{ping => #{error => show_screen_saver}}, self()),
             State#state{lock_state = screensaver}
     end;
+process_call({[<<"register_key_init">>], ReqData}, _Adapter, From, {SrcIp,_},
+    #state{sess = Session, user = UserName} = State) ->
+    #{<<"host_url">> := HostUrl} = jsx:decode(ReqData, [return_maps]),
+    act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "register_key_init"}, State),
+    {Challenge, RegisterConfig} = dderl_dal:fido2_register_config(dderl, Session, UserName, HostUrl),
+    reply(From, #{<<"register_key_init">> => RegisterConfig}, self()),
+    State#state{fido2_challenge = Challenge};
+process_call({[<<"register_key_attest">>], ReqData}, _Adapter, From, {SrcIp,_},
+             #state{fido2_challenge = Challenge} = State) ->
+    BodyMap = jsx:decode(ReqData, [return_maps]),
+    act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "register_key_init"}, State),
+    #{<<"attestationObject">> := Attestation64,
+      <<"clientDataJSON">> := ClientData,
+      <<"rawID">> := RawId64,
+      <<"type">> := <<"public-key">>} = BodyMap,
+    Attestation = base64:decode(Attestation64),
+    Resp =
+    case 'Elixir.Wax':register(Attestation, ClientData, Challenge) of
+        {ok, {#{attested_credential_data := #{credential_public_key := CPKey}}, Result}} ->
+            erlimem_session:run_cmd(State#state.sess, auth_add_fido2, [{RawId64, CPKey}]),
+            #{result => <<"attestation object validated">>};
+        {error, _} = Error ->
+            ?Info("Wax: attestation object validation failed with error ~p", [Error]),
+            #{error => <<"attestation object validation failed">>}
+    end,
+    reply(From, #{<<"register_key_attest">> => Resp}, self()),
+    State#state{fido2_challenge = undefined};
 %% IMPORTANT:
 % This function clause is placed right after login to be able to catch all
 % request (other than login above) which are NOT to be allowed without a login
@@ -780,11 +808,14 @@ login(ReqData, From, SrcIp, State) ->
             try dderl_dal:process_login(
                          ReqDataMap, State,
                          #{auth => fun(Auth) ->
-                                       erlimem_session:auth((State#state.sess), dderl, Id, Auth)
+                                       erlimem_session:auth(State#state.sess, dderl, Id, Auth)
                                    end,
-                           connInfo => ConnInfo,
+                           connInfo => ConnInfo, app => dderl,
                            relayState => fun dderl_resource:samlRelayStateHandle/2,
                            stateUpdateUsr =>  fun(St, Usr) -> St#state{user=Usr} end,
+                           stateGetUsr =>  fun(St) -> St#state.user end,
+                           stateUpdateFido2Challenge =>  fun(St, Chal) -> St#state{fido2_challenge=Chal} end,
+                           stateGetFido2Challenge =>  fun(St) -> St#state.fido2_challenge end,
                            stateUpdateSKey =>  fun(St, _) -> St end,
                            urlPrefix => dderl:get_url_suffix()}) of
                 {{E,M},St} when is_atom(E) ->
