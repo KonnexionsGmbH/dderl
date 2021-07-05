@@ -98,10 +98,10 @@ init(Req, '$path_probe') ->
     {Code, Resp} = ?PROBE_RESP,
     {ok, cowboy_req:reply(Code, #{}, Resp, Req), undefined};
 init(Req, State) ->
-    Url = iolist_to_binary(cowboy_req:uri(Req)),
+    #{path := Path} = Req,
     Req1 =
-    % case binary:last(Url) of
-        % $/ ->
+    case binary:last(Path) of
+        $/ ->
             Priv = priv_dir(),
             Filename = filename:join([Priv, "public", "dist", "index.html"]),
             case file:read_file(Filename) of
@@ -120,9 +120,15 @@ init(Req, State) ->
                         >>,
                         Req
                     )
-            % end;
-        % _ ->
-            % cowboy_req:reply(301, #{<<"location">> => <<Url/binary,"/">>}, Req)
+            end;
+        _ ->
+            Url = iolist_to_binary(cowboy_req:uri(Req, #{qs => undefined})),
+            QsBin =
+            case Req of
+                #{qs := <<>>} -> <<>>;
+                #{qs := Qs} -> <<"?", Qs/binary>>
+            end,
+            cowboy_req:reply(301, #{<<"location">> => <<Url/binary,"/",QsBin/binary>>}, Req)
     end,
     {ok, Req1, State}.
 

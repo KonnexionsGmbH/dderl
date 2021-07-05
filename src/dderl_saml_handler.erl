@@ -33,7 +33,8 @@ init(Req0, Args) ->
 process_req(Req, S = #state{sp = SP}) ->
     case esaml_cowboy:validate_assertion(SP, fun esaml_util:check_dupe_ets/2, Req) of
         {ok, Assertion, RelayState, Req1} ->
-            Fun = binary_to_term(base64:decode(http_uri:decode(binary_to_list(RelayState)))),
+            [{FunBin, _}] =  uri_string:dissect_query(RelayState),
+            Fun = binary_to_term(base64:decode(FunBin)),
             Fun(Req1, Assertion#esaml_assertion.attributes),
             {cowboy_loop, Req1, S, hibernate};
         {error, Reason, Req2} ->

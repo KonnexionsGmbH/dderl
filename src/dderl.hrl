@@ -216,6 +216,27 @@
 -define(ISENCRYPTMANDATORY, ?GET_CONFIG(samlEncryptIsMandatory,[], true,"SAML - Expect encrypted data")).
 -define(VERIFYRESPONSESIGN, ?GET_CONFIG(samlVerifyResponseSignature,[], true,"SAML - flag to verify response signature")).
 
+-define(FIDO2_REGISTRATION_CONFIG(__APP, __USERNAME),
+        ?GET_CONFIG(fido2RegistrationConfig, [__APP, __USERNAME],
+                    #{attestation => <<"none">>,
+                      authenticatorSelection =>
+                              #{requireResidentKey => false,
+                                userVerification => <<"discouraged">>},
+                      pubKeyCredParams => [#{alg => -7,type => <<"public-key">>}],
+                      rp => #{name => <<"K2 Informatics GmbH">>}},
+                     "FIDO2 Regestration config")).
+
+-define(FIDO2_AUTH_CONFIG(__APP, __USERNAME),
+        ?GET_CONFIG(fido2AuthenticationConfig, [__APP, __USERNAME],
+                    #{userVerification => <<"discouraged">>},
+                    "FIDO2 Authentication config")).
+
+-define(FIDO2_AUTH_CRED_CONFIG(__APP, __USERNAME),
+        ?GET_CONFIG(fido2AuthenticationCredentialConfig, [__APP, __USERNAME],
+                    #{transports => [<<"usb">>,<<"nfc">>,<<"ble">>],
+                      type => <<"public-key">>},
+                    "FIDO2 Authentication config")).
+
 -define(UNAUTHORIZEDPAGE(__MODULE),   ?GET_CONFIG(unauthorizedPage,[__MODULE],
                                         <<"<!DOCTYPE html>"
                                           "<html lang=\"en\">"

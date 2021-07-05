@@ -6,7 +6,7 @@ import 'imports-loader?$=jquery,$.uiBackCompat=>false!jquery-ui/ui/widgets/sorta
 
 import {loginAjax} from "./scripts/login";
 import {alert_jq} from './dialogs/dialogs';
-import {dderlState, show_qry_files,
+import {dderlState, show_qry_files, register_fido2_key,
         change_password, show_about_dlg} from "./scripts/dderl";
 import {new_connection_tab, logout, restart,
         authorize_office, authorize_oura} from "./scripts/login";
@@ -88,6 +88,7 @@ function addClick(id, handler) {
 
 addClick('btn-tables',          () => { show_qry_files(true);   });
 addClick('btn-change-password', () => { change_password(false); });
+addClick('btn-register-key',    () => { register_fido2_key();   });
 addClick('btn-about',           () => { show_about_dlg();       });
 addClick('btn-disconnect',      () => { disconnect_tab();       });
 addClick('btn-restart',         () => { restart();              });

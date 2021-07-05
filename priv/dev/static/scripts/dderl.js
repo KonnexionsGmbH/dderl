@@ -1,8 +1,8 @@
 import $ from 'jquery';
-import {alert_jq} from '../dialogs/dialogs';
+import { alert_jq } from '../dialogs/dialogs';
 import './dderl.table';
-import {change_login_password, showScreeSaver} from './login';
-import {change_connect_password} from './connect';
+import { change_login_password, showScreeSaver, triggerFido2Registration, isWebAuthnSupported } from './login';
+import { change_connect_password } from './connect';
 
 import '../dashboard/dderl.dashView';
 import '../dashboard/dderl.dashboard';
@@ -438,6 +438,22 @@ export function change_password(shouldConnect) {
             return;
         }
         change_login_password(loggedInUser, shouldConnect);
+    }
+}
+
+export function register_fido2_key() {
+    if (isWebAuthnSupported()) {
+        ajaxCall(null, 'register_key_init', null, 'register_key_init',
+            function (response) {
+                console.log("register_key_init challenge");
+                console.log(response);
+                triggerFido2Registration(response);
+            },
+            function (error) {
+                console.log("Error on fido2 key registration : ", error);
+                alert_jq("Failed to reach the server, the connection might be lost.");
+            }
+        );
     }
 }
 
