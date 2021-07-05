@@ -441,7 +441,6 @@ export function change_login_password(loggedInUser, shouldConnect) {
     });
 }
 
-export function authorize_office() {
     ajaxCall(null, 'office_365_auth_config', {}, 'office_365_auth_config', function (auth_config) {
         const params = 'scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no,width=500,height=600,left=100,top=100';
         window.open(auth_config.url, 'Office 365 login', params);
@@ -454,8 +453,6 @@ export function authorize_oura() {
         window.open(auth_config.url, 'Oura Ring login', params);
     });
 // fido2 helper functions
-function _arrayBufferToString(buffer) {
-    var binary = '';
     var bytes = new Uint8Array(buffer);
     var len = bytes.byteLength;
     for (var i = 0; i < len; i++) {
