@@ -14,7 +14,7 @@
 -include("dderlodpi.hrl").
 -include("gres.hrl").
 
--include_lib("imem/include/imem_sql.hrl").
+-include_lib("imem/src/imem_sql.hrl").
 
 -export([ init/0
         , process_cmd/6

@@ -3,8 +3,8 @@
 
 -include("dderl.hrl").
 -include("gres.hrl").
--include_lib("imem/include/imem_sql.hrl").  %% Included for stmtCol record
--include_lib("imem/include/imem_meta.hrl"). %% Included for config access
+-include_lib("imem/src/imem_sql.hrl").  %% Included for stmtCol record
+-include_lib("imem/src/imem_meta.hrl"). %% Included for config access
 
 -export([start_link/4
         ,get_status/2
