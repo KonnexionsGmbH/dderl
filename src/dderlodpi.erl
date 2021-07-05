@@ -189,7 +189,7 @@ handle_cast({fetch_recs_async, false, _}, #qry{fsm_ref = FsmRef, stmt_result = S
             end
     end,
     {noreply, State};
-handle_cast({fetch_push, NRows, Target}, #qry{fsm_ref = FsmRef, stmt_result = StmtResult} = State) ->
+handle_cast({fetch_push, NRows, Target}, #qry{fsm_ref = FsmRef, stmt_result = StmtResult, connection = Connection} = State) ->
     #qry{contain_rowid = ContainRowId, contain_rownum = ContainRowNum} = State,
     #stmtResults{stmtRefs = StmtRef, rowCols = Clms} = StmtResult,
     MissingRows = Target - NRows,
@@ -199,19 +199,19 @@ handle_cast({fetch_push, NRows, Target}, #qry{fsm_ref = FsmRef, stmt_result = St
         true ->
             RowsToFetch = MissingRows
     end,
-    case StmtRef:fetch_rows(RowsToFetch) of
-        {{rows, Rows}, Completed} ->
+    case dpi_fetch_rows(Connection, StmtRef, RowsToFetch) of
+        { Rows, Completed} ->
             RowsFixed = fix_row_format(StmtRef, Rows, Clms, ContainRowId),
             NewNRows = NRows + length(RowsFixed),
             if
-                Completed -> FsmRef:rows({RowsFixed, Completed});
+                Completed -> dderl_fsm:rows(FsmRef, {RowsFixed, Completed});
                 (NewNRows >= Target) andalso (not ContainRowNum) -> FsmRef:rows_limit(NewNRows, RowsFixed);
                 true ->
-                    FsmRef:rows({RowsFixed, false}),
+                    dderl_fsm:rows(FsmRef, {RowsFixed, false}),
                     gen_server:cast(self(), {fetch_push, NewNRows, Target})
             end;
         {error, Error} ->
-            FsmRef:rows({error, Error})
+            dderl_fsm:rows(FsmRef, {error, Error})
     end,
     {noreply, State};
 handle_cast(_Ignored, State) ->
@@ -859,7 +859,13 @@ number_to_binary(Else) -> ?Error("Tried to convert bad term to binary: ~p", [Els
 %%%% Dpi safe functions executed on dpi slave node
 
 dpi_conn_prepareStmt(#odpi_conn{node = Node, connection = Conn}, Sql) ->
-    dpi:safe(Node, fun() -> dpi:conn_prepareStmt(Conn, false, Sql, <<"">>) end).
+    Stmt = dpi:safe(Node, fun() -> dpi:conn_prepareStmt(Conn, false, Sql, <<"">>) end), % tentative statement with scrollable set to false
+    #{statementType := StatementType} = dpi:safe(Node, fun() -> dpi:stmt_getInfo(Stmt) end), % find out whether it is a SELECT
+    case StatementType of 'DPI_STMT_TYPE_SELECT' -> % SELECT statement needs to be redone with scrollable set to true
+        dpi:safe(Node, fun() -> dpi:stmt_close(Stmt) end), % remove the "bad" statement
+        dpi:safe(Node, fun() -> dpi:conn_prepareStmt(Conn, true, Sql, <<"">>) end); % return the proper statement
+    _Else -> Stmt end.   % if it is not a SELECT statement then the original Stmt handle is fine  
+
 
 dpi_conn_commit(#odpi_conn{node = Node, connection = Conn}) ->
     dpi:safe(Node, fun() -> dpi:conn_commit(Conn) end).
