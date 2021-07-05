@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 
 -include("dderl.hrl").
--include_lib("imem/include/imem_meta.hrl"). %% Included for config access
+-include_lib("imem/src/imem_meta.hrl"). %% Included for config access
 
 -export([start_link/3
         ,connect/2
@@ -18,7 +18,7 @@
         ,code_change/3
         ]).
 
--record(state, {statement        :: {atom, pid()}
+-record(state, {statement        :: pid()
                ,column_pos       :: [integer()]
                ,table_id         :: ets:tid()
                ,index_id         :: ets:tid()
@@ -72,8 +72,8 @@ more_data(SenderPid) ->
     gen_server:cast(SenderPid, more_data).
 
 %% Gen server callbacks
-init([{dderl_fsm, StmtPid} = Statement, ColumnPositions, table]) ->
-    FsmMonitorRef = erlang:monitor(process, StmtPid),
+init([Statement, ColumnPositions, table]) ->
+    FsmMonitorRef = erlang:monitor(process, Statement),
     State = #state{statement   = Statement
                   ,column_pos  = ColumnPositions
                   ,fsm_monitor = FsmMonitorRef
@@ -99,7 +99,7 @@ handle_cast(Cmd, #state{type = stats} = State) ->
     process_stats_cmd(Cmd, State);
 handle_cast(get_data_info, #state{statement = Statement, receiver_pid = ReceiverPid, column_pos = ColumnPos} = State) ->
     %% TODO: Maybe we will need sql to check for same table sender-receiver.
-    {TableId, IndexId, Nav, RowFun, Columns, FilterSpec} = Statement:get_sender_params(),
+    {TableId, IndexId, Nav, RowFun, Columns, FilterSpec} = dderl_fsm:get_sender_params(Statement),
     EtsTable = case Nav of
         raw -> TableId;
         ind -> IndexId
@@ -162,8 +162,8 @@ send_rows(Rows, #state{receiver_pid = ReceiverPid, skip = Skip} = State) ->
             State#state{skip = NewSkip}
     end.
 
-retry_more_data(#state{statement = {_, StmtFsmPid}} = State) ->
-    case sys:get_state(StmtFsmPid) of
+retry_more_data(#state{statement = Statement} = State) ->
+    case sys:get_state(Statement) of
         {completed, _} -> send_rows('$end_of_table', State);
         _ -> timer:sleep(500), %% retry after 0.5 seconds.
             more_data(self())
@@ -189,7 +189,7 @@ process_stats_cmd(Req, State) ->
     {noreply, State}.
 
 execute_get_data(GetDataFun, #state{statement = Statement, filter_spec = FilterSpec} = State) ->
-    case Statement:get_sender_params() of
+    case dderl_fsm:get_sender_params(Statement) of
         {_, _, _, _, _, FilterSpec} ->
             case GetDataFun() of
                 '$end_of_table' ->

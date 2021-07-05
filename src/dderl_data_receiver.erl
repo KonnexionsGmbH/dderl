@@ -3,8 +3,8 @@
 
 -include("dderl.hrl").
 -include("gres.hrl").
--include_lib("imem/include/imem_sql.hrl").  %% Included for stmtCol record
--include_lib("imem/include/imem_meta.hrl"). %% Included for config access
+-include_lib("imem/src/imem_sql.hrl").  %% Included for stmtCol record
+-include_lib("imem/src/imem_meta.hrl"). %% Included for config access
 
 -export([start_link/4
         ,get_status/2
@@ -20,7 +20,7 @@
         ]).
 
 -record(state,
-        {statement                 :: {atom, pid()}
+        {statement                 :: pid()
         ,columns                   :: [#rowCol{}]
         ,column_pos                :: [integer()]
         ,fsm_monitor               :: reference()
@@ -65,8 +65,8 @@ data(ReceiverPid, Rows) ->
     gen_server:cast(ReceiverPid, {data, Rows}).
 
 %% Gen server callbacks
-init([{dderl_fsm, StmtPid} = Statement, ColumnPositions, SenderPid, BrowserRespPid]) ->
-    FsmMonitorRef = erlang:monitor(process, StmtPid),
+init([Statement, ColumnPositions, SenderPid, BrowserRespPid]) ->
+    FsmMonitorRef = erlang:monitor(process, Statement),
     ok = dderl_data_sender:connect(SenderPid, self()), %% Todo handle case when not ok...
     SenderMonitorRef = erlang:monitor(process, SenderPid),
     State =#state{statement       = Statement
@@ -92,7 +92,7 @@ handle_cast({status, ReplyToPid}, #state{received_rows = RowCount, errors = Erro
     ReplyToPid ! {reply, jsx:encode([{<<"receiver_status">>, Response}])},
     {noreply, State#state{errors = []}, ?RESPONSE_TIMEOUT};
 handle_cast({data_info, {stats, SndColsCount, AvailableRows}}, #state{sender_pid = SenderPid, browser_pid = BrowserPid, statement = Statement, column_pos = ColumnPos} = State) ->
-    {Ucpf, Ucef, Columns, Node} = Statement:get_receiver_params(),
+    {Ucpf, Ucef, Columns, Node} = dderl_fsm:get_receiver_params(Statement),
     if
         length(ColumnPos) =:= SndColsCount ->
             Response = [{<<"available_rows">>, AvailableRows}, {<<"sender_columns">>, SndColsCount}],
@@ -105,7 +105,7 @@ handle_cast({data_info, {stats, SndColsCount, AvailableRows}}, #state{sender_pid
     end;
 handle_cast({data_info, {SenderColumns, AvailableRows}}, #state{sender_pid = SenderPid, browser_pid = BrowserPid, statement = Statement, column_pos = ColumnPos} = State) ->
     ?Debug("data information from sender, columns ~n~p~n, Available rows: ~p", [SenderColumns, AvailableRows]),
-    {Ucpfs, Ucefs, Columns, Node} = Statement:get_receiver_params(),
+    {Ucpfs, Ucefs, Columns, Node} = dderl_fsm:get_receiver_params(Statement),
     %% TODO: Check for column names and types instead of only count.
     if
         length(ColumnPos) =:= length(SenderColumns) ->

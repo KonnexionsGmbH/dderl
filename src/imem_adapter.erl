@@ -1,10 +1,10 @@
 -module(imem_adapter).
--author('Bikram Chatterjee <bikram.chatterjee@k2informatics.ch>').
+-author('Bikram Chatterjee <bikram@konnexions.ch>').
 
 -include("dderl.hrl").
 -include("gres.hrl").
 
--include_lib("imem/include/imem_sql.hrl").
+-include_lib("imem/src/imem_sql.hrl").
 
 -export([ init/0
         , process_cmd/6
@@ -810,6 +810,8 @@ process_query(Query, Connection, Params, SessPid) ->
                                         , update_cursor_execute_funs = imem_adapter_funs:update_cursor_execute(Connection, StmtRefs)
                                         }, SessPid),
             erlimem_session:add_stmt_fsm(Connection, StmtRefs, {dderl_fsm, StmtFsm}),
+            EncHash = erlimem_session:run_cmd(Connection, get_enc_hash, []),
+            dderl_fsm:put_enc_hash(StmtFsm, EncHash),
             ?Debug("StmtRslt ~p ~p", [RowCols, SortSpec]),
             Columns = gen_adapter:build_column_json(lists:reverse(RowCols)),
             JSortSpec = build_srtspec_json(SortSpec),

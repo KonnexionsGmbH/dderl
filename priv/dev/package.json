@@ -5,7 +5,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/K2InformaticsGmbH/dderl.git"
+    "url": "https://bitbucket.org/konnexions/dderl"
   },
   "dependencies": {
     "babel-polyfill": "6.26.0",
@@ -39,8 +39,7 @@
   },
   "scripts": {
     "install-build-prod": "yarn install && yarn build-prod",
-    "build": "yarn build-dev",
-    "build-dev": "yarn lint && yarn clean && webpack --progress",
+    "build": "yarn lint && yarn clean && webpack --progress",
     "build-prod": "yarn lint && yarn clean && webpack -p",
     "clean": "rimraf ../public/dist",
     "env": "env",
