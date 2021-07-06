@@ -3,7 +3,7 @@
 {application, dderl,
  [
   {description, "Web based tool for exploring databases"},
-  {vsn, "3.9.4"},
+  {vsn, "3.9.7"},
   {registered, []},
   {applications, [kernel,
                   stdlib,
@@ -12,8 +12,8 @@
                   cowboy,
                   erlimem,
                   esaml,
-                  mimetypes,
                   oranif,
+                  wax,
                   prometheus]},
   {mod, {dderl, []}},
   {env, [{interface, "0.0.0.0"}, {port, 8443}, {ssl_opts, []}]}

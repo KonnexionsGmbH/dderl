@@ -3,14 +3,6 @@
 
 -include("dderlodpi.hrl").
 
-%-define(TRACE_FUNCTION_CALLS, '_').
--ifdef(TRACE_FUNCTION_CALLS).
-    -define (TR, io:format("dderlodpi call ~p/~p~n", [?FUNCTION_NAME, ?FUNCTION_ARITY])).
-    -define (TR(__V), io:format("dderlodpi call ~p/~p (~p)~n", [?FUNCTION_NAME, ?FUNCTION_ARITY, __V])).
--else.
-    -define (TR, nop).
-    -define (TR(__V), nop).
--endif.
 
 %% API
 -export([
@@ -22,7 +14,6 @@
     fetch_close/1,          %
     filter_and_sort/6,      %
     close/1,                %
-    close_port/1,           %
     run_table_cmd/3,        %
     cols_to_rec/2,          %
     get_alias/1,            %
@@ -79,12 +70,10 @@
 %% ===================================================================
 -spec exec(map(), binary(), integer()) -> ok | {ok, pid()} | {error, term()}.
 exec(Connection, Sql, MaxRowCount) ->
-    ?TR,
-    exec(Connection, Sql, undefined, MaxRowCount).
+   exec(Connection, Sql, undefined, MaxRowCount).
 
 -spec exec(map(), binary(), tuple(), integer()) -> ok | {ok, pid()} | {error, term()}.
 exec(Connection, OrigSql, Binds, MaxRowCount) ->
-    ?TR,
     {Sql, NewSql, TableName, RowIdAdded, SelectSections} =
         parse_sql(sqlparse:parsetree(OrigSql), OrigSql),
     case catch run_query(Connection, Sql, Binds, NewSql, RowIdAdded, SelectSections) of
@@ -111,27 +100,25 @@ exec(Connection, OrigSql, Binds, MaxRowCount) ->
     end.
 
 -spec append_semicolon(binary(), integer()) -> binary().
-append_semicolon(Sql, $;) -> ?TR, Sql;
+append_semicolon(Sql, $;) -> Sql;
 append_semicolon(Sql, _) -> <<Sql/binary, $;>>.
 
 -spec change_password(tuple(), binary(), binary(), binary()) -> ok | {error, term()}.
-change_password({oci_port, _, _} = Connection, User, OldPassword, NewPassword) ->
-    ?TR,
-    run_table_cmd(Connection, iolist_to_binary(["ALTER USER ", User, " IDENTIFIED BY ", NewPassword, " REPLACE ", OldPassword])).
+change_password(_Connection, _User, _OldPassword, _NewPassword) ->
+    {error, unsupported}.
+    %
+    %run_table_cmd(Connection, iolist_to_binary(["ALTER USER ", User, " IDENTIFIED BY ", NewPassword, " REPLACE ", OldPassword])).
 
 -spec add_fsm(pid(), term()) -> ok.
 add_fsm(Pid, FsmRef) ->
-    ?TR,
     gen_server:cast(Pid, {add_fsm, FsmRef}).
 
 -spec fetch_recs_async(pid(), list(), integer()) -> ok.
 fetch_recs_async(Pid, Opts, Count) ->
-    ?TR,
     gen_server:cast(Pid, {fetch_recs_async, lists:member({fetch_mode, push}, Opts), Count}).
 
 -spec fetch_close(pid()) -> ok.
 fetch_close(Pid) ->
-    ?TR,
     gen_server:call(Pid, fetch_close, ?ExecTimeout).
 
 -spec filter_and_sort(pid(), tuple(), list(), list(), list(), binary()) -> {ok, binary(), fun()}.
@@ -140,16 +127,10 @@ filter_and_sort(Pid, Connection, FilterSpec, SortSpec, Cols, Query) ->
 
 -spec close(pid()) -> term().
 close(Pid) ->
-    ?TR,
     gen_server:call(Pid, close, ?ExecTimeout).
-
--spec close_port(tuple()) -> term().
-close_port({OciMod, PortPid, _Conn}) -> ?TR, close_port({OciMod, PortPid});
-close_port({_OciMod, _PortPid} = Port) -> ?TR, oci_port:close(Port).
 
 %% Gen server callbacks
 init([SelectSections, StmtResult, ContainRowId, MaxRowCount, ContainRowNum, Connection]) ->
-    ?TR,
     {ok, #qry{
             select_sections = SelectSections,
             stmt_result = StmtResult,
@@ -159,41 +140,32 @@ init([SelectSections, StmtResult, ContainRowId, MaxRowCount, ContainRowNum, Conn
             connection = Connection}}.
 
 handle_call({filter_and_sort, Connection, FilterSpec, SortSpec, Cols, Query}, _From, #qry{stmt_result = StmtResult} = State) ->
-    ?TR(a),
     #stmtResults{rowCols = StmtCols} = StmtResult,
     %% TODO: improve this to use/update parse tree from the state.
     Res = filter_and_sort_internal(Connection, FilterSpec, SortSpec, Cols, Query, StmtCols),
     {reply, Res, State};
 handle_call(build_sort_spec, _From, #qry{stmt_result = StmtResult, select_sections = SelectSections} = State) ->
-    ?TR(b),
     #stmtResults{rowCols = StmtCols} = StmtResult,
     SortSpec = build_sort_spec(SelectSections, StmtCols),
     {reply, SortSpec, State};
 handle_call(get_state, _From, State) ->
-    ?TR(c),
     {reply, State, State};
 handle_call(fetch_close, _From, #qry{} = State) ->
-    ?TR(d),
     {reply, ok, State#qry{pushlock = true}};
 handle_call(close, _From, #qry{connection = Connection, stmt_result = StmtResult} = State) ->
-    ?TR(e),
     #stmtResults{stmtRefs = StmtRef} = StmtResult,
     dpi_stmt_close(Connection, StmtRef),
     {stop, normal, ok, State#qry{stmt_result = StmtResult#stmtResults{stmtRefs = undefined}}};
 handle_call(_Ignored, _From, State) ->
-    ?TR(f),
     {noreply, State}.
 
-handle_cast({add_fsm, FsmRef}, #qry{} = State) -> ?TR, {noreply, State#qry{fsm_ref = FsmRef}};
+handle_cast({add_fsm, FsmRef}, #qry{} = State) ->  {noreply, State#qry{fsm_ref = FsmRef}};
 
 handle_cast({fetch_recs_async, _, _}, #qry{pushlock = true} = State) ->
-    ?TR,
     {noreply, State};
 handle_cast({fetch_push, _, _}, #qry{pushlock = true} = State) ->
-    ?TR,
     {noreply, State};
 handle_cast({fetch_recs_async, true, FsmNRows}, #qry{max_rowcount = MaxRowCount} = State) ->
-    ?TR,
     case FsmNRows rem MaxRowCount of
         0 -> RowsToRequest = MaxRowCount;
         Result -> RowsToRequest = MaxRowCount - Result
@@ -202,7 +174,6 @@ handle_cast({fetch_recs_async, true, FsmNRows}, #qry{max_rowcount = MaxRowCount}
     {noreply, State};
 handle_cast({fetch_recs_async, false, _}, #qry{fsm_ref = FsmRef, stmt_result = StmtResult,
         contain_rowid = ContainRowId, connection = Connection} = State) ->
-    ?TR,
     #stmtResults{stmtRefs = Statement, rowCols = Clms} = StmtResult,
     Res = dpi_fetch_rows(Connection, Statement, ?DEFAULT_ROW_SIZE),
     case Res of
@@ -218,8 +189,7 @@ handle_cast({fetch_recs_async, false, _}, #qry{fsm_ref = FsmRef, stmt_result = S
             end
     end,
     {noreply, State};
-handle_cast({fetch_push, NRows, Target}, #qry{fsm_ref = FsmRef, stmt_result = StmtResult} = State) ->
-    ?TR,
+handle_cast({fetch_push, NRows, Target}, #qry{fsm_ref = FsmRef, stmt_result = StmtResult, connection = Connection} = State) ->
     #qry{contain_rowid = ContainRowId, contain_rownum = ContainRowNum} = State,
     #stmtResults{stmtRefs = StmtRef, rowCols = Clms} = StmtResult,
     MissingRows = Target - NRows,
@@ -229,32 +199,29 @@ handle_cast({fetch_push, NRows, Target}, #qry{fsm_ref = FsmRef, stmt_result = St
         true ->
             RowsToFetch = MissingRows
     end,
-    case StmtRef:fetch_rows(RowsToFetch) of
-        {{rows, Rows}, Completed} ->
+    case dpi_fetch_rows(Connection, StmtRef, RowsToFetch) of
+        { Rows, Completed} ->
             RowsFixed = fix_row_format(StmtRef, Rows, Clms, ContainRowId),
             NewNRows = NRows + length(RowsFixed),
             if
-                Completed -> FsmRef:rows({RowsFixed, Completed});
+                Completed -> dderl_fsm:rows(FsmRef, {RowsFixed, Completed});
                 (NewNRows >= Target) andalso (not ContainRowNum) -> FsmRef:rows_limit(NewNRows, RowsFixed);
                 true ->
-                    FsmRef:rows({RowsFixed, false}),
+                    dderl_fsm:rows(FsmRef, {RowsFixed, false}),
                     gen_server:cast(self(), {fetch_push, NewNRows, Target})
             end;
         {error, Error} ->
-            FsmRef:rows({error, Error})
+            dderl_fsm:rows(FsmRef, {error, Error})
     end,
     {noreply, State};
 handle_cast(_Ignored, State) ->
-    ?TR,
     {noreply, State}.
 
 handle_info(_Info, State) ->
-    ?TR,
     {noreply, State}.
 
-terminate(_Reason, #qry{stmt_result = #stmtResults{stmtRefs = undefined}}) -> ?TR, ok;
+terminate(_Reason, #qry{stmt_result = #stmtResults{stmtRefs = undefined}}) ->  ok;
 terminate(_Reason, #qry{connection = Connection, stmt_result = #stmtResults{stmtRefs = Stmt}}) ->
-    ?TR,
     dpi_stmt_close(Connection, Stmt).
 
 code_change(_OldVsn, State, _Extra) ->
@@ -263,7 +230,6 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal functions %%%
 -spec select_type(list()) -> atom().
 select_type(Args) ->
-    ?TR,
     Opts = proplists:get_value(opt, Args, <<>>),
     GroupBy = proplists:get_value('group by', Args),
     NotAgregation = case proplists:get_value(from, Args) of
@@ -277,23 +243,19 @@ select_type(Args) ->
     end.
 
 -spec is_agregation([binary() | tuple()]) -> boolean().
-is_agregation([]) -> ?TR, false;
+is_agregation([]) ->  false;
 is_agregation([Table | Rest]) when is_binary(Table) ->
-    ?TR,
     is_agregation(Rest);
 is_agregation([{as, Table, Alias} | Rest]) when is_binary(Alias), is_binary(Table) ->
-    ?TR,
     is_agregation(Rest);
-is_agregation(_) -> ?TR, true.
+is_agregation(_) ->  true.
 
 -spec inject_rowid(atom(), list(), binary()) -> {binary(), binary(), boolean()}.
 inject_rowid(agregation, Args, Sql) ->
-    ?TR,
     {from, [FirstTable|_]=_Forms} = lists:keyfind(from, 1, Args),
     %% Do not add rowid on agregation.
     {FirstTable, Sql, false};
 inject_rowid(select, Args, Sql) ->
-    ?TR,
     {fields, Flds} = lists:keyfind(fields, 1, Args),
     {from, [FirstTable|_]=Forms} = lists:keyfind(from, 1, Args),
     NewFields = expand_star(Flds, Forms) ++ [add_rowid_field(FirstTable)],
@@ -307,42 +269,36 @@ inject_rowid(select, Args, Sql) ->
     end.
 
 -spec add_rowid_field(tuple() | binary()) -> binary().
-add_rowid_field(Table) -> ?TR, qualify_field(Table, "ROWID").
+add_rowid_field(Table) ->  qualify_field(Table, "ROWID").
 
 -spec qualify_field(tuple() | binary(), binary() | list()) -> binary().
-qualify_field(Table, Field) -> ?TR, iolist_to_binary(add_field(Table, Field)).
+qualify_field(Table, Field) ->  iolist_to_binary(add_field(Table, Field)).
 
 -spec add_field(tuple() | binary(), binary() | list()) -> iolist().
-add_field({as, _, Alias}, Field) -> ?TR, [Alias, ".", Field];
-add_field({{as, _, Alias}, _}, Field) -> ?TR, [Alias, ".", Field];
+add_field({as, _, Alias}, Field) ->  [Alias, ".", Field];
+add_field({{as, _, Alias}, _}, Field) ->  [Alias, ".", Field];
 add_field({Tab, _}, Field) when is_binary(Tab) ->
-    ?TR,
     include_at(binary:split(Tab, <<"@">>), Field);
 add_field(Tab, Field) when is_binary(Tab) ->
-    ?TR,
     include_at(binary:split(Tab, <<"@">>), Field).
 
 -spec include_at(list(), binary() | list()) -> iolist().
 include_at([TabName, TabLocation], Field) ->
-    ?TR,
     [TabName, ".", Field, $@, TabLocation];
 include_at([TabName], Field) ->
-    ?TR,
     [TabName, ".", Field].
 
 -spec expand_star(list(), list()) -> list().
-expand_star([<<"*">>], Forms) -> ?TR, qualify_star(Forms);
-expand_star(Flds, _Forms) -> ?TR, Flds.
+expand_star([<<"*">>], Forms) ->  qualify_star(Forms);
+expand_star(Flds, _Forms) ->  Flds.
 
 -spec qualify_star(list()) -> list().
-qualify_star([]) -> ?TR, [];
-qualify_star([Table | Rest]) -> ?TR, [qualify_field(Table, "*") | qualify_star(Rest)].
+qualify_star([]) ->  [];
+qualify_star([Table | Rest]) ->  [qualify_field(Table, "*") | qualify_star(Rest)].
 
 bind_exec_stmt(Conn, Stmt, undefined) ->
-    ?TR,
     dpi_stmt_execute(Conn, Stmt);
 bind_exec_stmt(Conn, Stmt, {BindsMeta, BindVal}) ->
-    ?TR,
     BindVars = bind_vars(Conn, Stmt, BindsMeta),
     {cols, Cols} = execute_with_binds(Conn, Stmt, BindVars, BindVal),
 
@@ -353,7 +309,6 @@ bind_exec_stmt(Conn, Stmt, {BindsMeta, BindVal}) ->
 
 % given the atom that specifies the type of the bind, finds the respective ora/dpi types and returns them as a tuple
 bindTypeMapping(OraType)->
-    ?TR,
     case OraType of
         'INT' -> { 'DPI_ORACLE_TYPE_NATIVE_INT', 'DPI_NATIVE_TYPE_INT64' };
         'VARCHAR2' -> { 'DPI_ORACLE_TYPE_CHAR', 'DPI_NATIVE_TYPE_BYTES' };
@@ -366,7 +321,6 @@ bindTypeMapping(OraType)->
 
 
 bind_vars(Conn, Stmt, BindsMeta)->
-    ?TR,
     [begin
         {OraNative, DpiNative} = bindTypeMapping(BindType),
         Var = (catch dpi:safe(Conn#odpi_conn.node, fun() ->
@@ -381,44 +335,40 @@ bind_vars(Conn, Stmt, BindsMeta)->
  
 
 execute_with_binds(#odpi_conn{context = _Ctx, connection = Conn, node = Node}, Stmt, BindVars, Binds) ->
-    ?TR,
-    
         % turn BindTuple into a list for the next list comprehension to work
         BindList = if
             is_list(Binds) -> Binds; % already a list: leave it as it is
             is_tuple(Binds) -> tuple_to_list(Binds); % a tuple: turn it into a list
             true -> [Binds] % something else: wrap it into a list
         end,
-        [   begin
-            dpi:safe(Node, fun() ->
-                case BindType of 
-                    'INT' ->
-                        % since everything is a binary now, even the ints need to be converted first
-                        ok = dpi:data_setInt64(Data, list_to_integer(binary_to_list(Bind)));
-                    'NUMBER' ->
-                        % doubles are handled as binaries now to avoid precision loss, so the double that is to be inserted has to be turned back from binary to double here
-                        ok = dpi:data_setDouble(Data, list_to_float(binary_to_list(Bind)));
-                    'VARCHAR2' ->
-                        ok = dpi:var_setFromBytes(Var, 0, Bind);
-                    'DATE' ->
-                        {{Y,M,D},{Hh,Mm,Ss}} = imem_datatype:io_to_datetime(Bind), % extract values out of timestamp binary
-                        ok = dpi:data_setTimestamp(Data, Y, M, D, Hh, Mm, Ss, 0, 0, 0); % fsecond and timezone hour/minute offset not supported, so they are set to 0
-                    'CLOB' ->
-                        LOB = dpi:conn_newTempLob(Conn, 'DPI_ORACLE_TYPE_CLOB'),
-                        ok = dpi:lob_setFromBytes(LOB, Bind),
-                        ok = dpi:var_setFromLob(Var, 0, LOB),
-                        ok = dpi:lob_release(LOB);
-                    'BLOB' ->
-                        LOB = dpi:conn_newTempLob(Conn, 'DPI_ORACLE_TYPE_BLOB'),
-                        Bind2 = (catch imem_datatype:io_to_binary(Bind, byte_size(Bind)/2)),
-                        ok = dpi:lob_setFromBytes(LOB, Bind2),
-                        ok = dpi:var_setFromLob(Var, 0, LOB),
-                        ok = dpi:lob_release(LOB);
-                    Else -> io:format("Error! Unsupported bind type ~p~n", [Else])
-                %% TODO: find out what other types are needed and implement those
-                end
-             end)
-        end
+        [dpi:safe(Node, fun() ->
+            %% TODO: find out what other types are needed and implement those
+            case BindType of 
+                'INT' ->
+                    % since everything is a binary now, even the ints need to be converted first
+                    ok = dpi:data_setInt64(Data, list_to_integer(binary_to_list(Bind)));
+                'NUMBER' ->
+                    % doubles are handled as binaries now to avoid precision loss, so the double that is to be inserted has to be turned back from binary to double here
+                    ok = dpi:data_setDouble(Data, list_to_float(binary_to_list(Bind)));
+                'VARCHAR2' ->
+                    ok = dpi:var_setFromBytes(Var, 0, Bind);
+                'DATE' ->
+                    {{Y,M,D},{Hh,Mm,Ss}} = imem_datatype:io_to_datetime(Bind), % extract values out of timestamp binary
+                    ok = dpi:data_setTimestamp(Data, Y, M, D, Hh, Mm, Ss, 0, 0, 0); % fsecond and timezone hour/minute offset not supported, so they are set to 0
+                'CLOB' ->
+                    LOB = dpi:conn_newTempLob(Conn, 'DPI_ORACLE_TYPE_CLOB'),
+                    ok = dpi:lob_setFromBytes(LOB, Bind),
+                    ok = dpi:var_setFromLob(Var, 0, LOB),
+                    ok = dpi:lob_release(LOB);
+                'BLOB' ->
+                    LOB = dpi:conn_newTempLob(Conn, 'DPI_ORACLE_TYPE_BLOB'),
+                    Bind2 = (catch imem_datatype:io_to_binary(Bind, byte_size(Bind)/2)),
+                    ok = dpi:lob_setFromBytes(LOB, Bind2),
+                    ok = dpi:var_setFromLob(Var, 0, LOB),
+                    ok = dpi:lob_release(LOB);
+                Else -> ?Error("Unsupported bind type ~p", [Else])
+            end
+        end)
         || {Bind, {{Var, Data}, _VarType, BindType}} <- lists:zip(BindList, BindVars)
         ],
     Cols = dpi:safe(Node, fun() ->
@@ -427,7 +377,6 @@ execute_with_binds(#odpi_conn{context = _Ctx, connection = Conn, node = Node}, S
     {cols,Cols}.
    
 run_query(Connection, Sql, Binds, NewSql, RowIdAdded, SelectSections) ->
-    ?TR,
     %% For now only the first table is counted.
     case dpi_conn_prepareStmt(Connection, NewSql) of
         Statement when is_reference(Statement) ->
@@ -455,7 +404,6 @@ run_query(Connection, Sql, Binds, NewSql, RowIdAdded, SelectSections) ->
 
 result_exec_query(NColumns, Statement, _Sql, _Binds, NewSql, RowIdAdded, Connection,
                     SelectSections) when is_integer(NColumns), NColumns > 0 ->
-                        ?TR,
     Clms = dpi_query_columns(Connection, Statement, NColumns),
     if
         RowIdAdded -> % ROWID is hidden from columns
@@ -486,7 +434,6 @@ result_exec_query(NColumns, Statement, _Sql, _Binds, NewSql, RowIdAdded, Connect
     R;
 result_exec_query(RowIdError, OldStmt, Sql, Binds, NewSql, _RowIdAdded, Connection,
         SelectSections) when Sql =/= NewSql ->
-            ?TR,
     ?Debug("RowIdError ~p", [RowIdError]),
     dpi_stmt_close(Connection, OldStmt),
     case dpi_conn_prepareStmt(Connection, Sql) of
@@ -497,38 +444,22 @@ result_exec_query(RowIdError, OldStmt, Sql, Binds, NewSql, _RowIdAdded, Connecti
         Error -> error(Error)
     end;
 result_exec_query(Error, Stmt, _Sql, _Binds, _NewSql, _RowIdAdded, Connection, _SelectSections) ->
-    ?TR,
     result_exec_error(Error, Stmt, Connection).
 
 result_exec_stmt({rowids, _}, Statement, _Sql, _Binds, _NewSql, _RowIdAdded, Connection, _SelectSections) ->
-    ?TR,
     dpi_stmt_close(Connection, Statement),
     ok;
 result_exec_stmt({executed, _}, Statement, _Sql, _Binds, _NewSql, _RowIdAdded, Connection, _SelectSections) ->
-    ?TR,
     dpi_stmt_close(Connection, Statement),
     ok;
-result_exec_stmt({executed, 1, [{Var, Val}]}, Statement, Sql, {Binds, _}, NewSql, false, Connection, _SelectSections) ->
-    ?TR,
+result_exec_stmt({executed, 1, [{Var, Val}]}, Statement, _Sql, {_Binds, _}, _NewSql, false, Connection, _SelectSections) ->
     dpi_stmt_close(Connection, Statement),
-    case lists:keyfind(Var, 1, Binds) of
-        {Var,out,'SQLT_RSET'} ->
-            result_exec_stmt(Val:exec_stmt(), Val, Sql, undefined, NewSql, false, Connection, []);
-        {Var,out,'SQLT_VNU'} ->
-            {ok, [{Var, list_to_binary(oci_util:from_num(Val))}]};
-        _ ->
-            {ok, [{Var, Val}]}
-    end;
+    {ok, [{Var, Val}]};
 result_exec_stmt({executed,_,Values}, Statement, _Sql, {Binds, _BindValues}, _NewSql, _RowIdAdded, Connection, _SelectSections) ->
-    ?TR,
     NewValues =
     lists:foldl(
       fun({Var, Val}, Acc) ->
-              [{Var,
-                case lists:keyfind(Var, 1, Binds) of
-                    {Var,out,'SQLT_VNU'} -> list_to_binary(oci_util:from_num(Val));
-                    _ -> Val
-                end} | Acc]
+              [{Var, Val} | Acc]
       end, [], Values),
     ?Debug("Values ~p", [Values]),
     ?Debug("Binds ~p", [Binds]),
@@ -536,18 +467,15 @@ result_exec_stmt({executed,_,Values}, Statement, _Sql, {Binds, _BindValues}, _Ne
     {ok, NewValues}.
 
 result_exec_error({error, _DpiNifFile, _Line, #{message := Msg}}, Statement, Connection) ->
-    ?TR,
     dpi_stmt_close(Connection, Statement),
     error(list_to_binary(Msg));
 result_exec_error(Result, Statement, Connection) ->
-    ?TR,
     ?Error("Result with unrecognized format ~p", [Result]),
     dpi_stmt_close(Connection, Statement),
     error(Result).
 
 -spec create_rowfun(boolean(), list(), term()) -> fun().
 create_rowfun(RowIdAdded, Clms, Stmt) ->
-    ?TR,
     fun({{}, Row}) ->
             if
                 RowIdAdded ->
@@ -559,11 +487,9 @@ create_rowfun(RowIdAdded, Clms, Stmt) ->
     end.
 
 expand_fields([<<"*">>], _, AllFields, Cols, Sections) ->
-    ?TR,
     NewFields = [lists:nth(N, AllFields) || N <- Cols],
     lists:keyreplace('fields', 1, Sections, {'fields', NewFields});
 expand_fields(QryFields, Tables, AllFields, Cols, Sections) ->
-    ?TR,
     NormQryFlds = normalize_pt_fields(QryFields, #{}),
     LowerAllFields = [string:to_lower(binary_to_list(X)) || X <- AllFields],
     case can_expand(maps:keys(NormQryFlds), Tables, LowerAllFields) of
@@ -576,17 +502,14 @@ expand_fields(QryFields, Tables, AllFields, Cols, Sections) ->
     end.
 
 can_expand(LowerSelectFields, [TableName], LowerAllFields) when is_binary(TableName) ->
-    ?TR,
     length(LowerSelectFields) =:= length(LowerAllFields) andalso [] =:= (LowerSelectFields -- LowerAllFields);
-can_expand(_, _, _) -> ?TR, false.
+can_expand(_, _, _) ->  false.
 
-normalize_pt_fields([], Result) -> ?TR, Result;
+normalize_pt_fields([], Result) ->  Result;
 normalize_pt_fields([{as, _Field, Alias} = Fld | Rest], Result) when is_binary(Alias) ->
-    ?TR,
     Normalized = string:to_lower(binary_to_list(Alias)),
     normalize_pt_fields(Rest, Result#{Normalized => Fld});
 normalize_pt_fields([TupleField | Rest], Result) when is_tuple(TupleField) ->
-    ?TR,
     case element(1, TupleField) of
         'fun' ->
             BinField = sqlparse_fold:top_down(sqlparse_format_flat, TupleField, []),
@@ -596,15 +519,12 @@ normalize_pt_fields([TupleField | Rest], Result) when is_tuple(TupleField) ->
             normalize_pt_fields(Rest, Result)
     end;
 normalize_pt_fields([Field | Rest], Result) when is_binary(Field) ->
-    ?TR,
     Normalized = string:to_lower(binary_to_list(Field)),
     normalize_pt_fields(Rest, Result#{Normalized => Field});
 normalize_pt_fields([_Ignored | Rest], Result) ->
-    ?TR,
     normalize_pt_fields(Rest, Result).
 
 build_sort_spec(SelectSections, StmtCols) ->
-    ?TR,
     FullMap = build_full_map(StmtCols),
     case lists:keyfind('order by', 1, SelectSections) of
         {'order by', OrderBy} ->
@@ -614,17 +534,14 @@ build_sort_spec(SelectSections, StmtCols) ->
     end.
 
 process_sort_order({Name, <<>>}, Map) ->
-    ?TR,
     process_sort_order({Name, <<"asc">>}, Map);
-process_sort_order({Name, Dir}, []) when is_binary(Name)-> ?TR, {Name, Dir};
+process_sort_order({Name, Dir}, []) when is_binary(Name)->  {Name, Dir};
 process_sort_order({Name, Dir}, [#bind{alias = Alias, cind = Pos} | Rest]) when is_binary(Name) ->
-    ?TR,
     case string:to_lower(binary_to_list(Name)) =:= string:to_lower(binary_to_list(Alias)) of
         true -> {Pos, Dir};
         false -> process_sort_order({Name, Dir}, Rest)
     end;
 process_sort_order({Fun, Dir}, Map) ->
-    ?TR,
     process_sort_order({sqlparse_fold:top_down(sqlparse_format_flat, Fun, []), Dir}, Map).
 
 
@@ -653,7 +570,6 @@ process_sort_order({Fun, Dir}, Map) ->
 %       {ok, NewSql, NewSortFun}
 
 filter_and_sort_internal(_Connection, FilterSpec, SortSpec, Cols, Query, StmtCols) ->
-    ?TR,
     FullMap = build_full_map(StmtCols),
     case Cols of
         [] ->   Cols1 = lists:seq(1,length(FullMap));
@@ -680,41 +596,33 @@ filter_and_sort_internal(_Connection, FilterSpec, SortSpec, Cols, Query, StmtCol
     end,
     {ok, NewSql, NewSortFun}.
 
-filter_replace_empty({'=', Column, <<"''">>}) -> ?TR, {is, Column, <<"null">>};
+filter_replace_empty({'=', Column, <<"''">>}) ->  {is, Column, <<"null">>};
 filter_replace_empty({in, Column, {list, List}} = In) ->
-    ?TR,
     EmptyRemoved = [E || E <- List, E =/= <<"''">>],
     case length(EmptyRemoved) =:= length(List) of
         true -> In; % Nothing to do
         false -> {'or', {in, Column, {list, EmptyRemoved}}, {is, Column, <<"null">>}}
     end;
 filter_replace_empty({Op, Parameter1, Parameter2}) ->
-    ?TR,
     {Op, filter_replace_empty(Parameter1), filter_replace_empty(Parameter2)};
-filter_replace_empty(Condition) -> ?TR, Condition.
-
--spec to_imem_type(atom()) -> atom().
-to_imem_type('SQLT_NUM') -> ?TR, number;
-to_imem_type(_) -> ?TR, binstr.
+filter_replace_empty(Condition) ->  Condition.
 
 build_full_map(Clms) ->
-    ?TR,
     [#bind{ tag = list_to_atom([$$|integer_to_list(T)])
               , name = Alias
               , alias = Alias
               , tind = 2
               , cind = T
-              , type = to_imem_type(OciType)
+              , type = binstr
               , len = Len
               , prec = undefined }
-     || {T, #rowCol{alias = Alias, type = OciType, len = Len}} <- lists:zip(lists:seq(1,length(Clms)), Clms)].
+     || {T, #rowCol{alias = Alias, len = Len}} <- lists:zip(lists:seq(1,length(Clms)), Clms)].
 
 build_sort_fun(_Sql, _Clms) ->
-    ?TR,
     fun(_Row) -> {} end.
 
 -spec cols_to_rec([map()], list()) -> [#rowCol{}].
-cols_to_rec([], _) -> ?TR, [];
+cols_to_rec([], _) ->  [];
 cols_to_rec([#{
     name := AliasStr,
     typeInfo := #{
@@ -722,7 +630,6 @@ cols_to_rec([#{
         fsPrecision := FsPrec
     }} | Rest], Fields
 ) when Type =:= 'DPI_ORACLE_TYPE_TIMESTAMP_TZ'; Type =:= 'DPI_ORACLE_TYPE_TIMESTAMP' ->
-    ?TR,
     Alias = list_to_binary(AliasStr),
     {Tag, ReadOnly, NewFields} = find_original_field(Alias, Fields),
     [#rowCol{ tag = Tag
@@ -738,7 +645,6 @@ cols_to_rec([#{
         scale := -127 
     }} | Rest], Fields
 ) ->
-    ?TR,
     Alias = list_to_binary(AliasStr),
     {Tag, ReadOnly, NewFields} = find_original_field(Alias, Fields),
     [#rowCol{ tag = Tag
@@ -754,7 +660,6 @@ cols_to_rec([#{
         scale := -127 
     }} | Rest], Fields
 ) ->
-    ?TR,
     Alias = list_to_binary(AliasStr),
     {Tag, ReadOnly, NewFields} = find_original_field(Alias, Fields),
     [#rowCol{ tag = Tag
@@ -769,7 +674,6 @@ cols_to_rec([#{
         oracleTypeNum := Type
     }} | Rest], Fields
 ) when Type =:= 'DPI_ORACLE_TYPE_NATIVE_DOUBLE'; Type =:= 'DPI_ORACLE_TYPE_NATIVE_FLOAT' ->
-    ?TR,
     Alias = list_to_binary(AliasStr),
     {Tag, ReadOnly, NewFields} = find_original_field(Alias, Fields),
     [#rowCol{ tag = Tag
@@ -785,7 +689,6 @@ cols_to_rec([#{
     }} | Rest],
     Fields
 ) ->
-    ?TR,
     Alias = list_to_binary(AliasStr),
     {Tag, ReadOnly, NewFields} = find_original_field(Alias, Fields),
     [#rowCol{ tag = Tag
@@ -796,62 +699,32 @@ cols_to_rec([#{
              , readonly = ReadOnly} | cols_to_rec(Rest, NewFields)].
 
 -spec get_alias([#rowCol{}]) -> [binary()].
-get_alias([]) -> ?TR, [];
+get_alias([]) ->  [];
 get_alias([#rowCol{alias = A} | Rest]) ->
-    ?TR,
     [A | get_alias(Rest)].
 
-translate_datatype(_Stmt, [], []) -> ?TR, [];
+translate_datatype(_Stmt, [], []) ->  [];
 translate_datatype(Stmt, [Bin | RestRow], [#rowCol{} | RestCols]) when is_binary(Bin) ->
-    ?TR(a),
     [Bin | translate_datatype(Stmt, RestRow, RestCols)];
 translate_datatype(Stmt, [null | RestRow], [#rowCol{} | RestCols]) ->
-    ?TR(b),
     [<<>> | translate_datatype(Stmt, RestRow, RestCols)];
 translate_datatype(Stmt, [R | RestRow], [#rowCol{type = 'DPI_ORACLE_TYPE_TIMESTAMP_TZ'} | RestCols]) ->
-    ?TR(c),
     [dpi_to_dderltstz(R) | translate_datatype(Stmt, RestRow, RestCols)];
 translate_datatype(Stmt, [R | RestRow], [#rowCol{type = 'DPI_ORACLE_TYPE_TIMESTAMP'} | RestCols]) ->
-    ?TR(d),
     [dpi_to_dderlts(R) | translate_datatype(Stmt, RestRow, RestCols)];
 translate_datatype(Stmt, [R | RestRow], [#rowCol{type = 'DPI_ORACLE_TYPE_DATE'} | RestCols]) ->
-    ?TR(e),
     [dpi_to_dderltime(R) | translate_datatype(Stmt, RestRow, RestCols)];
 translate_datatype(Stmt, [Number | RestRow], [#rowCol{type = Type} | RestCols]) when
         %Type =:= 'DPI_ORACLE_TYPE_NUMBER';
         Type =:= 'DPI_ORACLE_TYPE_NATIVE_DOUBLE';
         Type =:= 'DPI_ORACLE_TYPE_NATIVE_FLOAT' ->
-            ?TR(f),
-    Result = dderloci_utils:clean_dynamic_prec(number_to_binary(Number)),
-    [Result | translate_datatype(Stmt, RestRow, RestCols)];
-translate_datatype(Stmt, [{_Pointer, Size, Path, Name} | RestRow], [#rowCol{type = 'SQLT_BFILEE'} | RestCols]) ->
-    ?TR(g),
-    SizeBin = integer_to_binary(Size),
-    [<<Path/binary, $#, Name/binary, 32, $[, SizeBin/binary, $]>> | translate_datatype(Stmt, RestRow, RestCols)];
-translate_datatype(Stmt, [{Pointer, Size} | RestRow], [#rowCol{type = 'SQLT_BLOB'} | RestCols]) ->
-    ?TR(h),
-    if
-        Size > ?PREFETCH_SIZE ->
-            {lob, Trunc} = Stmt:lob(Pointer, 1, ?PREFETCH_SIZE),
-            SizeBin = integer_to_binary(Size),
-            AsIO = imem_datatype:binary_to_io(Trunc),
-            [<<AsIO/binary, $., $., 32, $[, SizeBin/binary, $]>> | translate_datatype(Stmt, RestRow, RestCols)];
-        true ->
-            {lob, Full} = Stmt:lob(Pointer, 1, Size),
-            AsIO = imem_datatype:binary_to_io(Full),
-            [AsIO | translate_datatype(Stmt, RestRow, RestCols)]
-    end;
-translate_datatype(Stmt, [Raw | RestRow], [#rowCol{type = 'SQLT_BIN'} | RestCols]) ->
-    ?TR(i),
-    [imem_datatype:binary_to_io(Raw) | translate_datatype(Stmt, RestRow, RestCols)];
+    [Number | translate_datatype(Stmt, RestRow, RestCols)];
 translate_datatype(Stmt, [R | RestRow], [#rowCol{} | RestCols]) ->
-    ?TR(j),
     [R | translate_datatype(Stmt, RestRow, RestCols)].
 
 -spec fix_row_format(term(), [list()], [#rowCol{}], boolean()) -> [tuple()].
-fix_row_format(_Stmt, [], _, _) -> ?TR, [];
+fix_row_format(_Stmt, [], _, _) ->  [];
 fix_row_format(Stmt, [Row | Rest], Columns, ContainRowId) ->
-    ?TR,
     %% TODO: we have to add the table name at the start of the rows i.e
     %  rows [
     %        {{temp,1,2,3},{}},
@@ -869,62 +742,21 @@ fix_row_format(Stmt, [Row | Rest], Columns, ContainRowId) ->
             [{{}, list_to_tuple(fix_format(Stmt, Row, Columns))} | fix_row_format(Stmt, Rest, Columns, ContainRowId)]
     end.
 
-fix_format(_Stmt, [], []) -> ?TR, [];
-fix_format(Stmt, [<<0:8, _/binary>> | RestRow], [#rowCol{type = 'SQLT_NUM'} | RestCols]) ->
-    ?TR,
-    [null | fix_format(Stmt, RestRow, RestCols)];
-fix_format(Stmt, [Number | RestRow], [#rowCol{type = 'SQLT_NUM', len = Scale, prec = dynamic} | RestCols]) ->
-    ?TR,
-    {Mantissa, Exponent} = dderloci_utils:oranumber_decode(Number),
-    FormattedNumber = imem_datatype:decimal_to_io(Mantissa, Exponent),
-    [imem_datatype:io_to_decimal(FormattedNumber, undefined, Scale) | fix_format(Stmt, RestRow, RestCols)];
-fix_format(Stmt, [Number | RestRow], [#rowCol{type = 'SQLT_NUM', len = Len,  prec = Prec} | RestCols]) ->
-    ?TR,
-    {Mantissa, Exponent} = dderloci_utils:oranumber_decode(Number),
-    FormattedNumber = imem_datatype:decimal_to_io(Mantissa, Exponent),
-    [imem_datatype:io_to_decimal(FormattedNumber, Len, Prec) | fix_format(Stmt, RestRow, RestCols)];
-fix_format(Stmt, [<<0, 0, 0, 0, 0, 0, 0, _/binary>> | RestRow], [#rowCol{type = 'SQLT_DAT'} | RestCols]) -> %% Null format for date.
-?TR,
-    [<<>> | fix_format(Stmt, RestRow, RestCols)];
-fix_format(Stmt, [<<Date:7/binary, _/binary>> | RestRow], [#rowCol{type = 'SQLT_DAT'} | RestCols]) -> %% Trim to expected binary size.
-?TR,
-    [Date | fix_format(Stmt, RestRow, RestCols)];
-fix_format(Stmt, [<<0,0,0,0,0,0,0,0,0,0,0,_/binary>> | RestRow], [#rowCol{type = 'SQLT_TIMESTAMP'} | RestCols]) -> %% Null format for timestamp.
-?TR,
-    [<<>> | fix_format(Stmt, RestRow, RestCols)];
-fix_format(Stmt, [<<TimeStamp:11/binary, _/binary>> | RestRow], [#rowCol{type = 'SQLT_TIMESTAMP'} | RestCols]) -> %% Trim to expected binary size.
-?TR,
-    [TimeStamp | fix_format(Stmt, RestRow, RestCols)];
-fix_format(Stmt, [<<0,0,0,0,0,0,0,0,0,0,0,0,0,_/binary>> | RestRow], [#rowCol{type = 'SQLT_TIMESTAMP_TZ'} | RestCols]) -> %% Null format for timestamp.
-?TR,
-    [<<>> | fix_format(Stmt, RestRow, RestCols)];
-fix_format(Stmt, [<<TimeStampTZ:13/binary, _/binary>> | RestRow], [#rowCol{type = 'SQLT_TIMESTAMP_TZ'} | RestCols]) -> %% Trim to expected binary size.
-?TR,
-    [TimeStampTZ | fix_format(Stmt, RestRow, RestCols)];
-fix_format(Stmt, [{Pointer, Size} | RestRow], [#rowCol{type = 'SQLT_CLOB'} | RestCols]) ->
-    ?TR,
-%% TODO: This is a workaround as there is no real support for CLOB in dderl or the current
-%%       driver, so we read full text here and treat it as a normal STR, Oracle is smart
-%%       to do the conversion into CLOB on the way in.
-    {lob, Full} = Stmt:lob(Pointer, 1, Size),
-    [Full | fix_format(Stmt, RestRow, RestCols)];
+fix_format(_Stmt, [], []) ->  [];
+
 fix_format(Stmt, [Cell | RestRow], [#rowCol{} | RestCols]) ->
-    ?TR,
     [Cell | fix_format(Stmt, RestRow, RestCols)].
 
 -spec run_table_cmd(tuple(), atom(), binary()) -> ok | {error, term()}. %% %% !! Fix this to properly use statements.
-run_table_cmd(#odpi_conn{}, restore_table, _TableName) -> ?TR, {error, <<"Command not implemented">>};
-run_table_cmd(#odpi_conn{}, snapshot_table, _TableName) -> ?TR, {error, <<"Command not implemented">>};
+run_table_cmd(#odpi_conn{}, restore_table, _TableName) ->  {error, <<"Command not implemented">>};
+run_table_cmd(#odpi_conn{}, snapshot_table, _TableName) ->  {error, <<"Command not implemented">>};
 run_table_cmd(#odpi_conn{} = Connection, truncate_table, TableName) ->
-    ?TR,
     run_table_cmd(Connection, iolist_to_binary([<<"truncate table ">>, TableName]));
 run_table_cmd(#odpi_conn{} = Connection, drop_table, TableName) ->
-    ?TR,
     run_table_cmd(Connection, iolist_to_binary([<<"drop table ">>, TableName])).
 
 -spec run_table_cmd(reference(), binary()) -> ok | {error, term()}.
 run_table_cmd(Connection, SqlCmd) ->
-    ?TR,
     Stmt = dpi_conn_prepareStmt(Connection, SqlCmd),
     Result = case dpi_stmt_execute(Connection, Stmt) of
         0 -> ok; % 0 rows available is the success response.
@@ -936,28 +768,23 @@ run_table_cmd(Connection, SqlCmd) ->
     Result.
 
 -spec find_original_field(binary(), list()) -> {binary(), boolean(), list()}.
-find_original_field(Alias, []) -> ?TR, {Alias, false, []};
-find_original_field(Alias, [<<"*">>]) -> ?TR, {Alias, false, []};
+find_original_field(Alias, []) ->  {Alias, false, []};
+find_original_field(Alias, [<<"*">>]) ->  {Alias, false, []};
 find_original_field(Alias, [Field | Fields]) when is_binary(Field) ->
-    ?TR,
     compare_alias(Alias, Field, Fields, Field, {Alias, false, Fields});
 find_original_field(Alias, [{as, Name, Field} = CompleteAlias | Fields])
   when is_binary(Name),
        is_binary(Field) ->
-           ?TR,
     compare_alias(Alias, Field, Fields, CompleteAlias, {Name, false, Fields});
 find_original_field(Alias, [{as, _Expr, Field} = CompleteAlias | Fields])
   when is_binary(Field) ->
-      ?TR,
     compare_alias(Alias, Field, Fields, CompleteAlias, {Alias, true, Fields});
 find_original_field(Alias, [Field | Fields]) ->
-    ?TR,
     {ResultName, ReadOnly, RestFields} = find_original_field(Alias, Fields),
     {ResultName, ReadOnly, [Field | RestFields]}.
 
 -spec compare_alias(binary(), binary(), list(), term(), binary()) -> {binary(), boolean(), list()}.
 compare_alias(Alias, Field, Fields, OrigField, Result) ->
-    ?TR,
     LowerAlias = string:to_lower(binary_to_list(Alias)),
     LowerField = string:to_lower(binary_to_list(Field)),
     AliasQuoted = [$" | LowerAlias] ++ [$"],
@@ -971,22 +798,18 @@ compare_alias(Alias, Field, Fields, OrigField, Result) ->
 
 -spec parse_sql(tuple(), binary()) -> {binary(), binary(), binary(), boolean(), list()}.
 parse_sql({ok, [{{select, SelectSections},_}]}, Sql) ->
-    ?TR,
     {TableName, NewSql, RowIdAdded} = inject_rowid(select_type(SelectSections), SelectSections, Sql),
     {Sql, NewSql, TableName, RowIdAdded, SelectSections};
 parse_sql({ok, [{{'begin procedure', _},_}]}, Sql) ->
-    ?TR,
     %% Old sql is replaced by the one with the correctly added semicolon, issue #401
     NewSql = append_semicolon(Sql, binary:last(Sql)),
     {NewSql, NewSql, <<"">>, false, []};
 parse_sql(_UnsuportedSql, Sql) ->
-    ?TR,
     {Sql, Sql, <<"">>, false, []}.
 
 %%%% Dpi data helper functions
 
 dpi_to_dderltime(#{day := Day, month := Month, year := Year, hour := Hour, minute := Min, second := Sec}) ->
-    ?TR,
     iolist_to_binary([
         pad(Day), ".",
         pad(Month), ".",
@@ -996,7 +819,6 @@ dpi_to_dderltime(#{day := Day, month := Month, year := Year, hour := Hour, minut
     ]).
 
 dpi_to_dderlts(#{fsecond := FSecond} = DpiTs) ->
-    ?TR,
     ListFracSecs = case integer_to_list(FSecond) of
         NeedPad when length(NeedPad) < 9 -> pad(NeedPad, 9);
         FullPrec -> FullPrec
@@ -1007,56 +829,51 @@ dpi_to_dderlts(#{fsecond := FSecond} = DpiTs) ->
     end.
 
 dpi_to_dderltstz(#{tzHourOffset := H,tzMinuteOffset := M} = DpiTsTz) ->
-    ?TR,
     iolist_to_binary([dpi_to_dderlts(DpiTsTz), format_tz(H, M)]).
 
 format_tz(TZOffset, M) when TZOffset > 0 ->
-    ?TR,
     [$+ | format_tz_internal(TZOffset, M)];
 format_tz(TZOffset, M) when TZOffset =:= 0, M >= 0 ->
-    ?TR,
     [$+ | format_tz_internal(TZOffset, M)];
 format_tz(TZOffset, M) ->
-    ?TR,
     [$- | format_tz_internal(abs(TZOffset), abs(M))].
 
 format_tz_internal(TZOffset, M) ->
-    ?TR,
     [pad_tz(TZOffset), integer_to_list(TZOffset), $:, pad_tz(M), integer_to_list(M)].
 
-pad_tz(TzDigit) when TzDigit < 10 -> ?TR, [$0];
-pad_tz(_) -> ?TR, [].
+pad_tz(TzDigit) when TzDigit < 10 ->  [$0];
+pad_tz(_) ->  [].
 
 pad(ListValue, Size) ->
-    ?TR,
     lists:duplicate(Size - length(ListValue), $0) ++ ListValue.
 
 pad(IntValue) ->
-    ?TR,
     Value = integer_to_list(IntValue),
     pad(Value, 2).
 
-number_to_binary(Int) when is_integer(Int) -> ?TR, integer_to_binary(Int);
-number_to_binary(Float) when is_float(Float) -> ?TR, float_to_binary(Float, [{decimals,20}, compact]);
-number_to_binary(Binary) when is_binary(Binary) -> ?TR, Binary; % already a binary, so just leave it
-number_to_binary(Else) -> ?TR, io:format("ERROR: Tried to convert bad term to binary: ~p~n", [Else]).
+number_to_binary(Int) when is_integer(Int) ->  integer_to_binary(Int);
+number_to_binary(Float) when is_float(Float) ->  float_to_binary(Float, [{decimals,20}, compact]);
+number_to_binary(Binary) when is_binary(Binary) ->  Binary; % already a binary, so just leave it
+number_to_binary(Else) -> ?Error("Tried to convert bad term to binary: ~p", [Else]).
 
 %%%% Dpi safe functions executed on dpi slave node
 
 dpi_conn_prepareStmt(#odpi_conn{node = Node, connection = Conn}, Sql) ->
-    ?TR,
-    dpi:safe(Node, fun() -> dpi:conn_prepareStmt(Conn, false, Sql, <<"">>) end).
+    Stmt = dpi:safe(Node, fun() -> dpi:conn_prepareStmt(Conn, false, Sql, <<"">>) end), % tentative statement with scrollable set to false
+    #{statementType := StatementType} = dpi:safe(Node, fun() -> dpi:stmt_getInfo(Stmt) end), % find out whether it is a SELECT
+    case StatementType of 'DPI_STMT_TYPE_SELECT' -> % SELECT statement needs to be redone with scrollable set to true
+        dpi:safe(Node, fun() -> dpi:stmt_close(Stmt) end), % remove the "bad" statement
+        dpi:safe(Node, fun() -> dpi:conn_prepareStmt(Conn, true, Sql, <<"">>) end); % return the proper statement
+    _Else -> Stmt end.   % if it is not a SELECT statement then the original Stmt handle is fine  
+
 
 dpi_conn_commit(#odpi_conn{node = Node, connection = Conn}) ->
-    ?TR,
     dpi:safe(Node, fun() -> dpi:conn_commit(Conn) end).
 
 dpi_conn_rollback(#odpi_conn{node = Node, connection = Conn}) ->
-    ?TR,
     dpi:safe(Node, fun() -> dpi:conn_rollback(Conn) end).
 
 dpi_conn_newVar(#odpi_conn{node = Node, connection = Conn} = Connection, Count, Type) ->
-    ?TR,
 
     % encapsulates the dpi:safe call call that creates the variable and returns the variable/data
     % because the call is the same for most variable types except the ora/dpi types
@@ -1075,11 +892,9 @@ dpi_conn_newVar(#odpi_conn{node = Node, connection = Conn} = Connection, Count, 
     _Else -> dpi_conn_newVar(Connection, Count) end.
 
 dpi_conn_newVar(Connection, Count) ->
-    ?TR,
     dpi_conn_newVar(Connection, Count, 'DPI_ORACLE_TYPE_VARCHAR', 'DPI_NATIVE_TYPE_BYTES', 4000).
 
 dpi_conn_newVar(#odpi_conn{node = Node, connection = Conn}, Count, OracleType, NativeType, Size) ->
-    ?TR,
     dpi:safe(Node, fun() ->
         #{var := Var, data := DataList} =
             dpi:conn_newVar(Conn, OracleType, NativeType, Count, Size, false, false, null),
@@ -1087,53 +902,41 @@ dpi_conn_newVar(#odpi_conn{node = Node, connection = Conn}, Count, OracleType, N
     end).
 
 dpi_stmt_bindByName(#odpi_conn{node = Node}, Stmt, Name, Var) ->
-    ?TR,
     dpi:safe(Node, fun() -> dpi:stmt_bindByName(Stmt, Name, Var) end).
 
 dpi_stmt_execute(Connection, Stmt) ->
-    ?TR,
     % Commit automatically for any dderl queries.
     dpi_stmt_execute(Connection, Stmt, ['DPI_MODE_EXEC_COMMIT_ON_SUCCESS']).
 
 dpi_stmt_execute(#odpi_conn{node = Node}, Stmt, Mode) ->
-    ?TR,
     dpi:safe(Node, fun() -> dpi:stmt_execute(Stmt, Mode) end).
 
 dpi_stmt_executeMany(#odpi_conn{node = Node}, Stmt, Count, Mode) ->
-    ?TR,
     dpi:safe(Node, fun() -> dpi:stmt_executeMany(Stmt, Mode, Count) end).
 
 dpi_stmt_getInfo(#odpi_conn{node = Node}, Stmt) ->
-    ?TR,
     dpi:safe(Node, fun() -> dpi:stmt_getInfo(Stmt) end).
 
 dpi_stmt_close(#odpi_conn{node = Node}, Stmt) ->
-    ?TR,
     dpi:safe(Node, fun() -> dpi:stmt_close(Stmt) end).
 
 dpi_var_getReturnedData(#odpi_conn{node = Node}, Var, Index) ->
-    ?TR,
     dpi:safe(Node, fun() -> dpi:var_getReturnedData(Var, Index) end).
 
 dpi_var_release(#odpi_conn{node = Node}, Var) ->
-    ?TR,
     dpi:safe(Node, fun() -> dpi:var_release(Var) end).
 
 dpi_data_release(#odpi_conn{node = Node}, DataList) when is_list(DataList) ->
-    ?TR,
     dpi:safe(Node, fun() -> [dpi:data_release(Data) || Data <- DataList] end);
 dpi_data_release(#odpi_conn{node = Node}, Data) ->
-    ?TR,
     dpi:safe(Node, fun() -> dpi:data_release(Data) end).
 
 % This is not directly dpi but seems this is the best place to declare as it is rpc...
 dpi_query_columns(#odpi_conn{node = Node}, Stmt, NColumns) ->
-    ?TR,
     dpi:safe(Node, fun() -> get_column_info(Stmt, 1, NColumns) end).
 
-get_column_info(_Stmt, ColIdx, Limit) when ColIdx > Limit -> ?TR, [];
+get_column_info(_Stmt, ColIdx, Limit) when ColIdx > Limit ->  [];
 get_column_info(Stmt, ColIdx, Limit) ->
-    ?TR,
     QueryInfo = dpi:stmt_getQueryInfo(Stmt, ColIdx),
     InnerMap = maps:get(typeInfo, QueryInfo),
     Type = case maps:get(defaultNativeTypeNum, InnerMap) of 'DPI_NATIVE_TYPE_DOUBLE' -> 'DPI_NATIVE_TYPE_BYTES'; A -> A end,
@@ -1142,7 +945,6 @@ get_column_info(Stmt, ColIdx, Limit) ->
     [QueryInfo2 | get_column_info(Stmt, ColIdx + 1, Limit)].
 
 dpi_fetch_rows( #odpi_conn{node = Node, connection = Conn}, Statement, BlockSize) ->
-    ?TR,
     dpi:safe(Node, fun() -> get_rows_prepare(Conn, Statement, BlockSize, []) end).
 
 %% initalizes things that need to be done before getting the rows
@@ -1167,31 +969,30 @@ get_rows_prepare(Conn, Stmt, NRows, Acc)->
                         % fetched as a binary in order to avoid a rounding error that would occur if they were transformed from their internal decimal
                         % representation to double. Therefore, stmt_getQueryValue() can't be used for this, so a variable needs to be made because
                         % the data has to be fetched using define so the value goes into the data and then retrieving the values from the data
-                        #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_BYTES', 100, 0, false, false, null),
+                        #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_BYTES', 100, 4000, false, false, null),
                         ok = dpi:stmt_define(Stmt, Col, Var),    %% results will be fetched to the vars and go into the data
                         {Var, Datas, OraType}; % put the variable and its data list into a tuple
                     'DPI_NATIVE_TYPE_LOB' ->
-                        #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_LOB', 100, 0, false, false, null),
+                        #{var := Var, data := Datas} = dpi:conn_newVar(Conn, OraType, 'DPI_NATIVE_TYPE_LOB', 100, 4000, false, false, null),
                         ok = dpi:stmt_define(Stmt, Col, Var),    %% results will be fetched to the vars and go into the data
                         {Var, Datas, OraType}; % put the variable and its data list into a tuple
-                    _else -> noVariable % when no variable needs to be made for the type, just put an atom signlizing that no variable was made and stmt_getQueryValue() can be used to get the values
+                    _else -> {noVariable, OraType} % when no variable needs to be made for the type, just put an atom signlizing that no variable was made and stmt_getQueryValue() can be used to get the values
                 end
             end
             || {OraType, NativeType, Col} <- Types], % make a list of {Var, Datas} tuples. Var is the dpiVar handle, Datas is the list of Data handles in that respective Var  
 R = get_rows(Conn, Stmt, NRows, Acc, VarsDatas), % gets all the results from the query
     [begin
-        case VarDatas of {Var, Datas} -> % if there is a variable (which was made to fetch a double as a binary)
+        case VarDatas of {noVariable, _OraType} -> nop; % if no variable was made, then nothing needs to be done here
+            {Var, Datas, _OraType} -> % if there is a variable (which was made to fetch a double as a binary)
                 [dpi:data_release(Data)|| Data <- Datas], % loop through the list of datas and release them all
-                dpi:var_release(Var); % now release the variable
-            _else -> nop % if no variable was made, then nothing needs to be done here
+                dpi:var_release(Var) % now release the variable
         end
     end || VarDatas <- VarsDatas], % clean up eventual variables that may have been made
 R. % return query results
 
 %% this recursive function fetches all the rows. It does so by calling yet another recursive function that fetches all the fields in a row.
-get_rows(_Conn, _, 0, Acc, _VarsDatas) -> ?TR, {lists:reverse(Acc), false};
+get_rows(_Conn, _, 0, Acc, _VarsDatas) ->  {lists:reverse(Acc), false};
 get_rows(Conn, Stmt, NRows, Acc, VarsDatas) ->
-    ?TR,
     case dpi:stmt_fetch(Stmt) of % try to fetch a row
         #{found := true} -> % got a row: get the values in that row and then do the recursive call to try to get another row
             get_rows(Conn, Stmt, NRows -1, [get_column_values(Conn, Stmt, 1, VarsDatas, length(Acc)+1) | Acc], VarsDatas); % recursive call
@@ -1200,42 +1001,42 @@ get_rows(Conn, Stmt, NRows, Acc, VarsDatas) ->
     end.
 
 %% get all the fields in one row
-get_column_values(_Conn, _Stmt, ColIdx, VarsDatas, _RowIndex) when ColIdx > length(VarsDatas) -> ?TR(1), [];
+get_column_values(_Conn, _Stmt, ColIdx, VarsDatas, _RowIndex) when ColIdx > length(VarsDatas) -> [];
 get_column_values(Conn, Stmt, ColIdx, VarsDatas, RowIndex) ->
-    ?TR(2),
     case lists:nth(ColIdx, VarsDatas) of % get the entry that is either a {Var, Datas} tuple or noVariable if no variable was made for this column
         {_Var, Datas, OraType} -> % if a variable was made for this column: the value was fetched into the variable's data object, so get it from there
             Value = dpi:data_get(lists:nth(RowIndex, Datas)), % get the value out of that data variable
             ValueFixed = case OraType of % depending on the ora type, the value might have to be changed into a different format so it displays properly
-                'DPI_ORACLE_TYPE_BLOB' -> list_to_binary(lists:flatten([io_lib:format("~2.16.0B", [X]) || X <- binary_to_list(Value)])); % turn binary to hex string
-                _Else -> Value end, % the value is already in the correct format for most types, so do nothing
+                'DPI_ORACLE_TYPE_BLOB' -> list_to_binary(lists:flatten([io_lib:format("~2.16.0B", [X]) || X <- binary_to_list(dpi:lob_readBytes(Value, 1, 4000))])); % turn binary to hex string
+                'DPI_ORACLE_TYPE_CLOB' -> dpi:lob_readBytes(Value, 1, 4000);
+            _Else -> Value end, % the value is already in the correct format for most types, so do nothing
 
             [ValueFixed | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas, RowIndex)]; % recursive call
-        noVariable -> % if no variable has been made then that means that the value can be fetched with stmt_getQueryValue()
+        {noVariable, OraType} -> % if no variable has been made then that means that the value can be fetched with stmt_getQueryValue()
             #{data := Data} = dpi:stmt_getQueryValue(Stmt, ColIdx), % get the value 
             Value = dpi:data_get(Data), % take the value from this freshly made data
             dpi:data_release(Data), % release this new data object
-            [Value | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas, RowIndex)]; % recursive call
+            ValueFixed = case OraType of % some types may require additional casting/unmarshalling
+                'DPI_ORACLE_TYPE_LONG_VARCHAR' -> list_to_binary(lists:flatten([io_lib:format("~2.16.0B", [X]) || X <- binary_to_list(Value)])); % turn binary into hex representation of binary
+                _Else -> Value end, % value doesn't need any converting
+            [ValueFixed | get_column_values(Conn, Stmt, ColIdx + 1, VarsDatas, RowIndex)]; % recursive call
         Else ->
-            io:format("ERROR! Invalid variable term of ~p~n!", [Else])
+            ?Error("Invalid variable term of ~p", [Else])
     end.
 
 % Helper function to avoid many rpc calls when binding a list of variables.
 dpi_var_set_many(#odpi_conn{node = Node}, Vars, Rows) ->
-    ?TR,
     dpi:safe(Node, fun() -> var_bind_many(Vars, Rows, 0) end).
 
-var_bind_many(_Vars, [], _) -> ?TR, ok;
+var_bind_many(_Vars, [], _) ->  ok;
 var_bind_many(Vars, [Row | Rest], Idx) ->
-    ?TR,
     ok = var_bind_row(Vars, Row, Idx),
     var_bind_many(Vars, Rest, Idx + 1).
 
-var_bind_row([], [], _Idx) -> ?TR, ok;
-var_bind_row([], _Row, _Idx) -> ?TR, {error, <<"Bind variables does not match the given data">>};
-var_bind_row(_Vars, [], _Idx) -> ?TR, {error, <<"Bind variables does not match the given data">>};
+var_bind_row([], [], _Idx) ->  ok;
+var_bind_row([], _Row, _Idx) ->  {error, <<"Bind variables does not match the given data">>};
+var_bind_row(_Vars, [], _Idx) ->  {error, <<"Bind variables does not match the given data">>};
 var_bind_row([{Var, Data, Type} | RestVars], [Bytes | RestRow], Idx) ->
-    ?TR,
     case Type of 
         Atom when % dates and timestamp are the same internally so dpi:data_setTimestamp is good for all of them
         Atom =:= 'DPI_ORACLE_TYPE_DATE';
@@ -1251,16 +1052,13 @@ var_bind_row([{Var, Data, Type} | RestVars], [Bytes | RestRow], Idx) ->
     end,
     var_bind_row(RestVars, RestRow, Idx);
 var_bind_row([Var | RestVars], [Bytes | RestRow], Idx) ->
-    ?TR,
     var_bind_row([{Var, undefined, undefined} | RestVars], [Bytes | RestRow], Idx).
 
 dpi_var_get_rowids(#odpi_conn{node = Node}, Var, Count) when Count > 0->
-    ?TR,
     dpi:safe(Node, fun() -> var_get_rowids(Var, Count, 0) end).
 
-var_get_rowids(_, Count, Count) -> ?TR, [];
+var_get_rowids(_, Count, Count) ->  [];
 var_get_rowids(Var, Count, Idx) ->
-    ?TR,
     #{numElements := 1, data  := [D]} = dpi:var_getReturnedData(Var, Idx),
     RowId = dpi:data_get(D),
     ok = dpi:data_release(D),

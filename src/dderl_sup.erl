@@ -34,10 +34,18 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
-    {ok, {#{strategy => one_for_one, intensity => 5, period => 10},
-          [?CHILD(dderl_dal, worker, []),
-           ?CHILD(dderl_rest, worker, []),
-           ?CHILD(dderl_metrics, worker, []),
-           ?CHILD(dderl_session_sup, supervisor, []),
-           ?CHILD(dderl_data_sender_sup, supervisor, []),
-           ?CHILD(dderl_data_receiver_sup, supervisor, [])]}}.
+  {
+    ok,
+    {
+      #{strategy => one_for_one, intensity => 5, period => 10},
+      [
+        ?CHILD(dderl_dal, worker, []),
+        ?CHILD(dderl_rest, worker, []),
+        ?CHILD(dderl_metrics, worker, []),
+        ?CHILD(dderl_session_sup, supervisor, []),
+        ?CHILD(dderl_data_sender_sup, supervisor, []),
+        ?CHILD(dderl_data_receiver_sup, supervisor, []),
+        ?CHILD(dperl_sup, supervisor, [])
+      ]
+    }
+  }.

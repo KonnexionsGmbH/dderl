@@ -1,6 +1,6 @@
 %% @doc POST ajax handler.
 -module(dderl_resource).
--author('Bikram Chatterjee <bikram.chatterjee@k2informatics.ch>').
+-author('Bikram Chatterjee <bikram@konnexions.ch>').
 
 -behaviour(cowboy_loop).
  
@@ -88,7 +88,7 @@ process_request_low(SessionToken, XSRFToken, Adapter, Req, Body, Typ) ->
     end,
     {Ip, Port} = cowboy_req:peer(Req),
     NewBody =
-    if Typ == [<<"login">>] -> 
+    if Typ == [<<"login">>] orelse Typ == [<<"register_key_init">>] -> 
             HostUrl = iolist_to_binary(cowboy_req:uri(Req, #{path => undefined, qs => undefined})),
             BodyMap = imem_json:decode(Body, [return_maps]),
             jsx:encode(BodyMap#{host_url => HostUrl});

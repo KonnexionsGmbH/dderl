@@ -2,7 +2,7 @@
 -define(DDERLODPI_HRL, true).
 
 -include("dderl.hrl").
--include_lib("imem/include/imem_sql.hrl").
+-include_lib("imem/src/imem_sql.hrl").
 
 -define(InitTimeout, 3600000).
 -define(ExecTimeout, 3600000).

@@ -3,7 +3,7 @@
 -include("dderl.hrl").
 -include("gres.hrl").
 
--include_lib("imem/include/imem_sql.hrl").
+-include_lib("imem/src/imem_sql.hrl").
 
 -export([ process_cmd/6
         , init/0
@@ -751,14 +751,6 @@ build_column_json([C|Cols], JCols, Counter) ->
         number  -> Type = <<"numeric">>;
         binstr  -> Type = <<"text">>;
         string  -> Type = <<"text">>;
-%% Oracle types:
-        'SQLT_NUM' -> Type = <<"numeric">>;
-        'SQLT_CHR' -> Type = <<"text">>;
-        'SQLT_STR' -> Type = <<"text">>;
-        'SQLT_VCS' -> Type = <<"text">>;
-        'SQLT_LVC' -> Type = <<"text">>;
-        'SQLT_CLOB'-> Type = <<"text">>;
-        'SQLT_VST' -> Type = <<"text">>;
 %% Oracle odpi types:
         'DPI_ORACLE_TYPE_VARCHAR' -> Type = <<"text">>;
         'DPI_ORACLE_TYPE_NVARCHAR' -> Type = <<"text">>;
@@ -903,11 +895,6 @@ generate_set_value(Row, Columns, [ColId | Rest], Adapter) ->
 
 -spec add_function_type(atom(), binary(), atom()) -> binary().
 add_function_type(_, <<>>, _) -> <<"NULL">>;
-add_function_type('SQLT_NUM', Value, odpi) -> Value;
-add_function_type('SQLT_DAT', Value, odpi) ->
-    ImemDatetime = imem_datatype:io_to_datetime(Value),
-    NewValue = imem_datatype:datetime_to_io(ImemDatetime),
-    iolist_to_binary([<<"to_date('">>, NewValue, <<"','DD.MM.YYYY HH24:MI:SS')">>]);
 add_function_type(integer, Value, imem) -> Value;
 add_function_type(float, Value, imem) -> Value;
 add_function_type(decimal, Value, imem) -> Value;
@@ -957,7 +944,7 @@ build_column_csv(UserId, Adapter, Cols) ->
            Bom when is_binary(Bom) -> Bom
        end)/binary,
       (unicode:characters_to_binary(
-         [csv_row([C#rowCol.alias || C <- Cols],
+         [csv_row([imem_datatype:strip_dquotes(C#rowCol.alias) || C <- Cols],
                   ?COL_SEP_CHAR(UserId, Adapter),
                   ?CSV_ESCAPE(UserId, Adapter)),
           ?ROW_SEP_CHAR(UserId, Adapter)],
@@ -992,12 +979,19 @@ csv_row([Cell | Row], ColSepChar, EscapeMode) ->
      | csv_row(Row, ColSepChar, EscapeMode)].
 
 -spec should_escape(atom(), list(), binary()) -> boolean().
-should_escape(always, _ColSepChar, _Cell) -> true;
+should_escape(always, _ColSepChar, Cell) -> 
+    (re:run(Cell, "^\".*\"$") =/= nomatch);
 should_escape(never, _ColSepChar, _Cell) -> false;
 should_escape(strict, ColSepChar, Cell) ->
-    re:run(Cell, "[\"\r\n"++ColSepChar++"]") =/= nomatch;
+    case re:run(Cell, "^\".*\"$") =/= nomatch of
+        true ->     re:run(Cell, "[\"\r\n"++ColSepChar++"]") =/= nomatch;
+        false ->    false
+    end;
 should_escape(normal, ColSepChar, Cell) ->
-    re:run(Cell, "^\"|[\r\n"++ColSepChar++"]") =/= nomatch;
+    case re:run(Cell, "^\".*\"$") =/= nomatch of
+        true ->     re:run(Cell, "[\r\n"++ColSepChar++"]") =/= nomatch;
+        false ->    false
+    end;
 should_escape(_Other, ColSepChar, Cell) ->
     should_escape(normal, ColSepChar, Cell).
 

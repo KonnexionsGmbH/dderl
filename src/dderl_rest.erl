@@ -2,7 +2,7 @@
 -behaviour(cowboy_loop).
 
 -include("dderl.hrl").
--include_lib("imem/include/imem_sql.hrl").
+-include_lib("imem/src/imem_sql.hrl").
 
 % gen_server exports
 -export([start_link/0, init/1, terminate/2, handle_call/3, handle_cast/2,
