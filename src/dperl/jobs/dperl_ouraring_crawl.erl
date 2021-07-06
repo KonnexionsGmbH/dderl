@@ -172,7 +172,7 @@ init({#dperlJob{name=Name, dstArgs = #{channel := Channel},
             {stop, badarg};
         {User, EncHash} ->
             ?JInfo("Starting with ~p's enchash...", [User]),
-            imem_sec_mnesia:put_enc_hash(EncHash),
+            imem_enc_mnesia:put_enc_hash(EncHash),
             ChannelBin = dperl_dal:to_binary(Channel),
             KeyPrefix = maps:get(key_prefix, SrcArgs, []),
             dperl_dal:create_check_channel(ChannelBin),
