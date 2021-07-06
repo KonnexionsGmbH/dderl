@@ -7,7 +7,7 @@
 
 -include("dderl.hrl").
 -include("gres.hrl").
--include_lib("imem/include/imem_sql.hrl").
+-include_lib("imem/src/imem_sql.hrl").
 
 -ifndef(NoFilter).
 %% TODO driver should translate for the same effect
@@ -39,6 +39,7 @@
         , stop/1
         , inspect_status/1
         , inspect_state/1
+        , put_enc_hash/2
         ]).
 
 -export([ rows/2        %% incoming rows          [RowList,true] | [RowList,false] | [RowList,tail]    RowList=list(KeyTuples)
@@ -231,6 +232,8 @@ stop(Pid) ->
 	gen_statem:cast(Pid,stop).
 
 inspect_status(Pid) -> gen_statem:call(Pid, inspect_status).
+
+put_enc_hash(Pid, EncHash) -> gen_statem:call(Pid, {put_enc_hash, EncHash}).
 
 inspect_state(Pid) -> gen_statem:call(Pid, inspect_state).
 
@@ -685,6 +688,7 @@ reply_stack(SN,ReplyTo, #state{stack={button,_Button,RT},tRef=TRef}=State0) ->
 init({#ctx{} = Ctx, SessPid}) ->
     process_flag(trap_exit, true),
     true = link(SessPid),
+
     #ctx{ bl                            = BL
          , replyToFun                   = ReplyTo
          , rowCols                      = RowCols
@@ -1738,6 +1742,9 @@ handle_call(cache_data, From, SN, #state{tableId = TableId, ctx=#ctx{rowCols=Row
     {next_state, SN, State, [{reply, From, ok}]};
 handle_call(inspect_status, From, SN, State) ->
     {next_state, SN, State, [{reply, From, SN}]};
+handle_call({put_enc_hash, EncHash}, From, SN, State) ->
+    imem_enc_mnesia:put_enc_hash(EncHash),
+    {next_state, SN, State, [{reply, From, ok}]};
 handle_call(inspect_state, From, SN, State) ->
     {next_state, SN, State, [{reply, From, State}]};
 handle_call(_Event, _From, empty, State) ->
