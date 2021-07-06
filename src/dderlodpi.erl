@@ -200,7 +200,9 @@ handle_cast({fetch_push, NRows, Target}, #qry{fsm_ref = FsmRef, stmt_result = St
             RowsToFetch = MissingRows
     end,
     case dpi_fetch_rows(Connection, StmtRef, RowsToFetch) of
-        { Rows, Completed} ->
+        {error, Error} ->
+            dderl_fsm:rows(FsmRef, {error, Error});
+        {Rows, Completed} ->
             RowsFixed = fix_row_format(StmtRef, Rows, Clms, ContainRowId),
             NewNRows = NRows + length(RowsFixed),
             if
@@ -209,9 +211,7 @@ handle_cast({fetch_push, NRows, Target}, #qry{fsm_ref = FsmRef, stmt_result = St
                 true ->
                     dderl_fsm:rows(FsmRef, {RowsFixed, false}),
                     gen_server:cast(self(), {fetch_push, NewNRows, Target})
-            end;
-        {error, Error} ->
-            dderl_fsm:rows(FsmRef, {error, Error})
+            end
     end,
     {noreply, State};
 handle_cast(_Ignored, State) ->
@@ -381,6 +381,11 @@ run_query(Connection, Sql, Binds, NewSql, RowIdAdded, SelectSections) ->
     case dpi_conn_prepareStmt(Connection, NewSql) of
         Statement when is_reference(Statement) ->
             StmtExecResult = bind_exec_stmt(Connection, Statement, Binds),
+            case StmtExecResult of
+                {error, _DpiNifFile, _Line, #{message := Msg}} ->
+                    error(list_to_binary(Msg)); % return oranif error
+                _Else -> nop                    % no oranif error? do nothing
+            end,
             case dpi_stmt_getInfo(Connection, Statement) of
                 #{isQuery := true} ->
                     result_exec_query(
