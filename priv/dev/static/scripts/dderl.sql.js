@@ -865,6 +865,7 @@ const tabPositions = Object.freeze({
             if(isMultiple) {
                 self._execMultStmts();
             }
+            else alert_jq("Statement executed"); // only one statement
         } else if(resultQry.hasOwnProperty('error')) {
             alert_jq(resultQry.error + "<br><br><b><center>" + self._pendingQueries.length + " statements not executed</center></b>");
         } else if(resultQry.hasOwnProperty('data')) {

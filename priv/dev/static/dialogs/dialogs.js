@@ -20,6 +20,11 @@ export function alert_jq(string) {
             }
         });
     dlgDiv.dialog("widget").draggable("option","containment","#main-body");
+    setTimeout(function(){ // auto-destroy alert window after 3 seconds
+        dlgDiv.dialog('destroy'); // the same routine as pressing 'close'
+        dlgDiv.remove();
+        dlgDiv.empty();},
+        3000); // 3000 milliseconds
     return dlgDiv;
 }
 
