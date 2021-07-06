@@ -384,7 +384,7 @@ run_query(Connection, Sql, Binds, NewSql, RowIdAdded, SelectSections) ->
             case StmtExecResult of
                 {error, _DpiNifFile, _Line, #{message := Msg}} ->
                     error(list_to_binary(Msg)); % return oranif error
-                    _Else -> nop                % no oranif error? do nothing
+                _Else -> nop                    % no oranif error? do nothing
             end,
             case dpi_stmt_getInfo(Connection, Statement) of
                 #{isQuery := true} ->
