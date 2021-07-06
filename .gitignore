@@ -11,8 +11,7 @@ test/*.beam
 *.dump
 *.swp
 *.swo
-package-lock.json
-dderl.dderl@*
+dderl.dderl*
 *.bkp
 tmp
 TEST*.xml
@@ -22,5 +21,4 @@ TEST*.xml
 node_modules/
 priv/swagger/yarn.*
 .rebar3/
-/dderl.dderl1@127.0.0.1/
 .idea
