@@ -449,10 +449,10 @@ process_cmd({[<<"system_views">>], ReqBody}, Sess, _UserId, From, Priv, SessPid)
             RespJson = jsx:encode([{<<"error">>, Reason}]);
         F ->
             C = dderl_dal:get_command(Sess, F#ddView.cmd),
-            ?Info("!!! C#ddCmd.command : ~p", [C#ddCmd.command]),
-            ?Info("!!! Sess : ~p", [Sess]),
-            ?Info("!!! {ConnId, imem} : ~p", [{ConnId, imem}]),
-            ?Info("!!! SessPid : ~p", [SessPid]),
+            %?Info("!!! C#ddCmd.command : ~p", [C#ddCmd.command]),
+            %?Info("!!! Sess : ~p", [Sess]),
+            %?Info("!!! {ConnId, imem} : ~p", [{ConnId, imem}]),
+            %?Info("!!! SessPid : ~p", [SessPid]),
             Resp = process_query(C#ddCmd.command, Sess, {ConnId, imem}, SessPid),
             ?Debug("ddViews ~p~n~p", [C#ddCmd.command, Resp]),
             RespJson = jsx:encode([{<<"system_views">>,
@@ -671,6 +671,8 @@ process_cmd({[<<"restore_tables_as">>], BodyJson}, _Sess, _UserId, From, #priv{c
     Priv;
 process_cmd({[<<"term_diff">>], ReqBody}, Sess, _UserId, From, Priv, SessPid) ->
     [{<<"term_diff">>, BodyJson}] = ReqBody,
+    %?Info("process_cmd Priv=~p ReqBody=~p", [Priv, ReqBody]),
+    %?Info("process_cmd called with Sess ~p SessPid ~p", [Sess, SessPid]),
     % Can't be handled directly as SessPid is not given to gen_adapter.
     gen_adapter:term_diff(BodyJson, Sess, SessPid, From),
     Priv;
@@ -810,7 +812,11 @@ process_query(Query, Connection, Params, SessPid) ->
                                         , update_cursor_execute_funs = imem_adapter_funs:update_cursor_execute(Connection, StmtRefs)
                                         }, SessPid),
             erlimem_session:add_stmt_fsm(Connection, StmtRefs, {dderl_fsm, StmtFsm}),
+<<<<<<< HEAD
+            EncHash = imem_enc_mnesia:get_enc_hash(), 
+=======
             EncHash = erlimem_session:run_cmd(Connection, get_enc_hash, []),
+>>>>>>> master
             dderl_fsm:put_enc_hash(StmtFsm, EncHash),
             ?Debug("StmtRslt ~p ~p", [RowCols, SortSpec]),
             Columns = gen_adapter:build_column_json(lists:reverse(RowCols)),

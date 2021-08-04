@@ -23,6 +23,30 @@ export function loginAjax(data = {}) {
 
 window.loginCb = loginCb;
 
+// oauth2 callback handler
+const url = new URL(window.location.href);
+const code = url.searchParams.get('code');
+const error = url.searchParams.get('error');
+const state = JSON.parse(url.searchParams.get('state'));
+if (code) {
+    dderlState.xsrfToken = state.xsrfToken;
+    const body = { 'oauth2_callback': { 'code': code, 'state': state } };
+    ajaxCall(null, 'oauth2_callback', body, 'oauth2_callback',
+        function () {
+            window.close();
+        },
+        function (error) {
+            alert('Error fetching access token : ' + error);
+            console.log('Error fetching access token', error);
+            window.close();
+        });
+} else if (error) {
+    const errorDesc = url.searchParams.get('error_description');
+    alert('Login error : ' + error + ' : ' + errorDesc);
+    window.close();
+}
+// oauth2 callback handler end
+
 function loginCb(resp) {
     try {
         if (window.opener && window.opener.isScreensaver && window.opener.loginCb && $.isFunction(window.opener.loginCb)) {
@@ -417,9 +441,18 @@ export function change_login_password(loggedInUser, shouldConnect) {
     });
 }
 
+    ajaxCall(null, 'office_365_auth_config', {}, 'office_365_auth_config', function (auth_config) {
+        const params = 'scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no,width=500,height=600,left=100,top=100';
+        window.open(auth_config.url, 'Office 365 login', params);
+    });
+}
+
+export function authorize_oura() {
+    ajaxCall(null, 'oura_ring_auth_config', {}, 'oura_ring_auth_config', function(auth_config) {
+        const params = 'scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no,width=500,height=600,left=100,top=100';
+        window.open(auth_config.url, 'Oura Ring login', params);
+    });
 // fido2 helper functions
-function _arrayBufferToString(buffer) {
-    var binary = '';
     var bytes = new Uint8Array(buffer);
     var len = bytes.byteLength;
     for (var i = 0; i < len; i++) {

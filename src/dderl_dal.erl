@@ -45,6 +45,9 @@
         ,get_d3_templates_path/1
         ,get_host_app/0
         ,is_proxy/2
+        ,create_check_avatar_channel/1
+        ,write_to_avatar_channel/3
+        ,read_from_avatar_channel/2
         ,fido2_register_config/4
         ]).
 
@@ -61,6 +64,12 @@
 -define(USE_CONN(__ConnId), {dderl, conn, {conn, __ConnId}, use}).
 -define(USE_LOCAL_CONN, {dderl, conn, local, use}).
 
+-define(GET_AVATAR_CHANNEL_PREFIX,
+    ?GET_CONFIG(avatarChannelPrefix,[], <<"ph">>,"PRIVACY_HUB - binary string prefix for avatar channel name")).
+
+-define(GET_AVATAR_CHANNEL_OPTIONS,
+    ?GET_CONFIG(avatarChannelOptions,[], [encrypted,audit,history],"PRIVACY_HUB - table options for avatar channel")).
+
 %% Validate this permission.
 -define(USE_ADAPTER, {dderl, adapter, {id, __AdaptId}, use}).
 
@@ -76,13 +85,13 @@ del_conn(Sess, UserId, ConId) ->
     HasAll = (erlimem_session:run_cmd(Sess, have_permission, [[?MANAGE_CONNS]]) == true),
     if HasAll ->
         ok = erlimem_session:run_cmd(Sess, delete, [ddConn, ConId]),
-        ?Info("user ~p deleted connection ~p", [UserId, ConId]),
+        %?Info("user ~p deleted connection ~p", [UserId, ConId]),
         ok;
     true ->
         case erlimem_session:run_cmd(Sess, select, [ddConn, [{#ddConn{id=ConId,owner=UserId,_='_'},[],['$_']}]]) of
             {[_|_], true} ->
                 ok = erlimem_session:run_cmd(Sess, delete, [ddConn, ConId]),
-                ?Info("user ~p deleted connection ~p", [UserId, ConId]),
+                %?Info("user ~p deleted connection ~p", [UserId, ConId]),
                 ok;
             _ ->
                 ?Error("user ~p doesn't have permission to delete connection ~p", [UserId, ConId]),
@@ -599,7 +608,7 @@ is_local_query(Qry) ->
 can_connect_locally(Sess) ->
     erlimem_session:run_cmd(Sess, have_permission, [[?USE_LOCAL_CONN]]) == true.
 
--spec conn_permission({atom(), pid()}, ddEntityId(), #ddConn{}) -> boolean().
+-spec conn_permission({atom(), pid()}, integer()|atom(), #ddConn{}) -> boolean().
 conn_permission(_Sess, UserId, #ddConn{owner=UserId}) -> true; %% If it is the owner always allow usage.
 conn_permission(Sess, _UserId, #ddConn{id=ConnId, owner=system}) ->
     erlimem_session:run_cmd(Sess, have_permission, [?USE_SYS_CONNS]) orelse  %% If it can use system connections.
@@ -892,6 +901,28 @@ is_proxy(AppId, NetCtx) ->
             end;
         [PF] when is_function(PF, 1) -> exec_is_proxy_fun(PF, NetCtx);
         _ -> false
+    end.
+
+avatar_channel_name(AccountId) when is_atom(AccountId) ->
+    avatar_channel_name(atom_to_binary(AccountId, utf8));
+avatar_channel_name(AccountId) when is_list(AccountId) ->
+    avatar_channel_name(list_to_binary(AccountId));
+avatar_channel_name(AccountId) when is_binary(AccountId) ->
+    Prefix = ?GET_AVATAR_CHANNEL_PREFIX,
+    <<Prefix/binary, AccountId/binary>>.
+
+% -spec create_check_avatar_channel(ddEntityId()) -> binary().
+create_check_avatar_channel(AccountId) ->
+    imem_dal_skvh:create_check_channel(avatar_channel_name(AccountId), ?GET_AVATAR_CHANNEL_OPTIONS).
+
+write_to_avatar_channel(AccountId, Key, Value) ->
+    imem_dal_skvh:write(AccountId, avatar_channel_name(AccountId), Key, Value).
+
+read_from_avatar_channel(AccountId, Key) ->
+    case imem_dal_skvh:read(AccountId, avatar_channel_name(AccountId), [Key]) of
+        [#{cvalue := CValue}] when is_binary(CValue) -> imem_json:decode(CValue, [return_maps]);
+        [#{cvalue := CValue}] when is_map(CValue)->     CValue;
+        [] ->                                           []
     end.
 
 -spec exec_is_proxy_fun(reference(), map()) -> boolean().

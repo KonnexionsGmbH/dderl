@@ -2,9 +2,27 @@
 -define(_dperl_HRL_, true).
 
 -define(LOG_TAG, "_dperl_").
--include_lib("dderl/src/dderl.hrl").
 
--type plan() :: at_most_once|at_least_once|on_all_nodes.
+-include("../dderl.hrl").          
+
+-type jobName()         :: binary().
+-type jobModule()       :: module().
+-type jobArgs()         :: map().
+-type jobEnabled()      :: true|false.
+-type jobRunning()      :: true|false|undefined.
+-type jobPlan()         :: at_most_once|at_least_once|on_all_nodes.
+-type jobOpts()         :: [].  % currently none, tbd 
+-type jobStatus()       :: undefined|idle|synced|cleaning|cleaned|refreshing|refreshed|error|stopped. 
+
+-type serviceName()     :: binary().
+-type serviceModule()   :: atom().
+-type serviceArgs()     :: map().
+-type serviceEnabled()  :: true|false.
+-type serviceRunning()  :: true|false|undefined.
+-type servicePlan()     :: at_most_once|at_least_once|on_all_nodes.
+-type serviceOpts()     :: [].  % currently none, tbd  
+-type serviceStatus()   :: idle|stopped|active|overload.
+
 
 -define(TABLESPEC(__T,__O),
         {__T, record_info(fields, __T), ?__T, #__T{}, __O}).
@@ -13,50 +31,46 @@
 
 -define(NOT_FOUND, '$notfound').
 
--record(dperlJob, {
-          name      :: binary(),
-          module    :: atom(),
-          args      :: any(),
-          srcArgs   :: any(),
-          dstArgs   :: any(),
-          enabled   :: true|false,
-          running   :: true|false,
-          plan      :: plan(),
-          nodes     :: [atom()],
-          opts = [] :: list()
-         }).
+-record(dperlJob,           { name      :: jobName()
+                            , module    :: jobModule()
+                            , args      :: any()
+                            , srcArgs   :: any()
+                            , dstArgs   :: any()
+                            , enabled   :: jobEnabled()
+                            , running   :: jobRunning()
+                            , plan      :: jobPlan()
+                            , nodes     :: [atom()]
+                            , opts = [] :: jobOpts()
+                            }).
 -define(dperlJob, [binstr,atom,term,term,term,boolean,atom,atom,list,list]).
 
 -define(JOBDYN_TABLE, 'dperlNodeJobDyn@').
--record(dperlNodeJobDyn, {
-          name          :: binary(), % same as dperlJob.name
-          state         :: map(),
-          status        :: atom(),
-          statusTime    :: ddTimestamp()
-         }).
+-record(dperlNodeJobDyn,    { name          :: jobName() % same as dperlJob.name
+                            , state         :: map()
+                            , status        :: jobStatus()
+                            , statusTime    :: ddTimestamp()
+                            }).
 -define(dperlNodeJobDyn, [binstr,map,atom,timestamp]).
 
--record(dperlService, {
-          name      :: binary(),
-          module    :: atom(),
-          args      :: any(),
-          resource  :: any(),
-          interface :: any(),
-          enabled   :: true|false,
-          running   :: true|false,
-          plan      :: plan(),
-          nodes     :: [atom()],
-          opts = [] :: list()
-         }).
+-record(dperlService,       { name      :: serviceName()
+                            , module    :: serviceModule()
+                            , args      :: any()
+                            , resource  :: any()
+                            , interface :: any()
+                            , enabled   :: serviceEnabled()
+                            , running   :: serviceRunning()
+                            , plan      :: servicePlan()
+                            , nodes     :: [atom()]
+                            , opts = [] :: serviceOpts()
+                            }).
 -define(dperlService, [binstr,atom,term,term,term,boolean,atom,atom,list,list]).
 
 -define(SERVICEDYN_TABLE, 'dperlServiceDyn@').
--record(dperlServiceDyn, {
-          name          :: binary(), % same as dperlService.name
-          state         :: map(),
-          status        :: atom(),
-          statusTime    :: ddTimestamp()
-         }).
+-record(dperlServiceDyn,    { name          :: serviceName() % same as dperlService.name
+                            , state         :: map()
+                            , status        :: serviceStatus()
+                            , statusTime    :: ddTimestamp()
+                            }).
 -define(dperlServiceDyn, [binstr,map,atom,timestamp]).
 
 -define(G(__JS,__F),

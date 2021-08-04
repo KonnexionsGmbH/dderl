@@ -16,7 +16,7 @@
 -record(state, {sessionToken}).
 
 init(Req0, []) ->
-    Req = ?COW_REQ_SET_META(reqTime, os:timestamp(), Req0),
+    Req = ?COW_REQ_SET_META(reqTime, imem_meta:time(), Req0),
     Req1 = ?COW_REQ_SET_META(accessLog, #{}, Req),
     ?Debug("Request : ~p", [Req1]),
     case cowboy_req:has_body(Req1) of
@@ -166,7 +166,7 @@ terminate(_Reason, Req, _State) ->
     RespSize = ?COW_REQ_GET_META(respSize, Req, 0),
     ReqSize = cowboy_req:body_length(Req),
     Size = ReqSize + RespSize,
-    ProcessingTimeMicroS = timer:now_diff(os:timestamp(), ReqTime),
+    ProcessingTimeMicroS = imem_datatype:musec_diff(ReqTime),
     catch dderl_access_logger:log(Log#{bytes => Size,
                                        time => ProcessingTimeMicroS}).
 

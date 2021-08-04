@@ -2,23 +2,78 @@
 
 -include("dperl.hrl").
 
--export([select/2, subscribe/1, unsubscribe/1, write/2, check_table/5,
-         sql_jp_bind/1, sql_bind_jp_values/2, read_channel/2,
-         io_to_oci_datetime/1, create_check_channel/1, write_channel/3,
-         read_check_write/4, read_audit_keys/3, read_audit/3, get_enabled/1,
-         update_job_dyn/2, update_job_dyn/3, job_error_close/1, to_binary/1,
-         count_sibling_jobs/2, create_check_channel/2, write_protected/6,
-         get_last_state/1, get_last_audit_time/1, connect_imem_link/4,
-         remove_from_channel/2, remove_deep/2, data_nodes/0, job_state/1,
-         job_error/3, job_error/4, job_error_close/0, update_service_dyn/4,
-         update_service_dyn/3, all_keys/1, read_gt/3, time_str/1, ts_str/1,
-         safe_json_map/1, read_gt_lt/4, normalize_map/1, read_keys_gt/3,
-         write_if_different/3, maps_diff/2, read_keys_gt_lt/4, oci_opts/2,
-         oci_fetch_rows/2, key_from_json/1, disable/1, set_running/2,
-         read_siblings/2, read_channel_raw/2, worker_error/4, sort_links/1,
-         get_pool_name/1, remote_dal/3, get_pool_name/2, run_oci_stmt/3,
-         activity_logger/3, create_check_index/2, to_atom/1, report_status/7,
-         key_to_json/1, key_to_json_enc/1]).
+-export([activity_logger/3
+        ,all_keys/1
+        ,check_table/5
+        ,connect_imem_link/4
+        ,count_sibling_jobs/2
+        ,create_check_channel/1
+        ,create_check_channel/2
+        ,create_check_index/2
+        ,create_or_replace_tigger/2
+        ,data_nodes/0
+        ,disable/1
+        ,get_enabled/1
+        ,get_last_audit_time/1
+        ,get_last_state/1
+        ,get_pool_name/1
+        ,get_pool_name/2
+        ,io_to_oci_datetime/1
+        ,job_error/3
+        ,job_error/4
+        ,job_error_close/0
+        ,job_error_close/1
+        ,job_state/1
+        ,key_from_json/1
+        ,key_to_json/1
+        ,key_to_json_enc/1
+        ,maps_diff/2
+        ,normalize_map/1
+        ,oci_fetch_rows/2
+        ,oci_opts/2
+        ,read_audit/3
+        ,read_audit_keys/3
+        ,read_channel/2
+        ,read_channel_raw/2
+        ,read_check_write/4
+        ,read_gt/3
+        ,read_gt_lt/4
+        ,read_keys_gt/3
+        ,read_keys_gt_lt/4
+        ,read_siblings/2
+        ,remote_dal/3
+        ,remove_deep/2
+        ,remove_from_channel/2
+        ,report_status/7
+        ,run_oci_stmt/3
+        ,safe_json_map/1
+        ,select/2
+        ,set_running/2
+        ,sort_links/1
+        ,sql_bind_jp_values/2
+        ,sql_jp_bind/1
+        ,subscribe/1
+        ,time_str/1
+        ,to_atom/1
+        ,to_binary/1
+        ,ts_str/1
+        ,unsubscribe/1
+        ,update_job_dyn/2
+        ,update_job_dyn/3
+        ,update_service_dyn/3
+        ,update_service_dyn/4
+        ,url_enc_params/1
+        ,worker_error/4
+        ,write/2
+        ,write_channel/3
+        ,write_channel_no_audit/3
+        ,write_if_different/3
+        ,write_protected/6
+        ,read_channel_index/2
+        ,read_channel_index_key/2
+        ,read_channel_index_key_prefix/3
+        ,read_channel_index_key_prefix_gt/4
+        ]).
 
 check_table(Table, ColumnNames, ColumnTypes, DefaultRecord, Opts) ->
     case catch imem_meta:create_check_table(
@@ -26,8 +81,9 @@ check_table(Table, ColumnNames, ColumnTypes, DefaultRecord, Opts) ->
                  Opts, system) of
         {'EXIT', {'ClientError', _} = Reason} ->
             ?Error("create_check table ~p, ~p", [Table, Reason]);
-        Else ->
-            ?Info("create_check table ~p... ~p", [Table, Else])
+        _Else ->
+            %?Info("create_check table ~p... ~p", [Table, _Else]),
+            ok
     end.
 
 -spec create_check_channel(binary() | list()) ->  ok | no_return().
@@ -52,6 +108,9 @@ create_check_index(Channel, IndexDefinition) ->
         Other ->                                        Other
     end.
 
+create_or_replace_tigger(Table, FunStr) ->
+    imem_meta:create_or_replace_trigger(Table, FunStr).
+
 -spec write_channel(binary(), any(), any()) -> ok | {error, any()}.
 write_channel(Channel, Key, Val) when is_map(Val); byte_size(Val) > 0 ->
    case catch imem_dal_skvh:write(system, Channel, Key, Val) of
@@ -60,6 +119,16 @@ write_channel(Channel, Key, Val) when is_map(Val); byte_size(Val) > 0 ->
        {error, Error} -> {error, Error};
        Other -> {error, Other}
    end.
+
+-spec write_channel_no_audit(binary(), any(), any()) -> ok | {error, any()}.
+write_channel_no_audit(Channel, Key, Val) when is_map(Val); byte_size(Val) > 0 ->
+   case catch imem_dal_skvh:write_no_audit(system, Channel, Key, Val) of
+       Res when is_map(Res) -> ok;
+       {'EXIT', Error} -> {error, Error};
+       {error, Error} -> {error, Error};
+       Other -> {error, Other}
+   end.
+
 
 write_if_different(Channel, Key, Val) ->
     case imem_dal_skvh:read(system, Channel, [Key]) of
@@ -75,6 +144,37 @@ read_channel(Channel, Key) when is_binary(Channel) ->
        [#{cvalue := Val}] -> Val;
        _ -> ?NOT_FOUND
    end.
+
+read_channel_index(Channel, Stu) ->
+    imem_meta:read(imem_meta:index_table(Channel), Stu).
+
+read_channel_index_key(Channel, Stu) ->
+    [sext:decode(Row#ddIndex.lnk) || Row <- read_channel_index(Channel, Stu)].
+
+read_channel_index_key_prefix(Channel, Stu, Prefix) ->
+    F = fun(X) -> lists:prefix(Prefix,X) end,
+    lists:filter(F, read_channel_index_key(Channel, Stu)).
+
+read_channel_index_key_prefix_gt(Channel, Stu, KeyPrefix, BlkCount) ->
+    read_channel_index_key_prefix_gt(imem_meta:index_table(Channel), Stu, KeyPrefix, BlkCount, []).
+
+read_channel_index_key_prefix_gt(_IndexTable, _Stu, _KeyPrefix, 0, Acc) -> lists:reverse(Acc);
+read_channel_index_key_prefix_gt(IndexTable, Stu, KeyPrefix, More, Acc) ->
+    case imem_meta:dirty_next(IndexTable, Stu) of 
+        '$end_of_table' ->  
+            lists:reverse(Acc);
+        Next ->
+            [Row] = imem_meta:read(IndexTable, Next), 
+            Key = sext:decode(Row#ddIndex.lnk),
+            case lists:prefix(KeyPrefix, Key) of 
+                true ->
+                    read_channel_index_key_prefix_gt( IndexTable, Next, KeyPrefix, 
+                                                      More-1, [{element(2,Next),Key}|Acc]);
+                false ->
+                    read_channel_index_key_prefix_gt( IndexTable, Next, KeyPrefix, 
+                                                      More, Acc)
+            end
+    end.
 
 read_channel_raw(Channel, Key) when is_list(Channel) ->
     read_channel_raw(list_to_binary(Channel), Key);
@@ -259,69 +359,64 @@ update_job_dyn(JobName, State) when is_binary(JobName) andalso is_map(State) ->
     imem_meta:transaction(fun() ->
     case imem_meta:read(?JOBDYN_TABLE, JobName) of
         [] ->
-            ok = imem_meta:write(
-                   ?JOBDYN_TABLE,
-                   #dperlNodeJobDyn{name = JobName, state = State,
-                                   status = synced,
-                                   statusTime = imem_meta:time_uid()});
+            ok = imem_meta:write(?JOBDYN_TABLE,
+                                 #dperlNodeJobDyn{ name=JobName, state=State, status=synced
+                                                 , statusTime = imem_meta:time_uid()});
         [#dperlNodeJobDyn{state=OldState} = J] ->
             NewState = maps:merge(OldState, State),
-            if OldState /= NewState ->
-                   ok = imem_meta:write(
-                          ?JOBDYN_TABLE,
-                          J#dperlNodeJobDyn{state = NewState,
-                                           statusTime = imem_meta:time_uid()});
+            if 
+                OldState /= NewState ->
+                    ok = imem_meta:write(?JOBDYN_TABLE,
+                                         J#dperlNodeJobDyn{ state=State
+                                                          , statusTime=imem_meta:time_uid()});
                true -> ok
             end
     end end);
-update_job_dyn(JobName, Status)
-  when is_binary(JobName) andalso 
+update_job_dyn(JobName, Status) when is_binary(JobName) andalso 
        (Status == synced orelse
         Status == cleaning orelse Status == cleaned orelse
         Status == refreshing orelse Status == refreshed orelse
         Status == idle orelse Status == error orelse Status == stopped) ->
     case imem_meta:read(?JOBDYN_TABLE, JobName) of
         [] ->
-            ok = imem_meta:write(
-                   ?JOBDYN_TABLE,
-                   #dperlNodeJobDyn{name = JobName, state = #{},
-                                   status = Status,
-                                   statusTime = imem_meta:time_uid()});
+            ok = imem_meta:write(?JOBDYN_TABLE,
+                                 #dperlNodeJobDyn{ name=JobName, state=#{}
+                                                 , status=Status
+                                                 , statusTime=imem_meta:time_uid()});
         [#dperlNodeJobDyn{status = OldStatus} = J] ->
-            if OldStatus /= Status orelse
-               (OldStatus == Status andalso Status == error) ->
-                   ok = imem_meta:write(
-                          ?JOBDYN_TABLE,
-                          J#dperlNodeJobDyn{status = Status,
-                                           statusTime = imem_meta:time_uid()});
-               true -> ok
+            if 
+                OldStatus /= Status orelse
+                (OldStatus == Status andalso Status == error) ->
+                    ok = imem_meta:write(?JOBDYN_TABLE,
+                                         J#dperlNodeJobDyn{ status=Status
+                                                          , statusTime=imem_meta:time_uid()});
+                true -> ok
             end
     end.
 
-update_job_dyn(JobName, State, Status)
-  when is_binary(JobName) andalso is_map(State) andalso
+update_job_dyn(JobName, State, Status) 
+    when is_binary(JobName) andalso is_map(State) andalso
        (Status == synced orelse Status == undefined orelse
         Status == cleaning orelse Status == cleaned orelse
         Status == refreshing orelse Status == refreshed orelse
         Status == idle orelse Status == error orelse Status == stopped) ->
     case imem_meta:read(?JOBDYN_TABLE, JobName) of
         [] ->
-            ok = imem_meta:write(
-                   ?JOBDYN_TABLE,
-                   #dperlNodeJobDyn{name = JobName, state = State,
-                                   status = Status,
-                                   statusTime = imem_meta:time_uid()});
-        [#dperlNodeJobDyn{state=OldState, status=OldStatus, statusTime = OTime} = J] ->
+            ok = imem_meta:write(?JOBDYN_TABLE,
+                                 #dperlNodeJobDyn{ name=JobName, state=State
+                                                 , status=Status
+                                                 , statusTime=imem_meta:time_uid()});
+        [#dperlNodeJobDyn{state=OldState, status=OldStatus, statusTime=OTime} = J] ->
             NewState = maps:merge(OldState,State),
             TimeDiff = imem_datatype:sec_diff(OTime),
-            if NewState /= OldState orelse (OldStatus == error andalso Status /= idle)
-               orelse (OldStatus /= error andalso Status /= OldStatus) 
-               orelse (OldStatus == Status andalso Status == idle)
-               orelse TimeDiff > 1  ->
-                   ok = imem_meta:write(
-                          ?JOBDYN_TABLE,
-                          J#dperlNodeJobDyn{state = NewState, status = Status,
-                                           statusTime = imem_meta:time_uid()});
+            if 
+                NewState /= OldState orelse (OldStatus == error andalso Status /= idle)
+                orelse (OldStatus /= error andalso Status /= OldStatus) 
+                orelse (OldStatus == Status andalso Status == idle)
+                orelse TimeDiff > 1  ->
+                    ok = imem_meta:write(?JOBDYN_TABLE,
+                                         J#dperlNodeJobDyn{ state=NewState, status=Status
+                                                          , statusTime=imem_meta:time_uid()});
                true -> ok
             end
     end.
@@ -335,9 +430,8 @@ get_last_state(JobName) when is_binary(JobName) ->
 
 get_last_audit_time(JobName) ->
     case get_last_state(JobName) of
-        #{lastAuditTime := LastAuditTime} ->
-            LastAuditTime;
-        _ -> {0,0,0}
+        #{lastAuditTime := LastAuditTime} ->    LastAuditTime;
+        _ ->                                    ?EPOCH
     end.
 
 count_sibling_jobs(Module, Channel) ->
@@ -512,6 +606,8 @@ safe_json_map(Value) when is_binary(Value) ->
         DecodedValue when is_list(DecodedValue) -> DecodedValue
     end.
 
+%% sort lists inside a map recursively so that the compare result 
+%% does not depend on list order 
 -spec normalize_map(map()) -> map().
 normalize_map(Map) when is_map(Map)->
     maps:map(
@@ -663,6 +759,14 @@ activity_logger(StatusCtx, Name, Extra) ->
         Pid ->
             ?JDebug("activity logger already running ~p", [Pid])
     end.
+
+-spec url_enc_params(map()) -> binary().
+url_enc_params(Params) ->
+    EParams = maps:fold(
+        fun(K, {enc, V}, Acc) ->    ["&", K, "=", http_uri:encode(V) | Acc];
+           (K, V, Acc) ->           ["&", K, "=", V | Acc]
+        end, [], Params),
+    erlang:iolist_to_binary([tl(EParams)]).
 
 %%------------------------------------------------------------------------------
 %% private

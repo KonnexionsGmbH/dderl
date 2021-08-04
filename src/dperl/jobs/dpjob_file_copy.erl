@@ -1,6 +1,6 @@
--module(dperl_file_copy).
+-module(dpjob_file_copy).
 
--include_lib("dperl/dperl.hrl").
+-include("../dperl.hrl").
 
 -behavior(dperl_worker).
 

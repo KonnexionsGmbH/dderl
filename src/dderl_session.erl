@@ -35,7 +35,7 @@
           , inactive_tref               :: timer:tref()
           , user        = <<>>          :: binary()
           , user_id                     :: ddEntityId()
-          , sess                        :: {atom, pid()}
+          , sess                        :: {atom(), pid()}
           , active_sender               :: pid()
           , active_receiver             :: pid()
           , downloads   = []            :: integer()
@@ -156,8 +156,8 @@ handle_info(inactive, #state{user = User, inactive_tref = ITref} = State) ->
             cancel_timer(ITref),
             {noreply, State#state{lock_state = screensaver}}
     end;
-handle_info(die, #state{user=User}=State) ->
-    ?Info([{user, User}], "session ~p idle for ~p ms", [{self(), User}, ?SESSION_IDLE_TIMEOUT]),
+handle_info(die, #state{user=_User}=State) ->
+    %?Info([{user, User}], "session ~p idle for ~p ms", [{self(), _User}, ?SESSION_IDLE_TIMEOUT]),
     {stop, normal, State};
 handle_info(logout, #state{user = User} = State) ->
     ?Debug("terminating session of logged out user ~p", [User]),
@@ -408,6 +408,45 @@ process_call({[<<"about">>], _ReqData}, _Adapter, From, {SrcIp,_}, State) ->
     reply(From, [{<<"about">>, Versions}], self()),
     State;
 
+process_call({[<<"office_365_auth_config">>], _ReqData}, _Adapter, From, {SrcIp, _}, State) ->
+    act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "office_365_auth_config"}, State),
+    AuthConfig = dpjob_office_365:get_auth_config(), % ToDo: may depend on JobName or TokenPrefix
+    Url = dderl_oauth:get_authorize_url(State#state.xsrf_token, AuthConfig, ?SYNC_OFFICE365),
+    reply(From, #{<<"office_365_auth_config">> => #{<<"url">> => Url}}, self()),
+    State;
+
+process_call({[<<"oura_ring_auth_config">>], _ReqData}, _Adapter, From, {SrcIp, _}, State) ->
+    act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "oura_ring_auth_config"}, State),
+    AuthConfig = dpjob_ouraring_crawl:get_auth_config(), % ToDo: may depend on JobName or TokenPrefix
+    Url = dderl_oauth:get_authorize_url(State#state.xsrf_token, AuthConfig, ?SYNC_OURARING),
+    %?Info("oura_ring_auth_config ~p ~p",[AuthConfig, Url]),
+    reply(From, #{<<"oura_ring_auth_config">> => #{<<"url">> => Url}}, self()),
+    State;
+
+process_call({[<<"oauth2_callback">>], ReqData}, _Adapter, From, {SrcIp, _}, State) ->
+    act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "oauth2_callback", args => ReqData}, State),
+    #{<<"oauth2_callback">> := 
+        #{<<"code">> := Code, <<"state">> := #{<<"type">> := SyncType}}} = jsx:decode(ReqData, [return_maps]),
+    %?Info("oauth2_callback SyncType: ~p Code: ~p",[SyncType, Code]),
+    % ToDo: Check if this data can be trusted
+    {SyncHandler,TokenPrefix} = try
+        SH = binary_to_existing_atom(SyncType,utf8),
+        {SH,SH:get_auth_token_key_prefix()} % ToDo: may depend on JobName or TokenPrefix
+    catch 
+        _:E:_ ->
+            ?Error("Finding TokenPrefix : ~p", [E]),
+            reply(From, #{<<"oauth2_callback">> => #{<<"error">> => <<"Error finding TokenPrefix">>}}, self())
+    end,
+    %?Info("oauth2_callback TokenPrefix: ~p",[TokenPrefix]),
+    case dderl_oauth:get_access_token(State#state.user, TokenPrefix, Code, SyncHandler) of
+        ok ->
+            reply(From, #{<<"oauth2_callback">> => #{<<"status">> => <<"ok">>}}, self());
+        {error, Error} ->
+            ?Error("Fetching token : ~p", [Error]),
+            reply(From, #{<<"oauth2_callback">> => #{<<"error">> => <<"Fetching token failed, Try again">>}}, self())
+    end,
+    State;
+
 process_call({[<<"connect_info">>], _ReqData}, _Adapter, From, {SrcIp,_},
              #state{sess=Sess, user_id=UserId, user = User} = State) ->
     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "connect_info"}, State),
@@ -467,7 +506,7 @@ process_call({[<<"del_con">>], ReqData}, _Adapter, From, {SrcIp,_},
     act_log(From, ?CMD_NOARGS, #{src => SrcIp, cmd => "del_con", args => ReqData}, State),
     [{<<"del_con">>, BodyJson}] = jsx:decode(ReqData),
     ConId = proplists:get_value(<<"conid">>, BodyJson, 0),
-    ?Info([{user, State#state.user}], "connection to delete ~p", [ConId]),
+    %?Info([{user, State#state.user}], "connection to delete ~p", [ConId]),
     Resp = case dderl_dal:del_conn(Sess, UserId, ConId) of
         ok -> <<"success">>;
         Error -> [{<<"error">>, list_to_binary(lists:flatten(io_lib:format("~p", [Error])))}]
@@ -684,16 +723,20 @@ process_call({Cmd, ReqData}, Adapter, From, {SrcIp,_}, #state{sess = Sess, user_
 
 spawn_process_call(Adapter, CurrentPriv, From, Cmd, BodyJson, Sess, UserId, SelfPid) ->
     try 
+        %?Info("spawn_gen_process_call Adapter=~p cmd=~p", [Adapter, Cmd]),
+        %?Info("spawn_process_call called with Sess ~p SelfPid ~p", [Sess, SelfPid]),
+        timer:sleep(1000),
         Adapter:process_cmd({Cmd, BodyJson}, Sess, UserId, From, CurrentPriv, SelfPid),
         SelfPid ! rearm_session_idle_timer
     catch Class:Error:Stacktrace ->
-            ?Error("Problem processing command: ~p:~p~n~p~n~p~n",
+            ?Error("Problem processing command: ~p:~p~n~p~n~p",
                    [Class, Error, BodyJson, Stacktrace]),
             reply(From, [{<<"error">>, <<"Unable to process the request">>}], SelfPid)
     end.
 
 spawn_gen_process_call(Adapter, From, C, BodyJson, Sess, UserId, SelfPid) ->
     try
+        %?Info("spawn_gen_process_call adapter=~p cmd=~p", [Adapter, C]),
         gen_adapter:process_cmd({[C], BodyJson}, adapter_name(Adapter), Sess, UserId, From, undefined),
         SelfPid ! rearm_session_idle_timer
     catch Class:Error:Stacktrace ->
@@ -790,7 +833,7 @@ login(ReqData, From, SrcIp, State) ->
     Reply0 = #{vsn => list_to_binary(Vsn), app => HostApp,
                node => Node, host => Host,
                rowNumLimit => imem_sql_expr:rownum_limit()},
-    case catch erlimem_session:run_cmd(ErlImemSess, login,[]) of
+    case catch erlimem_session:run_cmd(ErlImemSess, login3,[]) of
         {error,{{'SecurityException',{?PasswordChangeNeeded,_}},ST}} ->
             ?Warn("Password expired ~s~n~p", [State#state.user, ST]),
             {[UserId],true} = imem_meta:select(ddAccount, [{#ddAccount{name=State#state.user,
@@ -856,16 +899,22 @@ login(ReqData, From, SrcIp, State) ->
                     reply(From, #{login => #{error => format_error(ErrMsg)}}, self()),
                     State
             end;
-        _ ->
-            {[UserId],true} = imem_meta:select(ddAccount, [{#ddAccount{name=State#state.user,
-                                           id='$1',_='_'}, [], ['$1']}]),
-            act_log(From, ?LOGIN_CONNECT,
-                    #{src => SrcIp, userId => UserId, cmd_resp => "login success",
-                      cmd => "login"}, State),
-            if is_map(ReqData) -> {#{accountName=>State#state.user}, State#state{user_id = UserId}};
-               true ->
-                    reply(From, #{login => maps:merge(Reply0, #{accountName=>State#state.user})}, self()),
-                    State#state{user_id = UserId}
+        {_SKey, AccountId, EncHash} ->
+            %?Info("Login Result SKey:~p AccountId:~p EncHash:~p",[_SKey,AccountId,EncHash]),
+            ok = dderl_dal:create_check_avatar_channel(AccountId),
+            imem_enc_mnesia:put_enc_hash(EncHash),
+            act_log(From, ?LOGIN_CONNECT
+                , #{src=>SrcIp, userId=>AccountId, cmd_resp=>"login success", cmd=>"login"}
+                , State),
+            if 
+                is_map(ReqData) -> 
+                    {#{accountName=>State#state.user}, State#state{user_id = AccountId}};
+                true ->
+                    reply(From
+                        , #{login => maps:merge(Reply0, #{accountName=>State#state.user})}
+                        , self()
+                    ), 
+                    State#state{user_id = AccountId}
             end
     end.
 

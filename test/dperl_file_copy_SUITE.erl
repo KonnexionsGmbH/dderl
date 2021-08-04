@@ -1,8 +1,8 @@
 -module(dperl_file_copy_SUITE).
 
--include_lib("../src/dperl/dperl.hrl").
-
 -include_lib("common_test/include/ct.hrl").
+
+-include("../src/dperl/dperl.hrl").
 
 -export([all/0, init_per_suite/1, end_per_suite/1]).
 

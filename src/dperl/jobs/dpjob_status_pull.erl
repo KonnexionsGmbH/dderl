@@ -1,6 +1,6 @@
--module(dperl_status_pull).
+-module(dpjob_status_pull).
 
--include("dperl_status.hrl").
+-include("../dperl_status.hrl").
 
 -behavior(dperl_worker).
 -behavior(dperl_strategy_scr).

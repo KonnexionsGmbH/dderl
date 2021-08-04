@@ -1,6 +1,7 @@
 -ifndef(DDERL_HRL).
 -define(DDERL_HRL, true).
 
+-include_lib("imem/src/imem_config.hrl").
 -include_lib("imem/src/imem_meta.hrl").
 -include_lib("imem/src/imem_exports.hrl").
 
@@ -342,5 +343,11 @@
                 dderl:exec_coldstart_cb(_App, _ColdStartFun)
          end)()
 ).
+
+% OAUTH 
+
+-define(SYNC_OURARING, dpjob_ouraring_crawl).
+
+-define(SYNC_OFFICE365, dpjob_office_365).
 
 -endif.

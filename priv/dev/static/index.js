@@ -8,7 +8,8 @@ import {loginAjax} from "./scripts/login";
 import {alert_jq} from './dialogs/dialogs';
 import {dderlState, show_qry_files, register_fido2_key,
         change_password, show_about_dlg} from "./scripts/dderl";
-import {new_connection_tab, logout, restart} from "./scripts/login";
+import {new_connection_tab, logout, restart,
+        authorize_office, authorize_oura} from "./scripts/login";
 import {disconnect_tab, close_tab} from "./scripts/connect";
 import {newSqlEditor} from "./scripts/dderl.sql";
 import {patch_jquery_ui} from "./jquery-ui-helper/helper.js";
@@ -94,3 +95,5 @@ addClick('btn-restart',         () => { restart();              });
 addClick('connect-button',      () => { new_connection_tab();   });
 addClick('newsql-button',       () => { newSqlEditor();         });
 addClick('btn-logout',          () => { logout();               });
+addClick('btn-office-365',      () => { authorize_office();     });
+addClick('btn-oura-ring',       () => { authorize_oura();       });

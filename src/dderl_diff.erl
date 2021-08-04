@@ -10,7 +10,9 @@
 
 -spec term_diff(term(), pid(), atom(), binary(), atom(), binary()) -> binary().
 term_diff(Sess, SessPid, LeftType, LeftValue, RightType, RightValue) ->
-    case Sess:run_cmd(term_diff, [LeftType, LeftValue, RightType, RightValue, [ignore_whitespace,ignore_casing,ignore_dquotes]]) of
+    %?Info("term_diff called with args: ~p ~p ~p ~p", [LeftType, LeftValue, RightType, RightValue]),
+    %?Info("term_diff called with Sess ~p SessPid ~p", [Sess, SessPid]),
+    case erlimem_session:run_cmd(Sess, term_diff, [LeftType, LeftValue, RightType, RightValue, [ignore_whitespace,ignore_casing,ignore_dquotes]]) of
         {error, {{Ex, M}, _Stacktrace} = Error} ->
             ?Error("Error on term_diff ~p: ~p", [{LeftType, LeftValue, RightType, RightValue}, Error], _Stacktrace),
             Err = list_to_binary(atom_to_list(Ex) ++ ": " ++
@@ -26,7 +28,7 @@ term_diff(Sess, SessPid, LeftType, LeftValue, RightType, RightValue) ->
             Err = list_to_binary(lists:flatten(io_lib:format("~p", [Reason]))),
             #{<<"error">> => Err};
         DiffResult ->
-            ?Debug("The diff result ~p", [DiffResult]),
+            %?Info("The diff result ~p", [DiffResult]),
             FsmCtx = get_fsmctx(DiffResult),
             StmtFsm = dderl_fsm:start(FsmCtx, SessPid),
             Columns = gen_adapter:build_column_json(lists:reverse(get_columns())),
@@ -42,8 +44,9 @@ term_diff(Sess, SessPid, LeftType, LeftValue, RightType, RightValue) ->
 get_fsmctx(Result) ->
     % <<Id:32>> = crypto:strong_rand_bytes(4),
     RowCols = get_columns(),
+    Pid = self(),
     FullMap = build_full_map(RowCols),
-    #fsmctxs{stmtRefs       = [self()]
+    #fsmctxs{stmtRefs       = [Pid]
             ,stmtTables     = [<<"term_diff">>]
             ,rowCols        = RowCols
             ,rowFun         = get_rowfun()
@@ -56,8 +59,7 @@ get_fsmctx(Result) ->
                 [fun(_Opts, _Count) ->
                     Rows = [{{}, {RowId, Left, Cmp, Right}} || {ddTermDiff, RowId, Left, Cmp, Right} <- Result],
                     % This seems hackish but we don't want to keep a process here.
-                    % TODO: Revisit after tuple calls have been removed.
-                    dderl_fsm:rows({self(), {Rows, true}}, {dderl_fsm, self()})
+                    dderl_fsm:rows(self(), {Pid, {Rows, true}})
                 end]
             ,fetch_close_funs = [fun() -> ok end]
             ,stmt_close_funs  = [fun() -> ok end]
