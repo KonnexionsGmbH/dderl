@@ -236,9 +236,7 @@ init_interface() ->
     lists:foreach(
       fun({Ip, Port}) ->
               IpStr = inet:ntoa(Ip),
-              TransOpts = [{ip, Ip}, {port, Port},
-                           {num_acceptors, MaxAcceptors},
-                           {max_connections, MaxConnections}],
+              TransOpts = [{ip, Ip}, {port, Port}],
               case ?IMEMREST_SSLOPTS of
                   #{cert := Cert, key := Key} ->
                       SslTransOpts = TransOpts

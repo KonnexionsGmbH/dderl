@@ -50,15 +50,17 @@ start(_Type, _Args) ->
     {ok, Interface} = inet:getaddr(Ip, inet),
     DDerlRoutes = get_routes(),
     Dispatch = cowboy_router:compile([{'_', DDerlRoutes}]),
-    SslOptions = get_ssl_options(),
-    {ok, _} = cowboy:start_tls(
-                https,
-                [{ip, Interface}, {port, Port},
-                 {num_acceptors, ?MAXACCEPTORS},
-                 {max_connections, ?MAXCONNS} | SslOptions],
-                #{env => #{dispatch => Dispatch},
-                  stream_handlers => [cowboy_compress_h, cowboy_stream_h],
-                  middlewares => [cowboy_router, dderl_cow_mw, cowboy_handler]}),
+    TransportOpts = [{ip, Interface}, {port, Port}],
+    ProtocolOpts = #{env => #{dispatch => Dispatch},
+            stream_handlers => [cowboy_compress_h, cowboy_stream_h],
+            middlewares => [cowboy_router, dderl_cow_mw, cowboy_handler]},
+    case application:get_env(dderl, is_ssl) of
+        {ok, false} ->
+            {ok, _} = cowboy:start_clear(dderlWeb, TransportOpts, ProtocolOpts);
+        _ ->
+            SslOptions = get_ssl_options(),
+            {ok, _} = cowboy:start_tls(dderlWeb, [TransportOpts | SslOptions], ProtocolOpts)
+    end,
     IpStr = case Ip of
                 "0.0.0.0"            -> "127.0.0.1";
                 {0,0,0,0}            -> "127.0.0.1";
@@ -76,7 +78,7 @@ start(_Type, _Args) ->
     SupRef.
 
 stop(_State) ->
-    ok = cowboy:stop_listener(https),
+    ok = cowboy:stop_listener(secure),
     ?Info("SHUTDOWN DDERL"),
     ?Info("---------------------------------------------------").
 
@@ -154,26 +156,26 @@ insert_mw(Intf, MwMod) when is_atom(Intf), is_atom(MwMod) ->
     #{middlewares := Middlewares} = Opts = ranch:get_protocol_options(Intf),
     [LastMod|RestMods] = lists:reverse(Middlewares),
     ok = ranch:set_protocol_options(
-           https, Opts#{middlewares => lists:reverse([LastMod, MwMod | RestMods])}).
+           secure, Opts#{middlewares => lists:reverse([LastMod, MwMod | RestMods])}).
 
 -spec remove_mw(atom(), atom()) -> atom().
 remove_mw(Intf, MwMod) when is_atom(Intf), is_atom(MwMod) ->
     #{middlewares := Middlewares} = Opts = ranch:get_protocol_options(Intf),
     ok = ranch:set_protocol_options(
-           https, Opts#{middlewares => Middlewares -- [MwMod]}).
+           secure, Opts#{middlewares => Middlewares -- [MwMod]}).
 
 -spec insert_routes(atom(), list()) -> ok.
 insert_routes(Intf, [{'_',[],Dispatch}]) ->
     #{env := #{dispatch := [{'_',[],OldDispatches}]}} = Opts = ranch:get_protocol_options(Intf),
     ok = ranch:set_protocol_options(
-           https, Opts#{env => #{dispatch => [{'_',[],OldDispatches++Dispatch}]}}).
+           secure, Opts#{env => #{dispatch => [{'_',[],OldDispatches++Dispatch}]}}).
 
 -spec reset_routes(atom()) -> ok.
 reset_routes(Intf) ->
     Opts = ranch:get_protocol_options(Intf),
     [{'_',[],DefaultDispatches}] = cowboy_router:compile([{'_', get_routes()}]),
     ok = ranch:set_protocol_options(
-           https, Opts#{env => #{dispatch => [{'_',[],DefaultDispatches}]}}).
+           secure, Opts#{env => #{dispatch => [{'_',[],DefaultDispatches}]}}).
 
 -spec get_cookie(binary(), map(), term()) -> term().
 get_cookie(CookieName, Req, Default) ->
