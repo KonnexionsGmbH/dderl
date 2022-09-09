@@ -1840,10 +1840,10 @@ d3-zoom@1:
     d3-selection "1"
     d3-transition "1"
 
-d3@5.5.0:
-  version "5.5.0"
-  resolved "https://registry.yarnpkg.com/d3/-/d3-5.5.0.tgz#948413b91b988a6597f3e4c3e941d3b530bfee63"
-  integrity sha512-HRDSYvT3n7kMvJH7Avp7iR0Xsz97bkCFka9aOg04EdyXyiAP8yQzUpLH3712y9R7ffVo1g94t1OYFHBB0yI9vQ==
+d3@5.16.0:
+  version "5.16.0"
+  resolved "https://registry.yarnpkg.com/d3/-/d3-5.16.0.tgz#9c5e8d3b56403c79d4ed42fbd62f6113f199c877"
+  integrity sha512-4PL5hHaHwX4m7Zr1UapXW23apo6pexCgdetdJ5kTmADpG/7T9Gkxw0M0tf/pjoB63ezCCm0u5UaFYy2aMt0Mcw==
   dependencies:
     d3-array "1"
     d3-axis "1"
